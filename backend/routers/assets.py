@@ -93,3 +93,19 @@ def change_ticker(asset_id: int, body: AssetTickerUpdate):
         except Exception as e:
             raise HTTPException(400, str(e))
     return result
+
+@router.delete("/{asset_id}")
+def delete_asset(asset_id: int):
+    with get_db() as conn:
+        a = asset_service.get_asset(conn, asset_id)
+        if not a:
+            raise HTTPException(404, "Ativo não encontrado.")
+        try:
+            # Delete asset and all its references
+            conn.execute("DELETE FROM positions WHERE asset_id = ?", (asset_id,))
+            conn.execute("DELETE FROM asset_tickers WHERE asset_id = ?", (asset_id,))
+            conn.execute("DELETE FROM events WHERE asset_id = ?", (asset_id,))
+            conn.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
+        except Exception as e:
+            raise HTTPException(400, str(e))
+    return {"ok": True}

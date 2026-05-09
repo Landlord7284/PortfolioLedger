@@ -64,16 +64,7 @@ def update_portfolio(
 
 
 def delete_portfolio(conn: sqlite3.Connection, portfolio_id: int) -> bool:
-    """Delete a portfolio. Returns True if deleted."""
-    # Check for events first
-    row = conn.execute(
-        "SELECT COUNT(*) as c FROM events WHERE portfolio_id = ?",
-        (portfolio_id,),
-    ).fetchone()
-    if row and row["c"] > 0:
-        raise ValueError(
-            f"Carteira {portfolio_id} possui {row['c']} eventos. "
-            "Remova os eventos antes de excluir a carteira."
-        )
+    """Delete a portfolio and cascade delete its events."""
+    conn.execute("DELETE FROM events WHERE portfolio_id = ?", (portfolio_id,))
     cur = conn.execute("DELETE FROM portfolios WHERE id = ?", (portfolio_id,))
     return cur.rowcount > 0

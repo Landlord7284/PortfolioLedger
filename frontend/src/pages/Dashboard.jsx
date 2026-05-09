@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [showImport, setShowImport] = useState(false);
   const [filterClass, setFilterClass] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isLargeModal, setIsLargeModal] = useState(false);
   const [showRedeemed, setShowRedeemed] = useState(() => {
     return localStorage.getItem('showRedeemed') === 'true';
   });
@@ -229,6 +230,7 @@ export default function Dashboard() {
                       <strong style={{ color: 'var(--text-accent)' }}>
                         {pos.current_ticker || `#${pos.asset_id}`}
                       </strong>
+                      {pos.duplicate_flag && <span className="badge badge-warning" style={{marginLeft: '8px'}} title="Possui evento duplicado pendente de análise">🔴</span>}
                     </td>
                     <td><span className="badge badge-class">{pos.asset_class}</span></td>
                     <td className="text-muted">{pos.currency}</td>
@@ -252,7 +254,7 @@ export default function Dashboard() {
       {/* Event form modal */}
       {showEventForm && (
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowEventForm(false)}>
-          <div className="modal">
+          <div className={`modal ${isLargeModal ? 'modal-large' : ''}`}>
             <div className="modal-header">
               <h2 className="modal-title">Novo Evento</h2>
               <button className="modal-close" onClick={() => setShowEventForm(false)}>&times;</button>
@@ -260,6 +262,7 @@ export default function Dashboard() {
             <EventForm
               onSuccess={() => { setShowEventForm(false); loadPositions(); }}
               onCancel={() => setShowEventForm(false)}
+              onModeChange={setIsLargeModal}
             />
           </div>
         </div>

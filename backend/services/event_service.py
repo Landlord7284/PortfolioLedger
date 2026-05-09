@@ -479,7 +479,7 @@ def get_position(
 ) -> dict | None:
     row = conn.execute(
         """
-        SELECT p.*, a.asset_class, a.currency,
+        SELECT p.*, a.asset_class, a.currency, a.duplicate_flag,
                (SELECT ticker FROM asset_tickers
                 WHERE asset_id = p.asset_id AND valid_until IS NULL
                 ORDER BY valid_from DESC LIMIT 1) as current_ticker
@@ -500,7 +500,7 @@ def list_positions(
     if portfolio_id is not None:
         rows = conn.execute(
             """
-            SELECT p.*, a.asset_class, a.currency,
+            SELECT p.*, a.asset_class, a.currency, a.duplicate_flag,
                    (SELECT ticker FROM asset_tickers
                     WHERE asset_id = p.asset_id AND valid_until IS NULL
                     ORDER BY valid_from DESC LIMIT 1) as current_ticker
@@ -514,7 +514,7 @@ def list_positions(
     else:
         rows = conn.execute(
             """
-            SELECT p.*, a.asset_class, a.currency,
+            SELECT p.*, a.asset_class, a.currency, a.duplicate_flag,
                    (SELECT ticker FROM asset_tickers
                     WHERE asset_id = p.asset_id AND valid_until IS NULL
                     ORDER BY valid_from DESC LIMIT 1) as current_ticker

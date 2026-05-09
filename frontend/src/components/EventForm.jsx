@@ -82,17 +82,40 @@ function SearchableSelect({ options, value, onChange, disabled }) {
   );
 }
 
-export default function EventForm({ assetId, onSuccess, onCancel }) {
+export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }) {
   const { activePortfolioId } = useContext(AppContext);
   const [assetList, setAssetList] = useState([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [isBulkMode, setIsBulkMode] = useState(false);
 
+  useEffect(() => {
+    if (onModeChange) onModeChange(isBulkMode);
+  }, [isBulkMode, onModeChange]);
+
+  const formatDateToBr = (isoStr) => {
+    if (!isoStr) return '';
+    const [y, m, d] = isoStr.split('-');
+    return `${d}/${m}/${y}`;
+  };
+
+  const parseBrToDate = (brStr) => {
+    if (!brStr || brStr.length !== 10) return '';
+    const [d, m, y] = brStr.split('/');
+    return `${y}-${m}-${d}`;
+  };
+
+  const handleDateMask = (value) => {
+    let v = value.replace(/\D/g, '');
+    if (v.length > 2) v = v.slice(0, 2) + '/' + v.slice(2);
+    if (v.length > 5) v = v.slice(0, 5) + '/' + v.slice(5, 9);
+    return v;
+  };
+
   // Single mode state
   const [selectedAssetId, setSelectedAssetId] = useState(assetId || '');
   const [eventType, setEventType] = useState('Compra');
-  const [eventDate, setEventDate] = useState(new Date().toISOString().slice(0, 10));
+  const [eventDate, setEventDate] = useState(formatDateToBr(new Date().toISOString().slice(0, 10)));
   const [quantity, setQuantity] = useState('');
   const [eventValue, setEventValue] = useState('');
   const [notes, setNotes] = useState('');
@@ -149,11 +172,13 @@ export default function EventForm({ assetId, onSuccess, onCancel }) {
         // Bulk submit
         const payload = bulkRows.map(r => {
           if (!r.asset_id) throw new Error("Todos os ativos devem ser selecionados.");
+          const parsedDate = parseBrToDate(r.date);
+          if (!parsedDate) throw new Error("Formato de data inválido. Use DD/MM/YYYY.");
           return {
             portfolio_id: activePortfolioId,
             asset_id: Number(r.asset_id),
             event_type: r.event_type,
-            event_date: r.date,
+            event_date: parsedDate,
             quantity: r.qty.replace(',', '.'),
             event_value: normalize(r.val, r.event_type),
             notes: r.notes || null,
@@ -165,11 +190,12 @@ export default function EventForm({ assetId, onSuccess, onCancel }) {
         let targetAssetId = selectedAssetId;
 
         if (isNewAsset) {
+          const parsedMaturity = parseBrToDate(newMaturityDate);
           const asset = await assetsApi.create({
             asset_class: newClass,
             ticker: newTicker,
             currency: ['Stock', 'REIT'].includes(newClass) ? 'USD' : 'BRL',
-            maturity_date: CLASSES_WITH_MATURITY.includes(newClass) ? (newMaturityDate || null) : null,
+            maturity_date: CLASSES_WITH_MATURITY.includes(newClass) ? (parsedMaturity || null) : null,
           });
           targetAssetId = asset.id;
         }
@@ -178,11 +204,14 @@ export default function EventForm({ assetId, onSuccess, onCancel }) {
           throw new Error('Selecione um ativo.');
         }
 
+        const parsedDate = parseBrToDate(eventDate);
+        if (!parsedDate) throw new Error("Formato de data inválido. Use DD/MM/YYYY.");
+
         await eventsApi.create({
           portfolio_id: activePortfolioId,
           asset_id: Number(targetAssetId),
           event_type: eventType,
-          event_date: eventDate,
+          event_date: parsedDate,
           quantity: quantity.replace(',', '.'),
           event_value: normalize(eventValue, eventType),
           notes: notes || null,
@@ -245,7 +274,7 @@ export default function EventForm({ assetId, onSuccess, onCancel }) {
                     </select>
                   </td>
                   <td>
-                    <input type="date" className="form-input" style={{ width: '100%', padding: '6px' }} value={row.date} onChange={(e) => updateBulkRow(row.id, 'date', e.target.value)} required />
+                    <input type="text" placeholder="DD/MM/YYYY" className="form-input" style={{ width: '100%', padding: '6px' }} value={row.date} onChange={(e) => updateBulkRow(row.id, 'date', handleDateMask(e.target.value))} required />
                   </td>
                   <td>
                     <input className="form-input" style={{ width: '100%', padding: '6px' }} placeholder="0,00" value={row.qty} onChange={(e) => updateBulkRow(row.id, 'qty', e.target.value)} required />
@@ -293,7 +322,7 @@ export default function EventForm({ assetId, onSuccess, onCancel }) {
                   {CLASSES_WITH_MATURITY.includes(newClass) && (
                     <div className="form-group">
                       <label className="form-label">Data de Vencimento</label>
-                      <input type="date" className="form-input" value={newMaturityDate} onChange={(e) => setNewMaturityDate(e.target.value)} required />
+                      <input type="text" placeholder="DD/MM/YYYY" className="form-input" value={newMaturityDate} onChange={(e) => setNewMaturityDate(handleDateMask(e.target.value))} required />
                     </div>
                   )}
                 </div>
@@ -315,7 +344,7 @@ export default function EventForm({ assetId, onSuccess, onCancel }) {
           <div className="form-row">
             <div className="form-group">
               <label className="form-label">Data</label>
-              <input type="date" className="form-input" value={eventDate} onChange={(e) => setEventDate(e.target.value)} required />
+              <input type="text" placeholder="DD/MM/YYYY" className="form-input" value={eventDate} onChange={(e) => setEventDate(handleDateMask(e.target.value))} required />
             </div>
             <div className="form-group">
               <label className="form-label">Quantidade</label>

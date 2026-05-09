@@ -132,6 +132,8 @@ def delete_event(event_id: int):
             ev = event_service.delete_event(conn, event_id)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        except EngineValidationError as e:
+            raise HTTPException(422, str(e))
     return ev
 
 
@@ -143,7 +145,29 @@ def delete_events_bulk(body: EventBulkDeleteRequest):
             results = event_service.delete_events_bulk(conn, body.event_ids)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        except EngineValidationError as e:
+            raise HTTPException(422, str(e))
     return results
+
+@router.post("/api/events/{event_id}/resolve-duplicate")
+def resolve_duplicate(event_id: int):
+    with get_db() as conn:
+        ev = conn.execute("SELECT asset_id FROM events WHERE id = ?", (event_id,)).fetchone()
+        if not ev:
+            raise HTTPException(404, "Evento não encontrado")
+        
+        conn.execute("UPDATE events SET duplicate_flag = 0 WHERE id = ?", (event_id,))
+        
+        # Check if asset has other duplicates
+        asset_id = ev["asset_id"]
+        other_dup = conn.execute(
+            "SELECT 1 FROM events WHERE asset_id = ? AND duplicate_flag = 1 LIMIT 1",
+            (asset_id,)
+        ).fetchone()
+        if not other_dup:
+            conn.execute("UPDATE assets SET duplicate_flag = 0 WHERE id = ?", (asset_id,))
+            
+        return {"ok": True}
 
 
 # ── Import ───────────────────────────────────────────────────

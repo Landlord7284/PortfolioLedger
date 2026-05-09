@@ -50,6 +50,8 @@ export const assets = {
     request(`/assets/${id}/tickers`, { method: 'POST', body: JSON.stringify(data) }),
   updateMetadata: (id, data) =>
     request(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  delete: (id) =>
+    request(`/assets/${id}`, { method: 'DELETE' }),
 };
 
 // ── Events ──────────────────────────────────────────────────
@@ -74,6 +76,8 @@ export const events = {
     request(`/events/${id}`, { method: 'DELETE' }),
   bulkDelete: (eventIds) =>
     request('/events/bulk-delete', { method: 'POST', body: JSON.stringify({ event_ids: eventIds }) }),
+  resolveDuplicate: (id) =>
+    request(`/events/${id}/resolve-duplicate`, { method: 'POST' }),
 };
 
 // ── Positions ───────────────────────────────────────────────

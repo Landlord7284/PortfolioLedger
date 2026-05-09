@@ -209,9 +209,16 @@ export default function AssetDetail() {
   const [eventList, setEventList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showEventForm, setShowEventForm] = useState(false);
+  const [isLargeModal, setIsLargeModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
   const [error, setError] = useState('');
   const [selectedEvents, setSelectedEvents] = useState(new Set());
+
+  const formatDateToBr = (isoStr) => {
+    if (!isoStr) return '';
+    const [y, m, d] = isoStr.split('-');
+    return `${d}/${m}/${y}`;
+  };
 
   const load = async () => {
     setLoading(true);
@@ -263,6 +270,32 @@ export default function AssetDetail() {
     }
   };
 
+  const handleResolveDuplicate = async (eventId, confirmDuplicate) => {
+    if (!confirm(confirmDuplicate ? 'Confirmar este evento como válido e remover alerta?' : 'Ignorar e excluir este evento duplicado?')) return;
+    setError('');
+    try {
+      if (confirmDuplicate) {
+        await eventsApi.resolveDuplicate(eventId);
+      } else {
+        await eventsApi.delete(eventId);
+      }
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleDeleteAsset = async () => {
+    if (!confirm(`Tem certeza que deseja excluir completamente o ativo ${asset.current_ticker} do banco de dados?`)) return;
+    setError('');
+    try {
+      await assetsApi.delete(asset.id);
+      navigate('/');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const toggleSelect = (id) => {
     const next = new Set(selectedEvents);
     if (next.has(id)) next.delete(id);
@@ -295,6 +328,7 @@ export default function AssetDetail() {
   }
 
   const validEvents = eventList.filter(ev => !ev.is_cancelled && !ev.is_storno);
+  const orderedEventList = [...eventList].reverse();
 
   return (
     <>
@@ -356,11 +390,28 @@ export default function AssetDetail() {
             <div className="card-title">Histórico de Eventos (Ledger)</div>
             <div className="card-subtitle">{eventList.length} evento(s) registrado(s)</div>
           </div>
-          {selectedEvents.size > 0 && (
-            <button className="btn btn-sm btn-danger" onClick={handleBulkDelete}>
-              🗑️ Excluir Selecionados ({selectedEvents.size})
-            </button>
-          )}
+          <div className="flex gap-8 items-center">
+            {selectedEvents.size > 0 && (
+              <>
+                <button className="btn btn-sm btn-secondary" onClick={() => setSelectedEvents(new Set())}>
+                  Limpar Seleção
+                </button>
+                <button className="btn btn-sm btn-danger" onClick={handleBulkDelete}>
+                  🗑️ Excluir Selecionados ({selectedEvents.size})
+                </button>
+              </>
+            )}
+            {validEvents.length === 0 && eventList.length > 0 && (
+               <button className="btn btn-sm btn-danger" onClick={handleDeleteAsset}>
+                 ⚠️ Excluir Ativo Completamente
+               </button>
+            )}
+            {eventList.length === 0 && (
+               <button className="btn btn-sm btn-danger" onClick={handleDeleteAsset}>
+                 ⚠️ Excluir Ativo
+               </button>
+            )}
+          </div>
         </div>
 
         {eventList.length === 0 ? (
@@ -389,7 +440,7 @@ export default function AssetDetail() {
                 </tr>
               </thead>
               <tbody>
-                {eventList.map((ev) => {
+                {orderedEventList.map((ev) => {
                   const isCancelled = ev.is_cancelled;
                   const isStorno = ev.is_storno;
                   const isInteractive = !isCancelled && !isStorno;
@@ -405,7 +456,7 @@ export default function AssetDetail() {
                           />
                         )}
                       </td>
-                      <td className="mono">{ev.event_date}</td>
+                      <td className="mono">{formatDateToBr(ev.event_date)}</td>
                       <td>
                         {isCancelled ? (
                           <span className="badge badge-cancelled">{ev.event_type}</span>
@@ -432,8 +483,17 @@ export default function AssetDetail() {
                       <td>
                         {isInteractive && (
                           <div className="flex gap-8">
-                            <button className="btn btn-sm btn-secondary" onClick={() => setEditingEvent(ev)}>✏️</button>
-                            <button className="btn btn-sm btn-danger" onClick={() => handleDelete(ev.id)}>🗑️</button>
+                            {ev.duplicate_flag ? (
+                              <>
+                                <button className="btn btn-sm btn-primary" onClick={() => handleResolveDuplicate(ev.id, true)}>Confirmar</button>
+                                <button className="btn btn-sm btn-danger" onClick={() => handleResolveDuplicate(ev.id, false)}>Ignorar</button>
+                              </>
+                            ) : (
+                              <>
+                                <button className="btn btn-sm btn-secondary" onClick={() => setEditingEvent(ev)}>✏️</button>
+                                <button className="btn btn-sm btn-danger" onClick={() => handleDelete(ev.id)}>🗑️</button>
+                              </>
+                            )}
                           </div>
                         )}
                       </td>
@@ -448,7 +508,7 @@ export default function AssetDetail() {
 
       {showEventForm && (
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowEventForm(false)}>
-          <div className="modal">
+          <div className={`modal ${isLargeModal ? 'modal-large' : ''}`}>
             <div className="modal-header">
               <h2 className="modal-title">Novo Evento — {asset.current_ticker}</h2>
               <button className="modal-close" onClick={() => setShowEventForm(false)}>&times;</button>
@@ -457,6 +517,7 @@ export default function AssetDetail() {
               assetId={Number(assetId)}
               onSuccess={() => { setShowEventForm(false); load(); }}
               onCancel={() => setShowEventForm(false)}
+              onModeChange={setIsLargeModal}
             />
           </div>
         </div>

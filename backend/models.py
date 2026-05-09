@@ -162,6 +162,7 @@ class PositionResponse(BaseModel):
     asset_class: Optional[str] = None
     currency: Optional[str] = None
     current_ticker: Optional[str] = None
+    duplicate_flag: bool = False
     quantity: str
     total_cost: str
     average_price: str

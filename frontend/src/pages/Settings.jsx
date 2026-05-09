@@ -11,6 +11,10 @@ export default function Settings() {
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
 
+  const [portfolioToDelete, setPortfolioToDelete] = useState(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!newName.trim()) return;
@@ -50,16 +54,25 @@ export default function Settings() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Tem certeza que deseja excluir esta carteira?')) return;
+  const handleDeleteRequest = (p) => {
+    setPortfolioToDelete(p);
+    setDeleteConfirmText('');
+  };
+
+  const confirmDelete = async () => {
+    if (!portfolioToDelete || deleteConfirmText !== portfolioToDelete.name) return;
+    setDeleting(true);
     try {
-      await portfolioApi.delete(id);
-      if (activePortfolioId === id) {
+      await portfolioApi.delete(portfolioToDelete.id);
+      if (activePortfolioId === portfolioToDelete.id) {
         setActivePortfolioId(null);
       }
+      setPortfolioToDelete(null);
       await refreshPortfolios();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -151,7 +164,7 @@ export default function Settings() {
                       </button>
                       <button
                         className="btn btn-sm btn-danger"
-                        onClick={() => handleDelete(p.id)}
+                        onClick={() => handleDeleteRequest(p)}
                       >
                         🗑️
                       </button>
@@ -161,6 +174,43 @@ export default function Settings() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {portfolioToDelete && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setPortfolioToDelete(null)}>
+          <div className="modal">
+            <div className="modal-header">
+              <h2 className="modal-title">Excluir Carteira</h2>
+              <button className="modal-close" onClick={() => setPortfolioToDelete(null)}>&times;</button>
+            </div>
+            <div className="alert alert-danger mb-16">
+              <strong>Atenção!</strong> Esta ação excluirá a carteira <strong>{portfolioToDelete.name}</strong> e <strong>todos os seus eventos</strong> definitivamente.
+            </div>
+            <p className="mb-16">
+              Para confirmar a exclusão, digite o nome da carteira (<strong>{portfolioToDelete.name}</strong>) abaixo:
+            </p>
+            <input 
+              className="form-input mb-16" 
+              style={{ width: '100%' }}
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder={portfolioToDelete.name}
+            />
+            <div className="modal-footer" style={{ border: 'none', padding: 0 }}>
+              <button className="btn btn-secondary" onClick={() => setPortfolioToDelete(null)} disabled={deleting}>
+                Cancelar
+              </button>
+              <button 
+                className="btn btn-danger" 
+                onClick={confirmDelete}
+                disabled={deleteConfirmText !== portfolioToDelete.name || deleting}
+              >
+                {deleting ? 'Excluindo...' : 'Excluir Permanentemente'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

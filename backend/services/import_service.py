@@ -353,30 +353,49 @@ def import_to_ledger(
                 event_value=ev["event_value"],
             )
 
-            if existing_id is not None:
-                _flag_duplicate(conn, existing_id, asset_id)
-                duplicates += 1
-                detail = (
-                    f"Evento duplicado: {ev['ticker']} "
-                    f"{ev['event_type']} {ev['event_date']} "
-                    f"qty={ev['quantity']} val={ev['event_value']} "
-                    f"(evento existente #{existing_id})"
+            if existing_id:
+                # Insert the duplicate but with duplicate_flag = 1
+                seq = next_sequence(conn)
+                conn.execute(
+                    """
+                    INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
+                                        quantity, event_value, sequence_num, duplicate_flag, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                    """,
+                    (
+                        portfolio_id,
+                        asset_id,
+                        ev["event_type"],
+                        ev["event_date"],
+                        ev["quantity"],
+                        ev["event_value"],
+                        seq,
+                        "Possível duplicidade (Importação)",
+                    ),
                 )
-                duplicate_details.append(detail)
-                continue
-
-            # Create event
-            create_event(
-                conn,
-                portfolio_id=portfolio_id,
-                asset_id=asset_id,
-                event_type=ev["event_type"],
-                event_date=ev["event_date"],
-                quantity=ev["quantity"],
-                event_value=ev["event_value"],
-                notes=f"Importado de planilha (linha {i + 1})",
-            )
-            imported += 1
+                from backend.services.event_service import recalculate_position
+                recalculate_position(conn, asset_id, portfolio_id)
+                
+                # Flag asset
+                conn.execute("UPDATE assets SET duplicate_flag = 1 WHERE id = ?", (asset_id,))
+                
+                imported += 1
+                duplicates += 1
+                duplicate_details.append(
+                    f"Ativo {ev['ticker']}, {ev['event_type']} em {ev['event_date']}"
+                )
+            else:
+                create_event(
+                    conn,
+                    portfolio_id=portfolio_id,
+                    asset_id=asset_id,
+                    event_type=ev["event_type"],
+                    event_date=ev["event_date"],
+                    quantity=ev["quantity"],
+                    event_value=ev["event_value"],
+                    notes=f"Importado de planilha (linha {i + 1})",
+                )
+                imported += 1
 
         except Exception as e:
             errors.append(f"Evento {i} ({ev['ticker']} {ev['event_date']}): {e}")
