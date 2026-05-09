@@ -12,6 +12,13 @@ function App() {
   const [portfolioList, setPortfolioList] = useState([]);
   const [activePortfolioId, setActivePortfolioId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [hideValues, setHideValues] = useState(() => {
+    return localStorage.getItem('hideValues') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('hideValues', hideValues);
+  }, [hideValues]);
 
   const refreshPortfolios = async () => {
     try {
@@ -46,6 +53,8 @@ function App() {
       activePortfolioId,
       setActivePortfolioId,
       refreshPortfolios,
+      hideValues,
+      setHideValues,
     }}>
       <BrowserRouter>
         <Layout>

@@ -1,8 +1,8 @@
 """
-Legacy XLSX importer for Dados.xlsx.
+XLSX importer for event data.
 
-This module handles importing the user's existing Excel spreadsheet into the
-ledger.  Formula support is intentionally limited to **simple arithmetic
+This module handles importing Excel spreadsheets into the ledger.
+Formula support is intentionally limited to **simple arithmetic
 expressions** (addition, subtraction, multiplication, division) as a legacy
 compatibility feature.  Complex formulas, cell references, and Excel functions
 are rejected with explicit errors.
@@ -16,8 +16,9 @@ import ast
 import operator
 import re
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import Optional, BinaryIO
 
 import openpyxl
 
@@ -160,17 +161,24 @@ _EVENT_LABEL_MAP = {
 # XLSX parser
 # ─────────────────────────────────────────────────────────────
 
-def parse_xlsx(file_path: Path | str) -> list[dict]:
+def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
     """
-    Parse the legacy Dados.xlsx file and return a list of normalised
-    event dicts ready for insertion.
+    Parse an XLSX file and return a list of normalised event dicts
+    ready for insertion.
+
+    ``source`` can be a file path (Path/str) or an in-memory
+    file-like object (e.g., BytesIO from an upload).
 
     Each dict contains:
         asset_class, ticker, event_type, event_date, quantity, event_value
 
     Raises on unresolvable formulas or unknown labels.
     """
-    wb = openpyxl.load_workbook(str(file_path), data_only=False)
+    if isinstance(source, (str, Path)):
+        wb = openpyxl.load_workbook(str(source), data_only=False)
+    else:
+        wb = openpyxl.load_workbook(source, data_only=False)
+
     ws = wb["Registro"]
 
     events: list[dict] = []
@@ -247,13 +255,65 @@ def parse_xlsx(file_path: Path | str) -> list[dict]:
     return events
 
 
+# ─────────────────────────────────────────────────────────────
+# Duplicate detection
+# ─────────────────────────────────────────────────────────────
+
+def _check_duplicate(
+    conn,
+    portfolio_id: int,
+    asset_id: int,
+    event_type: str,
+    event_date: str,
+    quantity: str,
+    event_value: str,
+) -> int | None:
+    """
+    Check if an event with the same key fields already exists.
+
+    Returns the existing event id if found, None otherwise.
+    """
+    row = conn.execute(
+        """
+        SELECT id FROM events
+        WHERE portfolio_id = ?
+          AND asset_id = ?
+          AND event_type = ?
+          AND event_date = ?
+          AND quantity = ?
+          AND event_value = ?
+          AND is_cancelled = 0
+          AND is_storno = 0
+        LIMIT 1
+        """,
+        (portfolio_id, asset_id, event_type, event_date, quantity, event_value),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def _flag_duplicate(conn, event_id: int, asset_id: int) -> None:
+    """Set duplicate_flag on event and asset."""
+    conn.execute(
+        "UPDATE events SET duplicate_flag = 1 WHERE id = ?", (event_id,)
+    )
+    conn.execute(
+        "UPDATE assets SET duplicate_flag = 1 WHERE id = ?", (asset_id,)
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# Import pipeline
+# ─────────────────────────────────────────────────────────────
+
 def import_to_ledger(
     conn,
-    file_path: Path | str,
+    source: Path | str | BinaryIO,
     portfolio_id: int,
 ) -> dict:
     """
     Full import pipeline: parse XLSX → create assets → create events.
+
+    Detects duplicate events and flags them instead of creating duplicates.
 
     Returns a summary dict with counts.
     """
@@ -261,10 +321,12 @@ def import_to_ledger(
     from backend.services.event_service import create_event
     from backend.database import next_sequence
 
-    parsed = parse_xlsx(file_path)
+    parsed = parse_xlsx(source)
 
     imported = 0
     skipped = 0
+    duplicates = 0
+    duplicate_details: list[str] = []
     errors: list[str] = []
 
     for i, ev in enumerate(parsed, start=1):
@@ -280,6 +342,29 @@ def import_to_ledger(
                 )
                 asset_id = asset["id"]
 
+            # Check for duplicates before insertion
+            existing_id = _check_duplicate(
+                conn,
+                portfolio_id=portfolio_id,
+                asset_id=asset_id,
+                event_type=ev["event_type"],
+                event_date=ev["event_date"],
+                quantity=ev["quantity"],
+                event_value=ev["event_value"],
+            )
+
+            if existing_id is not None:
+                _flag_duplicate(conn, existing_id, asset_id)
+                duplicates += 1
+                detail = (
+                    f"Evento duplicado: {ev['ticker']} "
+                    f"{ev['event_type']} {ev['event_date']} "
+                    f"qty={ev['quantity']} val={ev['event_value']} "
+                    f"(evento existente #{existing_id})"
+                )
+                duplicate_details.append(detail)
+                continue
+
             # Create event
             create_event(
                 conn,
@@ -289,7 +374,7 @@ def import_to_ledger(
                 event_date=ev["event_date"],
                 quantity=ev["quantity"],
                 event_value=ev["event_value"],
-                notes=f"Importado do Dados.xlsx (linha {i + 1})",
+                notes=f"Importado de planilha (linha {i + 1})",
             )
             imported += 1
 
@@ -301,5 +386,7 @@ def import_to_ledger(
         "total_rows": len(parsed),
         "imported": imported,
         "skipped": skipped,
+        "duplicates": duplicates,
+        "duplicate_details": duplicate_details,
         "errors": errors,
     }

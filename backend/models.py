@@ -42,6 +42,12 @@ class AssetCreate(BaseModel):
     name: Optional[str] = None
     maturity_date: Optional[str] = None
     aux_id: Optional[str] = None
+    # v1.0.1 metadata
+    cnpj: Optional[str] = None
+    isin: Optional[str] = None
+    sector: Optional[str] = None
+    subsector: Optional[str] = None
+    segment: Optional[str] = None
 
     @field_validator("ticker")
     @classmethod
@@ -60,14 +66,33 @@ class AssetTickerUpdate(BaseModel):
         return v.strip().upper()
 
 
+class AssetMetadataUpdate(BaseModel):
+    """PATCH body for updating asset metadata fields."""
+    name: Optional[str] = None
+    maturity_date: Optional[str] = None
+    cnpj: Optional[str] = None
+    isin: Optional[str] = None
+    sector: Optional[str] = None
+    subsector: Optional[str] = None
+    segment: Optional[str] = None
+
+
 class AssetResponse(BaseModel):
     id: int
     asset_class: str
     currency: str
-    maturity_date: Optional[str]
-    aux_id: Optional[str]
+    maturity_date: Optional[str] = None
+    aux_id: Optional[str] = None
     current_ticker: Optional[str] = None
     current_name: Optional[str] = None
+    # v1.0.1 metadata
+    name: Optional[str] = None
+    cnpj: Optional[str] = None
+    isin: Optional[str] = None
+    sector: Optional[str] = None
+    subsector: Optional[str] = None
+    segment: Optional[str] = None
+    duplicate_flag: bool = False
     created_at: str
 
 
@@ -81,6 +106,11 @@ class EventCreate(BaseModel):
     quantity: str              # Decimal as string
     event_value: str           # Decimal as string
     notes: Optional[str] = None
+
+
+class EventBulkCreate(BaseModel):
+    """Body for creating multiple events at once."""
+    events: list[EventCreate]
 
 
 class EventStorno(BaseModel):
@@ -113,8 +143,15 @@ class EventResponse(BaseModel):
     correction_of: Optional[int] = None
     is_storno: bool
     is_cancelled: bool
+    duplicate_flag: bool = False
+    realized_event_result: Optional[str] = None
     notes: Optional[str] = None
     created_at: str
+
+
+class EventBulkDeleteRequest(BaseModel):
+    """Body for deleting multiple events at once."""
+    event_ids: list[int]
 
 
 # ── Positions ────────────────────────────────────────────────
@@ -139,4 +176,6 @@ class ImportResult(BaseModel):
     total_rows: int
     imported: int
     skipped: int
+    duplicates: int = 0
+    duplicate_details: list[str] = []
     errors: list[str]

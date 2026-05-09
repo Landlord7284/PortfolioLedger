@@ -29,13 +29,21 @@ function formatQuantity(value) {
 }
 
 export default function Dashboard() {
-  const { activePortfolioId, portfolioList } = useContext(AppContext);
+  const { activePortfolioId, portfolioList, hideValues } = useContext(AppContext);
   const [positionList, setPositionList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showEventForm, setShowEventForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [filterClass, setFilterClass] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showRedeemed, setShowRedeemed] = useState(() => {
+    return localStorage.getItem('showRedeemed') === 'true';
+  });
   const navigate = useNavigate();
+
+  useEffect(() => {
+    localStorage.setItem('showRedeemed', showRedeemed);
+  }, [showRedeemed]);
 
   const loadPositions = async () => {
     if (!activePortfolioId) {
@@ -59,9 +67,20 @@ export default function Dashboard() {
   }, [activePortfolioId]);
 
   // Filtered positions
-  const filtered = filterClass
-    ? positionList.filter((p) => p.asset_class === filterClass)
-    : positionList;
+  const filtered = positionList.filter((p) => {
+    if (!showRedeemed && parseFloat(p.quantity) === 0) return false;
+    if (filterClass && p.asset_class !== filterClass) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const ticker = (p.current_ticker || '').toLowerCase();
+      const name = (p.name || '').toLowerCase();
+      return ticker.includes(q) || name.includes(q);
+    }
+    return true;
+  });
+
+  const displayMoney = (val) => hideValues ? '•••••' : formatMoney(val);
+  const displayQuantity = (val) => hideValues ? '•••••' : formatQuantity(val);
 
   // Summary calculations
   const totalCost = positionList.reduce((s, p) => s + parseFloat(p.total_cost || 0), 0);
@@ -91,9 +110,18 @@ export default function Dashboard() {
             {portfolioList.find((p) => p.id === activePortfolioId)?.name || ''}
           </p>
         </div>
+        <div className="search-input-wrapper" style={{ margin: '0 20px', flex: 1, maxWidth: '400px' }}>
+          <span className="search-icon">🔍</span>
+          <input 
+            className="search-input"
+            placeholder="Buscar por ticker ou nome..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
         <div className="flex gap-12">
           <button className="btn btn-secondary" onClick={() => setShowImport(true)}>
-            📥 Importar XLSX
+            📥 Importar Eventos
           </button>
           <button className="btn btn-primary" onClick={() => setShowEventForm(true)}>
             + Novo Evento
@@ -105,12 +133,12 @@ export default function Dashboard() {
       <div className="summary-grid">
         <div className="summary-card">
           <div className="label">Custo Total</div>
-          <div className="value">R$ {formatMoney(totalCost)}</div>
+          <div className="value">{hideValues ? '•••••' : `R$ ${formatMoney(totalCost)}`}</div>
         </div>
         <div className="summary-card">
           <div className="label">Resultado Realizado</div>
-          <div className={`value ${totalRealized >= 0 ? 'positive' : 'negative'}`}>
-            R$ {formatMoney(totalRealized)}
+          <div className={`value ${!hideValues && totalRealized >= 0 ? 'positive' : !hideValues ? 'negative' : ''}`}>
+            {hideValues ? '•••••' : `R$ ${formatMoney(totalRealized)}`}
           </div>
         </div>
         <div className="summary-card">
@@ -124,26 +152,41 @@ export default function Dashboard() {
       </div>
 
       {/* Filter */}
-      {classes.length > 1 && (
-        <div className="flex items-center gap-8 mb-16">
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Filtrar:</span>
-          <button
-            className={`btn btn-sm ${!filterClass ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setFilterClass('')}
-          >
-            Todos
-          </button>
-          {classes.map((c) => (
-            <button
-              key={c}
-              className={`btn btn-sm ${filterClass === c ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setFilterClass(c)}
-            >
-              {c}
-            </button>
-          ))}
+      <div className="flex items-center justify-between mb-16">
+        <div className="flex items-center gap-8">
+          {classes.length > 1 && (
+            <>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Filtrar:</span>
+              <button
+                className={`btn btn-sm ${!filterClass ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setFilterClass('')}
+              >
+                Todos
+              </button>
+              {classes.map((c) => (
+                <button
+                  key={c}
+                  className={`btn btn-sm ${filterClass === c ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setFilterClass(c)}
+                >
+                  {c}
+                </button>
+              ))}
+            </>
+          )}
         </div>
-      )}
+        <div className="flex items-center gap-8">
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Exibir resgatados</span>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={showRedeemed}
+              onChange={(e) => setShowRedeemed(e.target.checked)}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
 
       {/* Positions table */}
       {loading ? (
@@ -190,12 +233,12 @@ export default function Dashboard() {
                     <td><span className="badge badge-class">{pos.asset_class}</span></td>
                     <td className="text-muted">{pos.currency}</td>
                     <td className={`right mono ${qty === 0 ? 'text-muted' : ''}`}>
-                      {formatQuantity(pos.quantity)}
+                      {displayQuantity(pos.quantity)}
                     </td>
-                    <td className="right mono">{formatMoney(pos.total_cost)}</td>
-                    <td className="right mono">{formatMoney(pos.average_price)}</td>
-                    <td className={`right mono ${realized > 0 ? 'text-positive' : realized < 0 ? 'text-negative' : ''}`}>
-                      {formatMoney(pos.realized_result)}
+                    <td className="right mono">{displayMoney(pos.total_cost)}</td>
+                    <td className="right mono">{displayMoney(pos.average_price)}</td>
+                    <td className={`right mono ${!hideValues && realized > 0 ? 'text-positive' : !hideValues && realized < 0 ? 'text-negative' : ''}`}>
+                      {displayMoney(pos.realized_result)}
                     </td>
                     <td className="text-muted">{pos.last_event_date || '—'}</td>
                   </tr>

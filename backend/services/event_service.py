@@ -17,6 +17,7 @@ from backend.domain.engine import (
     PositionState,
     EngineValidationError,
     replay_events,
+    replay_events_with_results,
     to_decimal,
 )
 from backend.domain.enums import EventType
@@ -190,6 +191,34 @@ def create_event(
     return dict(row)
 
 
+def create_events_bulk(
+    conn: sqlite3.Connection,
+    events_data: list[dict],
+) -> list[dict]:
+    """
+    Create multiple events in a single transaction.
+
+    Each dict must contain: portfolio_id, asset_id, event_type,
+    event_date, quantity, event_value, notes (optional).
+
+    Returns the list of created event dicts.
+    """
+    created = []
+    for ev_data in events_data:
+        ev = create_event(
+            conn,
+            portfolio_id=ev_data["portfolio_id"],
+            asset_id=ev_data["asset_id"],
+            event_type=ev_data["event_type"],
+            event_date=ev_data["event_date"],
+            quantity=ev_data["quantity"],
+            event_value=ev_data["event_value"],
+            notes=ev_data.get("notes"),
+        )
+        created.append(ev)
+    return created
+
+
 # ─────────────────────────────────────────────────────────────
 # Storno
 # ─────────────────────────────────────────────────────────────
@@ -316,6 +345,75 @@ def correct_event(
 
 
 # ─────────────────────────────────────────────────────────────
+# Delete (soft-delete)
+# ─────────────────────────────────────────────────────────────
+
+def delete_event(
+    conn: sqlite3.Connection,
+    event_id: int,
+) -> dict:
+    """
+    Soft-delete an event by marking it as cancelled, then recalculate position.
+
+    Returns the cancelled event.
+    """
+    original = conn.execute(
+        "SELECT * FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    if not original:
+        raise ValueError(f"Evento {event_id} não encontrado.")
+    if original["is_cancelled"]:
+        raise ValueError(f"Evento {event_id} já está cancelado.")
+
+    conn.execute(
+        "UPDATE events SET is_cancelled = 1 WHERE id = ?", (event_id,)
+    )
+
+    # Recalculate position
+    recalculate_position(conn, original["asset_id"], original["portfolio_id"])
+
+    row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+    return dict(row)
+
+
+def delete_events_bulk(
+    conn: sqlite3.Connection,
+    event_ids: list[int],
+) -> list[dict]:
+    """
+    Soft-delete multiple events and recalculate affected positions.
+
+    Returns the list of cancelled event dicts.
+    """
+    results = []
+    # Track which (asset_id, portfolio_id) pairs need recalculation
+    affected: set[tuple[int, int]] = set()
+
+    for event_id in event_ids:
+        original = conn.execute(
+            "SELECT * FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
+        if not original:
+            continue
+        if original["is_cancelled"]:
+            continue
+
+        conn.execute(
+            "UPDATE events SET is_cancelled = 1 WHERE id = ?", (event_id,)
+        )
+        affected.add((original["asset_id"], original["portfolio_id"]))
+
+        row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        results.append(dict(row))
+
+    # Recalculate all affected positions
+    for asset_id, portfolio_id in affected:
+        recalculate_position(conn, asset_id, portfolio_id)
+
+    return results
+
+
+# ─────────────────────────────────────────────────────────────
 # Query helpers
 # ─────────────────────────────────────────────────────────────
 
@@ -324,7 +422,11 @@ def list_events(
     asset_id: Optional[int] = None,
     portfolio_id: Optional[int] = None,
 ) -> list[dict]:
-    """List events with optional filters, ordered chronologically."""
+    """List events with optional filters, ordered chronologically.
+
+    When filtering by both asset_id and portfolio_id, the response
+    includes a computed ``realized_event_result`` for each exit event.
+    """
     conditions = []
     params = []
     if asset_id is not None:
@@ -339,14 +441,35 @@ def list_events(
         f"SELECT * FROM events {where} ORDER BY event_date ASC, sequence_num ASC",
         params,
     ).fetchall()
-    return [dict(r) for r in rows]
+    events_list = [dict(r) for r in rows]
+
+    # If filtering by a specific asset+portfolio, compute per-event results
+    if asset_id is not None and portfolio_id is not None:
+        records = _rows_to_event_records(rows)
+        per_event_results = replay_events_with_results(records)
+
+        for ev_dict in events_list:
+            result_val = per_event_results.get(ev_dict["id"])
+            if result_val is not None:
+                ev_dict["realized_event_result"] = str(result_val)
+            else:
+                ev_dict["realized_event_result"] = None
+    else:
+        for ev_dict in events_list:
+            ev_dict["realized_event_result"] = None
+
+    return events_list
 
 
 def get_event(conn: sqlite3.Connection, event_id: int) -> dict | None:
     row = conn.execute(
         "SELECT * FROM events WHERE id = ?", (event_id,)
     ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    d["realized_event_result"] = None
+    return d
 
 
 def get_position(

@@ -30,12 +30,20 @@ CREATE TABLE IF NOT EXISTS portfolios (
 -- Assets (asset_id is the immutable internal key)
 -- ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS assets (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    asset_class   TEXT    NOT NULL,
-    currency      TEXT    NOT NULL DEFAULT 'BRL',
-    maturity_date TEXT,
-    aux_id        TEXT,
-    created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_class     TEXT    NOT NULL,
+    currency        TEXT    NOT NULL DEFAULT 'BRL',
+    maturity_date   TEXT,
+    aux_id          TEXT,
+    -- Metadata fields (v1.0.1)
+    name            TEXT,
+    cnpj            TEXT,
+    isin            TEXT,
+    sector          TEXT,
+    subsector       TEXT,
+    segment         TEXT,
+    duplicate_flag  INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 -- ────────────────────────────────────────────────────────────
@@ -70,6 +78,7 @@ CREATE TABLE IF NOT EXISTS events (
     correction_of   INTEGER REFERENCES events(id),
     is_storno       INTEGER NOT NULL DEFAULT 0,
     is_cancelled    INTEGER NOT NULL DEFAULT 0,
+    duplicate_flag  INTEGER NOT NULL DEFAULT 0,
     notes           TEXT,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );

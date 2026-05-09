@@ -7,9 +7,14 @@ const BASE_URL = 'http://localhost:8000/api';
 async function request(path, options = {}) {
   const url = `${BASE_URL}${path}`;
   const config = {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { ...options.headers },
     ...options,
   };
+
+  // Only add Content-Type JSON if not sending FormData
+  if (!(config.body instanceof FormData) && !config.headers['Content-Type']) {
+    config.headers['Content-Type'] = 'application/json';
+  }
 
   const res = await fetch(url, config);
 
@@ -43,6 +48,8 @@ export const assets = {
   create: (data) => request('/assets', { method: 'POST', body: JSON.stringify(data) }),
   changeTicker: (id, data) =>
     request(`/assets/${id}/tickers`, { method: 'POST', body: JSON.stringify(data) }),
+  updateMetadata: (id, data) =>
+    request(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 // ── Events ──────────────────────────────────────────────────
@@ -61,6 +68,12 @@ export const events = {
     request(`/events/${id}/storno`, { method: 'POST', body: JSON.stringify(data) }),
   correct: (id, data) =>
     request(`/events/${id}/correct`, { method: 'POST', body: JSON.stringify(data) }),
+  bulkCreate: (data) =>
+    request('/events/bulk', { method: 'POST', body: JSON.stringify(data) }),
+  delete: (id) =>
+    request(`/events/${id}`, { method: 'DELETE' }),
+  bulkDelete: (eventIds) =>
+    request('/events/bulk-delete', { method: 'POST', body: JSON.stringify({ event_ids: eventIds }) }),
 };
 
 // ── Positions ───────────────────────────────────────────────
@@ -75,8 +88,14 @@ export const positions = {
 
 // ── Import ──────────────────────────────────────────────────
 
-export const importXlsx = (portfolioId) =>
-  request(`/import/xlsx?portfolio_id=${portfolioId}`, { method: 'POST' });
+export const importXlsx = (portfolioId, file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request(`/import/xlsx?portfolio_id=${portfolioId}`, {
+    method: 'POST',
+    body: formData,
+  });
+};
 
 // ── Health ──────────────────────────────────────────────────
 

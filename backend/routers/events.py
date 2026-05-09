@@ -1,19 +1,22 @@
 """
-Event and position API router.
+Event, import and position API router.
 """
 
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 
 from backend.database import get_db
 from backend.domain.engine import EngineValidationError
 from backend.models import (
     EventCreate,
+    EventBulkCreate,
     EventStorno,
     EventCorrection,
     EventResponse,
+    EventBulkDeleteRequest,
     PositionResponse,
     ImportResult,
 )
@@ -44,6 +47,31 @@ def create_event(body: EventCreate):
         except ValueError as e:
             raise HTTPException(400, str(e))
     return ev
+
+
+@router.post("/api/events/bulk", response_model=list[EventResponse])
+def create_events_bulk(body: EventBulkCreate):
+    """Create multiple events in a single transaction."""
+    with get_db() as conn:
+        try:
+            events_data = [
+                {
+                    "portfolio_id": ev.portfolio_id,
+                    "asset_id": ev.asset_id,
+                    "event_type": ev.event_type,
+                    "event_date": ev.event_date,
+                    "quantity": ev.quantity,
+                    "event_value": ev.event_value,
+                    "notes": ev.notes,
+                }
+                for ev in body.events
+            ]
+            results = event_service.create_events_bulk(conn, events_data)
+        except EngineValidationError as e:
+            raise HTTPException(422, str(e))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return results
 
 
 @router.get("/api/events", response_model=list[EventResponse])
@@ -96,14 +124,41 @@ def correct(event_id: int, body: EventCorrection):
     return ev
 
 
+@router.delete("/api/events/{event_id}", response_model=EventResponse)
+def delete_event(event_id: int):
+    """Soft-delete an event (mark as cancelled) and recalculate position."""
+    with get_db() as conn:
+        try:
+            ev = event_service.delete_event(conn, event_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return ev
+
+
+@router.post("/api/events/bulk-delete", response_model=list[EventResponse])
+def delete_events_bulk(body: EventBulkDeleteRequest):
+    """Soft-delete multiple events and recalculate positions."""
+    with get_db() as conn:
+        try:
+            results = event_service.delete_events_bulk(conn, body.event_ids)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return results
+
+
 # ── Import ───────────────────────────────────────────────────
 
 @router.post("/api/import/xlsx", response_model=ImportResult)
-def import_xlsx(portfolio_id: int = Query(...)):
-    """Import the legacy Dados.xlsx file into a portfolio."""
-    xlsx_path = Path(__file__).resolve().parent.parent.parent / "Dados.xlsx"
-    if not xlsx_path.exists():
-        raise HTTPException(404, f"Arquivo Dados.xlsx não encontrado em {xlsx_path}")
+async def import_xlsx(
+    portfolio_id: int = Query(...),
+    file: UploadFile = File(...),
+):
+    """Import an XLSX file with events into a portfolio."""
+    if not file.filename.endswith(".xlsx"):
+        raise HTTPException(400, "O arquivo deve ter extensão .xlsx")
+
+    content = await file.read()
+    source = BytesIO(content)
 
     with get_db() as conn:
         # Verify portfolio exists
@@ -111,7 +166,7 @@ def import_xlsx(portfolio_id: int = Query(...)):
         if not get_portfolio(conn, portfolio_id):
             raise HTTPException(404, f"Carteira {portfolio_id} não encontrada.")
         try:
-            result = import_to_ledger(conn, xlsx_path, portfolio_id)
+            result = import_to_ledger(conn, source, portfolio_id)
         except ImportError as e:
             raise HTTPException(422, str(e))
         except Exception as e:

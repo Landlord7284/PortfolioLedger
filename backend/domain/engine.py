@@ -291,6 +291,22 @@ def replay_events(events: list[EventRecord]) -> PositionState:
     return state
 
 
+def replay_events_with_results(events: list[EventRecord]) -> dict[int, Decimal]:
+    """
+    Replay events and return a mapping of event_id → realized result
+    for each exit event (Venda, Resgate Antecipado, Resgate Vencimento).
+
+    Non-exit events and cancelled/storno events are not included in the map.
+    """
+    state = PositionState()
+    results: dict[int, Decimal] = {}
+    for ev in events:
+        realized = process_event(ev, state, skip_validation=False)
+        if realized != _ZERO and not ev.is_cancelled and not ev.is_storno:
+            results[ev.id] = realized
+    return results
+
+
 def validate_event_standalone(event: EventRecord, prior_events: list[EventRecord]) -> None:
     """
     Validate a *new* event by replaying all prior events up to the event's

@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { importXlsx } from '../api/client';
 
 export default function ImportModal({ portfolioId, onClose, onSuccess }) {
+  const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
   const handleImport = async () => {
+    if (!file) return;
     setImporting(true);
     setError('');
     try {
-      const res = await importXlsx(portfolioId);
+      const res = await importXlsx(portfolioId, file);
       setResult(res);
       if (res.imported > 0) {
         onSuccess?.();
@@ -26,20 +28,30 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal">
         <div className="modal-header">
-          <h2 className="modal-title">Importar Dados.xlsx</h2>
+          <h2 className="modal-title">Importar Eventos</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
 
         {!result ? (
           <>
             <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
-              Importar o arquivo <code style={{ color: 'var(--text-accent)' }}>Dados.xlsx</code> para
-              a carteira selecionada. Todos os eventos serão processados e as posições recalculadas.
+              Selecione uma planilha <code style={{ color: 'var(--text-accent)' }}>.xlsx</code> para
+              a carteira selecionada. O nome do arquivo não importa, apenas o formato das colunas.
             </p>
 
+            <div className="form-group mb-24">
+              <input 
+                type="file" 
+                accept=".xlsx" 
+                onChange={(e) => setFile(e.target.files[0])}
+                className="form-input"
+                style={{ padding: '8px' }}
+              />
+            </div>
+
             <div className="alert alert-warning">
-              ⚠️ Esta operação pode demorar alguns minutos dependendo da quantidade de eventos.
-              Fórmulas Excel simples serão resolvidas automaticamente.
+              ⚠️ Esta operação pode demorar alguns minutos.
+              Eventos já existentes serão ignorados e marcados com flag.
             </div>
 
             {error && <div className="alert alert-error">{error}</div>}
@@ -48,7 +60,7 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
               <button className="btn btn-secondary" onClick={onClose} disabled={importing}>
                 Cancelar
               </button>
-              <button className="btn btn-primary" onClick={handleImport} disabled={importing}>
+              <button className="btn btn-primary" onClick={handleImport} disabled={!file || importing}>
                 {importing ? (
                   <><div className="spinner" /> Importando...</>
                 ) : (
@@ -73,12 +85,25 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
                 <div className="value positive">{result.imported}</div>
               </div>
               <div className="summary-card">
-                <div className="label">Ignorados</div>
-                <div className="value" style={{ color: result.skipped > 0 ? 'var(--warning)' : 'inherit' }}>
+                <div className="label">Duplicados</div>
+                <div className="value" style={{ color: result.duplicates > 0 ? 'var(--warning)' : 'inherit' }}>
+                  {result.duplicates}
+                </div>
+              </div>
+              <div className="summary-card">
+                <div className="label">Ignorados / Erro</div>
+                <div className="value" style={{ color: result.skipped > 0 ? 'var(--danger)' : 'inherit' }}>
                   {result.skipped}
                 </div>
               </div>
             </div>
+
+            {result.duplicates > 0 && (
+              <div className="alert alert-warning" style={{ marginBottom: '16px' }}>
+                <strong>{result.duplicates} eventos duplicados</strong> foram ignorados, 
+                mas adicionamos uma flag nos ativos/eventos correspondentes para sua revisão.
+              </div>
+            )}
 
             {result.errors.length > 0 && (
               <div style={{ maxHeight: '200px', overflow: 'auto', marginBottom: '16px' }}>

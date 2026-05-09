@@ -3,7 +3,7 @@ import { useContext } from 'react';
 import { AppContext } from '../App';
 
 export default function Layout({ children }) {
-  const { portfolioList, activePortfolioId, setActivePortfolioId } = useContext(AppContext);
+  const { portfolioList, activePortfolioId, setActivePortfolioId, hideValues, setHideValues } = useContext(AppContext);
   const location = useLocation();
 
   const pageTitle = () => {
@@ -41,7 +41,7 @@ export default function Layout({ children }) {
 
         <div style={{ padding: '16px 12px', borderTop: '1px solid var(--border-primary)' }}>
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Versão 0.1.0 — Fase 1
+            Versão 1.0.1 — Fase 1
           </div>
         </div>
       </aside>
@@ -64,6 +64,13 @@ export default function Layout({ children }) {
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
+                <button 
+                  className="btn btn-icon hide-values-btn" 
+                  onClick={() => setHideValues(!hideValues)}
+                  title={hideValues ? "Mostrar valores" : "Ocultar valores"}
+                >
+                  {hideValues ? "👁️‍🗨️" : "👁️"}
+                </button>
               </div>
             )}
           </div>
