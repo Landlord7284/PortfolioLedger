@@ -1,0 +1,142 @@
+"""
+Pydantic models for API request / response schemas.
+
+Financial values are exchanged as strings so the frontend can display them
+without floating-point surprises. The domain layer converts to Decimal.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+
+# ── Portfolios ───────────────────────────────────────────────
+
+class PortfolioCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    consolidated: bool = True
+
+
+class PortfolioUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=120)
+    consolidated: Optional[bool] = None
+
+
+class PortfolioResponse(BaseModel):
+    id: int
+    name: str
+    consolidated: bool
+    created_at: str
+    updated_at: str
+
+
+# ── Assets ───────────────────────────────────────────────────
+
+class AssetCreate(BaseModel):
+    asset_class: str
+    currency: str = "BRL"
+    ticker: str = Field(..., min_length=1, max_length=30)
+    name: Optional[str] = None
+    maturity_date: Optional[str] = None
+    aux_id: Optional[str] = None
+
+    @field_validator("ticker")
+    @classmethod
+    def ticker_upper(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class AssetTickerUpdate(BaseModel):
+    ticker: str = Field(..., min_length=1, max_length=30)
+    name: Optional[str] = None
+    valid_from: str  # ISO date
+
+    @field_validator("ticker")
+    @classmethod
+    def ticker_upper(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class AssetResponse(BaseModel):
+    id: int
+    asset_class: str
+    currency: str
+    maturity_date: Optional[str]
+    aux_id: Optional[str]
+    current_ticker: Optional[str] = None
+    current_name: Optional[str] = None
+    created_at: str
+
+
+# ── Events ───────────────────────────────────────────────────
+
+class EventCreate(BaseModel):
+    portfolio_id: int
+    asset_id: int
+    event_type: str
+    event_date: str            # ISO date  YYYY-MM-DD
+    quantity: str              # Decimal as string
+    event_value: str           # Decimal as string
+    notes: Optional[str] = None
+
+
+class EventStorno(BaseModel):
+    notes: Optional[str] = None
+
+
+class EventCorrection(BaseModel):
+    """Body for correcting an existing event.
+
+    The correction creates a storno of the original and a new replacement
+    event with the fields provided here.
+    """
+    event_type: str
+    event_date: str
+    quantity: str
+    event_value: str
+    notes: Optional[str] = None
+
+
+class EventResponse(BaseModel):
+    id: int
+    portfolio_id: int
+    asset_id: int
+    event_type: str
+    event_date: str
+    quantity: str
+    event_value: str
+    sequence_num: int
+    storno_of: Optional[int] = None
+    correction_of: Optional[int] = None
+    is_storno: bool
+    is_cancelled: bool
+    notes: Optional[str] = None
+    created_at: str
+
+
+# ── Positions ────────────────────────────────────────────────
+
+class PositionResponse(BaseModel):
+    portfolio_id: int
+    asset_id: int
+    asset_class: Optional[str] = None
+    currency: Optional[str] = None
+    current_ticker: Optional[str] = None
+    quantity: str
+    total_cost: str
+    average_price: str
+    realized_result: str
+    last_event_date: Optional[str] = None
+    updated_at: str
+
+
+# ── Import ───────────────────────────────────────────────────
+
+class ImportResult(BaseModel):
+    total_rows: int
+    imported: int
+    skipped: int
+    errors: list[str]

@@ -1,0 +1,235 @@
+import { useState, useEffect, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { AppContext } from '../App';
+import { positions as posApi } from '../api/client';
+import EventForm from '../components/EventForm';
+import ImportModal from '../components/ImportModal';
+
+/**
+ * Format a numeric string as BRL-style display (truncated to 2 decimals).
+ */
+function formatMoney(value, currency = 'BRL') {
+  const num = parseFloat(value);
+  if (isNaN(num)) return '—';
+  return num.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatQuantity(value) {
+  const num = parseFloat(value);
+  if (isNaN(num)) return '—';
+  // Show up to 8 decimals, but trim trailing zeros
+  const formatted = num.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 8,
+  });
+  return formatted;
+}
+
+export default function Dashboard() {
+  const { activePortfolioId, portfolioList } = useContext(AppContext);
+  const [positionList, setPositionList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [filterClass, setFilterClass] = useState('');
+  const navigate = useNavigate();
+
+  const loadPositions = async () => {
+    if (!activePortfolioId) {
+      setPositionList([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await posApi.list(activePortfolioId);
+      setPositionList(data);
+    } catch (err) {
+      console.error('Failed to load positions:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPositions();
+  }, [activePortfolioId]);
+
+  // Filtered positions
+  const filtered = filterClass
+    ? positionList.filter((p) => p.asset_class === filterClass)
+    : positionList;
+
+  // Summary calculations
+  const totalCost = positionList.reduce((s, p) => s + parseFloat(p.total_cost || 0), 0);
+  const totalRealized = positionList.reduce((s, p) => s + parseFloat(p.realized_result || 0), 0);
+  const activeAssets = positionList.filter((p) => parseFloat(p.quantity) > 0).length;
+
+  // Unique classes for filter
+  const classes = [...new Set(positionList.map((p) => p.asset_class))].sort();
+
+  if (!activePortfolioId) {
+    return (
+      <div className="empty-state">
+        <div className="icon">📁</div>
+        <h3>Nenhuma carteira selecionada</h3>
+        <p>Crie uma carteira em Configurações para começar.</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Action bar */}
+      <div className="flex items-center justify-between mb-24">
+        <div>
+          <h2 style={{ fontSize: '1.3rem', fontWeight: 700 }}>Posições Consolidadas</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px' }}>
+            {portfolioList.find((p) => p.id === activePortfolioId)?.name || ''}
+          </p>
+        </div>
+        <div className="flex gap-12">
+          <button className="btn btn-secondary" onClick={() => setShowImport(true)}>
+            📥 Importar XLSX
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowEventForm(true)}>
+            + Novo Evento
+          </button>
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div className="summary-grid">
+        <div className="summary-card">
+          <div className="label">Custo Total</div>
+          <div className="value">R$ {formatMoney(totalCost)}</div>
+        </div>
+        <div className="summary-card">
+          <div className="label">Resultado Realizado</div>
+          <div className={`value ${totalRealized >= 0 ? 'positive' : 'negative'}`}>
+            R$ {formatMoney(totalRealized)}
+          </div>
+        </div>
+        <div className="summary-card">
+          <div className="label">Ativos em Carteira</div>
+          <div className="value">{activeAssets}</div>
+        </div>
+        <div className="summary-card">
+          <div className="label">Total de Ativos</div>
+          <div className="value">{positionList.length}</div>
+        </div>
+      </div>
+
+      {/* Filter */}
+      {classes.length > 1 && (
+        <div className="flex items-center gap-8 mb-16">
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Filtrar:</span>
+          <button
+            className={`btn btn-sm ${!filterClass ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setFilterClass('')}
+          >
+            Todos
+          </button>
+          {classes.map((c) => (
+            <button
+              key={c}
+              className={`btn btn-sm ${filterClass === c ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterClass(c)}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Positions table */}
+      {loading ? (
+        <div className="loading-container">
+          <div className="spinner" />
+          <span>Carregando posições...</span>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="empty-state">
+          <div className="icon">📭</div>
+          <h3>Nenhuma posição encontrada</h3>
+          <p>Lance um evento ou importe o Dados.xlsx para começar.</p>
+        </div>
+      ) : (
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Classe</th>
+                <th>Moeda</th>
+                <th className="right">Quantidade</th>
+                <th className="right">Custo Total</th>
+                <th className="right">Preço Médio</th>
+                <th className="right">Resultado Realizado</th>
+                <th>Último Evento</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((pos) => {
+                const realized = parseFloat(pos.realized_result || 0);
+                const qty = parseFloat(pos.quantity || 0);
+                return (
+                  <tr
+                    key={`${pos.portfolio_id}-${pos.asset_id}`}
+                    className="clickable"
+                    onClick={() => navigate(`/assets/${pos.asset_id}`)}
+                  >
+                    <td>
+                      <strong style={{ color: 'var(--text-accent)' }}>
+                        {pos.current_ticker || `#${pos.asset_id}`}
+                      </strong>
+                    </td>
+                    <td><span className="badge badge-class">{pos.asset_class}</span></td>
+                    <td className="text-muted">{pos.currency}</td>
+                    <td className={`right mono ${qty === 0 ? 'text-muted' : ''}`}>
+                      {formatQuantity(pos.quantity)}
+                    </td>
+                    <td className="right mono">{formatMoney(pos.total_cost)}</td>
+                    <td className="right mono">{formatMoney(pos.average_price)}</td>
+                    <td className={`right mono ${realized > 0 ? 'text-positive' : realized < 0 ? 'text-negative' : ''}`}>
+                      {formatMoney(pos.realized_result)}
+                    </td>
+                    <td className="text-muted">{pos.last_event_date || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Event form modal */}
+      {showEventForm && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowEventForm(false)}>
+          <div className="modal">
+            <div className="modal-header">
+              <h2 className="modal-title">Novo Evento</h2>
+              <button className="modal-close" onClick={() => setShowEventForm(false)}>&times;</button>
+            </div>
+            <EventForm
+              onSuccess={() => { setShowEventForm(false); loadPositions(); }}
+              onCancel={() => setShowEventForm(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Import modal */}
+      {showImport && (
+        <ImportModal
+          portfolioId={activePortfolioId}
+          onClose={() => setShowImport(false)}
+          onSuccess={loadPositions}
+        />
+      )}
+    </>
+  );
+}
