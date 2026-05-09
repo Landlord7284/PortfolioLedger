@@ -1,5 +1,10 @@
 import { useState } from 'react';
 import { importXlsx } from '../api/client';
+import { UploadCloud, FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 export default function ImportModal({ portfolioId, onClose, onSuccess }) {
   const [file, setFile] = useState(null);
@@ -25,103 +30,115 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <div className="modal-header">
-          <h2 className="modal-title">Importar Eventos</h2>
-          <button className="modal-close" onClick={onClose}>&times;</button>
-        </div>
+    <Dialog open={true} onOpenChange={(v) => { if (!v && !importing) onClose(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UploadCloud className="w-5 h-5" />
+            Importar Eventos
+          </DialogTitle>
+          {!result && (
+            <DialogDescription>
+              Selecione uma planilha <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">.xlsx</code> para a carteira selecionada.
+            </DialogDescription>
+          )}
+        </DialogHeader>
 
         {!result ? (
-          <>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
-              Selecione uma planilha <code style={{ color: 'var(--text-accent)' }}>.xlsx</code> para
-              a carteira selecionada. O nome do arquivo não importa, apenas o formato das colunas.
-            </p>
+          <div className="space-y-4">
+            <Input
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => setFile(e.target.files[0])}
+              className="cursor-pointer"
+            />
 
-            <div className="form-group mb-24">
-              <input 
-                type="file" 
-                accept=".xlsx" 
-                onChange={(e) => setFile(e.target.files[0])}
-                className="form-input"
-                style={{ padding: '8px' }}
-              />
+            <div className="p-3 bg-muted rounded-lg flex items-start gap-2 text-sm text-muted-foreground">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <p>Eventos já existentes serão ignorados e marcados com flag de duplicação para revisão.</p>
             </div>
 
-            <div className="alert alert-warning">
-              ⚠️ Esta operação pode demorar alguns minutos.
-              Eventos já existentes serão ignorados e marcados com flag.
-            </div>
+            {error && (
+              <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <p>{error}</p>
+              </div>
+            )}
 
-            {error && <div className="alert alert-error">{error}</div>}
-
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={onClose} disabled={importing}>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose} disabled={importing}>
                 Cancelar
-              </button>
-              <button className="btn btn-primary" onClick={handleImport} disabled={!file || importing}>
+              </Button>
+              <Button onClick={handleImport} disabled={!file || importing}>
                 {importing ? (
-                  <><div className="spinner" /> Importando...</>
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Importando...</>
                 ) : (
-                  '🚀 Iniciar Importação'
+                  <><FileSpreadsheet className="w-4 h-4" /> Iniciar Importação</>
                 )}
-              </button>
-            </div>
-          </>
+              </Button>
+            </DialogFooter>
+          </div>
         ) : (
-          <>
-            <div className="alert alert-success">
-              ✅ Importação concluída!
+          <div className="space-y-4">
+            <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-lg flex items-center gap-2 text-sm font-medium">
+              <CheckCircle2 className="w-5 h-5 shrink-0" />
+              Importação concluída!
             </div>
 
-            <div className="summary-grid" style={{ marginBottom: '16px' }}>
-              <div className="summary-card">
-                <div className="label">Total de linhas</div>
-                <div className="value">{result.total_rows}</div>
-              </div>
-              <div className="summary-card">
-                <div className="label">Importados</div>
-                <div className="value positive">{result.imported}</div>
-              </div>
-              <div className="summary-card">
-                <div className="label">Duplicados</div>
-                <div className="value" style={{ color: result.duplicates > 0 ? 'var(--warning)' : 'inherit' }}>
-                  {result.duplicates}
-                </div>
-              </div>
-              <div className="summary-card">
-                <div className="label">Ignorados / Erro</div>
-                <div className="value" style={{ color: result.skipped > 0 ? 'var(--danger)' : 'inherit' }}>
-                  {result.skipped}
-                </div>
-              </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Card>
+                <CardContent className="p-3">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Total de linhas</p>
+                  <p className="text-xl font-bold font-mono">{result.total_rows}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-3">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Importados</p>
+                  <p className="text-xl font-bold font-mono text-emerald-500">{result.imported}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-3">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Duplicados</p>
+                  <p className={`text-xl font-bold font-mono ${result.duplicates > 0 ? 'text-amber-500' : ''}`}>{result.duplicates}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-3">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Erros</p>
+                  <p className={`text-xl font-bold font-mono ${result.skipped > 0 ? 'text-destructive' : ''}`}>{result.skipped}</p>
+                </CardContent>
+              </Card>
             </div>
 
             {result.duplicates > 0 && (
-              <div className="alert alert-warning" style={{ marginBottom: '16px' }}>
-                <strong>{result.duplicates} eventos duplicados</strong> foram ignorados, 
-                mas adicionamos uma flag nos ativos/eventos correspondentes para sua revisão.
+              <div className="p-3 bg-muted rounded-lg text-sm text-muted-foreground">
+                <strong>{result.duplicates} eventos duplicados</strong> foram ignorados, mas adicionamos uma flag nos ativos/eventos correspondentes para sua revisão.
               </div>
             )}
 
             {result.errors.length > 0 && (
-              <div style={{ maxHeight: '200px', overflow: 'auto', marginBottom: '16px' }}>
-                <h4 style={{ color: 'var(--danger)', marginBottom: '8px' }}>Erros:</h4>
-                {result.errors.map((err, i) => (
-                  <div key={i} className="alert alert-error" style={{ fontSize: '0.8rem', padding: '8px 12px' }}>
-                    {err}
-                  </div>
-                ))}
+              <div className="space-y-2">
+                <h4 className="text-destructive font-medium text-sm flex items-center gap-1">
+                  <AlertCircle className="w-4 h-4" /> Detalhes dos erros:
+                </h4>
+                <div className="max-h-32 overflow-y-auto space-y-1">
+                  {result.errors.map((err, i) => (
+                    <div key={i} className="p-2 bg-destructive/10 text-destructive rounded text-xs font-mono">
+                      {err}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
-            <div className="modal-footer">
-              <button className="btn btn-primary" onClick={onClose}>Fechar</button>
-            </div>
-          </>
+            <DialogFooter>
+              <Button onClick={onClose} className="w-full sm:w-auto">Fechar</Button>
+            </DialogFooter>
+          </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

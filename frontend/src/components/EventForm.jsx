@@ -1,6 +1,11 @@
 import { useState, useEffect, useContext, useRef } from 'react';
 import { AppContext } from '../App';
 import { events as eventsApi, assets as assetsApi } from '../api/client';
+import { Plus, Trash2, ArrowLeft, Loader2, AlertTriangle } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 
 const EVENT_TYPES = [
   'Compra', 'Venda', 'Desdobramento', 'Grupamento',
@@ -16,6 +21,8 @@ const ASSET_CLASSES = [
 const CLASSES_WITH_MATURITY = ['Debênture', 'CRI', 'CRA', 'Tesouro Direto'];
 
 const VALUE_IGNORED = ['Desdobramento', 'Grupamento'];
+
+const selectClassName = "flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 function SearchableSelect({ options, value, onChange, disabled }) {
   const [search, setSearch] = useState('');
@@ -40,10 +47,8 @@ function SearchableSelect({ options, value, onChange, disabled }) {
   );
 
   return (
-    <div className="search-input-wrapper" ref={wrapperRef} style={{ width: '100%', maxWidth: 'none' }}>
-      <input
-        className="form-input"
-        style={{ width: '100%', paddingLeft: '14px' }}
+    <div className="relative w-full" ref={wrapperRef}>
+      <Input
         value={displayValue}
         disabled={disabled}
         placeholder="Buscar ativo..."
@@ -51,27 +56,17 @@ function SearchableSelect({ options, value, onChange, disabled }) {
         onChange={(e) => setSearch(e.target.value)}
       />
       {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, 
-          background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
-          borderRadius: 'var(--radius-md)', zIndex: 10, maxHeight: '200px', overflowY: 'auto',
-          marginTop: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-        }}>
-          {filtered.length === 0 && <div style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>Nenhum encontrado</div>}
+        <div className="absolute top-full left-0 right-0 mt-1 bg-popover text-popover-foreground border border-border rounded-lg shadow-md ring-1 ring-foreground/10 z-50 max-h-60 overflow-y-auto">
+          {filtered.length === 0 && <div className="p-3 text-sm text-muted-foreground text-center">Nenhum encontrado</div>}
           {filtered.map((o) => (
             <div
               key={o.value}
-              style={{
-                padding: '8px 12px', cursor: 'pointer',
-                background: o.value === value ? 'var(--bg-card-hover)' : 'transparent'
-              }}
+              className={`px-3 py-2 text-sm cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground ${o.value === value ? 'bg-accent' : ''}`}
               onMouseDown={(e) => {
-                e.preventDefault(); // prevent input blur
+                e.preventDefault();
                 onChange(o.value);
                 setOpen(false);
               }}
-              onMouseEnter={(e) => e.target.style.background = 'var(--bg-card-hover)'}
-              onMouseLeave={(e) => e.target.style.background = o.value === value ? 'var(--bg-card-hover)' : 'transparent'}
             >
               {o.label}
             </div>
@@ -112,21 +107,18 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
     return v;
   };
 
-  // Single mode state
   const [selectedAssetId, setSelectedAssetId] = useState(assetId || '');
   const [eventType, setEventType] = useState('Compra');
   const [eventDate, setEventDate] = useState(formatDateToBr(new Date().toISOString().slice(0, 10)));
   const [quantity, setQuantity] = useState('');
   const [eventValue, setEventValue] = useState('');
   const [notes, setNotes] = useState('');
-  
-  // New asset creation
+
   const [isNewAsset, setIsNewAsset] = useState(false);
   const [newTicker, setNewTicker] = useState('');
   const [newClass, setNewClass] = useState('Ação');
   const [newMaturityDate, setNewMaturityDate] = useState('');
 
-  // Bulk mode state
   const [bulkRows, setBulkRows] = useState([
     { id: 1, asset_id: assetId || '', event_type: 'Compra', date: eventDate, qty: '', val: '', notes: '' }
   ]);
@@ -169,7 +161,6 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
 
     try {
       if (isBulkMode) {
-        // Bulk submit
         const payload = bulkRows.map(r => {
           if (!r.asset_id) throw new Error("Todos os ativos devem ser selecionados.");
           const parsedDate = parseBrToDate(r.date);
@@ -186,7 +177,6 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
         });
         await eventsApi.bulkCreate({ events: payload });
       } else {
-        // Single submit
         let targetAssetId = selectedAssetId;
 
         if (isNewAsset) {
@@ -227,102 +217,115 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   };
 
   return (
-    <form onSubmit={handleSubmit}>
-      <div className="flex justify-between items-center mb-16">
-        <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Lançamento Manual</h3>
-        {!isNewAsset && (
-          <label className="flex items-center gap-8 cursor-pointer">
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Adição em massa</span>
-            <div className="toggle">
-              <input type="checkbox" checked={isBulkMode} onChange={(e) => setIsBulkMode(e.target.checked)} />
-              <span className="toggle-slider"></span>
-            </div>
+    <form onSubmit={handleSubmit} className="space-y-5">
+      {/* Mode toggle */}
+      {!isNewAsset && (
+        <div className="flex items-center justify-end gap-2">
+          <label htmlFor="bulk-mode" className="text-sm text-muted-foreground cursor-pointer">
+            Adição em massa
           </label>
-        )}
-      </div>
+          <Switch
+            id="bulk-mode"
+            checked={isBulkMode}
+            onCheckedChange={setIsBulkMode}
+          />
+        </div>
+      )}
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && (
+        <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p>{error}</p>
+        </div>
+      )}
 
       {isBulkMode ? (
-        <div style={{ overflowX: 'auto', marginBottom: '16px' }}>
-          <table style={{ minWidth: '800px' }}>
-            <thead>
-              <tr>
-                {!assetId && <th style={{ width: '25%' }}>Ativo</th>}
-                <th style={{ width: '15%' }}>Evento</th>
-                <th style={{ width: '15%' }}>Data</th>
-                <th style={{ width: '15%' }}>Qtd</th>
-                <th style={{ width: '15%' }}>Valor</th>
-                <th style={{ width: '10%' }}>Ação</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bulkRows.map(row => (
-                <tr key={row.id}>
-                  {!assetId && (
-                    <td>
-                      <SearchableSelect 
-                        options={assetOptions} 
-                        value={row.asset_id} 
-                        onChange={(val) => updateBulkRow(row.id, 'asset_id', val)} 
-                      />
-                    </td>
-                  )}
-                  <td>
-                    <select className="form-select" style={{ width: '100%', padding: '6px' }} value={row.event_type} onChange={(e) => updateBulkRow(row.id, 'event_type', e.target.value)}>
-                      {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </td>
-                  <td>
-                    <input type="text" placeholder="DD/MM/YYYY" className="form-input" style={{ width: '100%', padding: '6px' }} value={row.date} onChange={(e) => updateBulkRow(row.id, 'date', handleDateMask(e.target.value))} required />
-                  </td>
-                  <td>
-                    <input className="form-input" style={{ width: '100%', padding: '6px' }} placeholder="0,00" value={row.qty} onChange={(e) => updateBulkRow(row.id, 'qty', e.target.value)} required />
-                  </td>
-                  <td>
-                    <input className="form-input" style={{ width: '100%', padding: '6px' }} placeholder="0,00" value={row.val} onChange={(e) => updateBulkRow(row.id, 'val', e.target.value)} disabled={VALUE_IGNORED.includes(row.event_type)} required={!VALUE_IGNORED.includes(row.event_type)} />
-                  </td>
-                  <td>
-                    <button type="button" className="btn btn-sm btn-danger btn-icon" onClick={() => removeBulkRow(row.id)} disabled={bulkRows.length === 1}>🗑️</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <button type="button" className="btn btn-sm btn-secondary mt-8" onClick={handleAddBulkRow}>+ Adicionar Linha</button>
+        <div className="space-y-3">
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {!assetId && <TableHead className="min-w-[200px]">Ativo</TableHead>}
+                  <TableHead className="min-w-[140px]">Evento</TableHead>
+                  <TableHead className="min-w-[120px]">Data</TableHead>
+                  <TableHead className="min-w-[100px]">Qtd</TableHead>
+                  <TableHead className="min-w-[100px]">Valor</TableHead>
+                  <TableHead className="w-14 text-center">Ação</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bulkRows.map(row => (
+                  <TableRow key={row.id}>
+                    {!assetId && (
+                      <TableCell className="p-2">
+                        <SearchableSelect
+                          options={assetOptions}
+                          value={row.asset_id}
+                          onChange={(val) => updateBulkRow(row.id, 'asset_id', val)}
+                        />
+                      </TableCell>
+                    )}
+                    <TableCell className="p-2">
+                      <select className={selectClassName} value={row.event_type} onChange={(e) => updateBulkRow(row.id, 'event_type', e.target.value)}>
+                        {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </TableCell>
+                    <TableCell className="p-2">
+                      <Input type="text" placeholder="DD/MM/YYYY" value={row.date} onChange={(e) => updateBulkRow(row.id, 'date', handleDateMask(e.target.value))} required />
+                    </TableCell>
+                    <TableCell className="p-2">
+                      <Input placeholder="0,00" value={row.qty} onChange={(e) => updateBulkRow(row.id, 'qty', e.target.value)} required />
+                    </TableCell>
+                    <TableCell className="p-2">
+                      <Input placeholder="0,00" value={row.val} onChange={(e) => updateBulkRow(row.id, 'val', e.target.value)} disabled={VALUE_IGNORED.includes(row.event_type)} required={!VALUE_IGNORED.includes(row.event_type)} />
+                    </TableCell>
+                    <TableCell className="p-2 text-center">
+                      <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" onClick={() => removeBulkRow(row.id)} disabled={bulkRows.length === 1}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={handleAddBulkRow}>
+            <Plus className="w-4 h-4" /> Adicionar Linha
+          </Button>
         </div>
       ) : (
-        <>
-          {/* Single Mode Asset Selection */}
+        <div className="space-y-4">
+          {/* Asset Selection */}
           {!assetId && (
-            <div className="form-group">
-              <div className="flex items-center gap-12 mb-8">
-                <label className="form-label" style={{ margin: 0 }}>Ativo</label>
-                <button
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Ativo</label>
+                <Button
                   type="button"
-                  className="btn btn-sm btn-secondary"
+                  variant="outline"
+                  size="xs"
                   onClick={() => setIsNewAsset(!isNewAsset)}
                 >
-                  {isNewAsset ? '← Selecionar existente' : '+ Novo ativo'}
-                </button>
+                  {isNewAsset ? <><ArrowLeft className="w-3 h-3" /> Selecionar existente</> : <><Plus className="w-3 h-3" /> Novo ativo</>}
+                </Button>
               </div>
 
               {isNewAsset ? (
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Ticker</label>
-                    <input className="form-input" value={newTicker} onChange={(e) => setNewTicker(e.target.value.toUpperCase())} placeholder="Ex: WEGE3" required />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 border border-border rounded-lg bg-muted/30">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground uppercase">Ticker</label>
+                    <Input value={newTicker} onChange={(e) => setNewTicker(e.target.value.toUpperCase())} placeholder="Ex: WEGE3" required />
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Classe</label>
-                    <select className="form-select" value={newClass} onChange={(e) => setNewClass(e.target.value)}>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground uppercase">Classe</label>
+                    <select className={selectClassName} value={newClass} onChange={(e) => setNewClass(e.target.value)}>
                       {ASSET_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                   {CLASSES_WITH_MATURITY.includes(newClass) && (
-                    <div className="form-group">
-                      <label className="form-label">Data de Vencimento</label>
-                      <input type="text" placeholder="DD/MM/YYYY" className="form-input" value={newMaturityDate} onChange={(e) => setNewMaturityDate(handleDateMask(e.target.value))} required />
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground uppercase">Data de Vencimento</label>
+                      <Input type="text" placeholder="DD/MM/YYYY" value={newMaturityDate} onChange={(e) => setNewMaturityDate(handleDateMask(e.target.value))} required />
                     </div>
                   )}
                 </div>
@@ -332,48 +335,47 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             </div>
           )}
 
-          {/* Event type */}
-          <div className="form-group">
-            <label className="form-label">Tipo de Evento</label>
-            <select className="form-select" value={eventType} onChange={(e) => setEventType(e.target.value)}>
-              {EVENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Tipo de Evento</label>
+              <select className={selectClassName} value={eventType} onChange={(e) => setEventType(e.target.value)}>
+                {EVENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Data</label>
+              <Input type="text" placeholder="DD/MM/YYYY" value={eventDate} onChange={(e) => setEventDate(handleDateMask(e.target.value))} required />
+            </div>
           </div>
 
-          {/* Date, Quantity, Value */}
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Data</label>
-              <input type="text" placeholder="DD/MM/YYYY" className="form-input" value={eventDate} onChange={(e) => setEventDate(handleDateMask(e.target.value))} required />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Quantidade</label>
-              <input className="form-input" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0,00" required />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Quantidade</label>
+              <Input value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0,00" required />
             </div>
             {!VALUE_IGNORED.includes(eventType) && (
-              <div className="form-group">
-                <label className="form-label">Valor Evento</label>
-                <input className="form-input" value={eventValue} onChange={(e) => setEventValue(e.target.value)} placeholder="0,00" required />
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Total do Evento</label>
+                <Input value={eventValue} onChange={(e) => setEventValue(e.target.value)} placeholder="0,00" required />
               </div>
             )}
           </div>
 
-          {/* Notes */}
-          <div className="form-group">
-            <label className="form-label">Observações</label>
-            <input className="form-input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional" />
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Observações (Opcional)</label>
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ex: Referente a proventos..." />
           </div>
-        </>
+        </div>
       )}
 
       {/* Actions */}
-      <div className="modal-footer" style={{ border: 'none', padding: 0, marginTop: '16px' }}>
+      <div className="flex justify-end gap-2 pt-4 border-t border-border">
         {onCancel && (
-          <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancelar</button>
+          <Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button>
         )}
-        <button type="submit" className="btn btn-primary" disabled={creating}>
-          {creating ? <><div className="spinner" /> Salvando...</> : 'Lançar Evento'}
-        </button>
+        <Button type="submit" disabled={creating}>
+          {creating ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</> : 'Lançar Evento'}
+        </Button>
       </div>
     </form>
   );

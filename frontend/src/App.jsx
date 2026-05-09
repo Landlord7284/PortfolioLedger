@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import AssetDetail from './pages/AssetDetail';
 import Settings from './pages/Settings';
 import { portfolios as portfolioApi } from './api/client';
+import { Loader2 } from 'lucide-react';
 
 export const AppContext = createContext(null);
 
@@ -40,9 +41,9 @@ function App() {
 
   if (loading) {
     return (
-      <div className="loading-container" style={{ height: '100vh' }}>
-        <div className="spinner" />
-        <span>Carregando...</span>
+      <div className="flex h-screen items-center justify-center gap-3 text-muted-foreground bg-background">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span className="text-sm">Carregando...</span>
       </div>
     );
   }

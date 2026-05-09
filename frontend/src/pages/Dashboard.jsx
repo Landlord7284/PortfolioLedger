@@ -4,10 +4,15 @@ import { AppContext } from '../App';
 import { positions as posApi } from '../api/client';
 import EventForm from '../components/EventForm';
 import ImportModal from '../components/ImportModal';
+import { Search, Plus, Download, FolderOpen, Inbox, AlertCircle, Loader2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-/**
- * Format a numeric string as BRL-style display (truncated to 2 decimals).
- */
 function formatMoney(value, currency = 'BRL') {
   const num = parseFloat(value);
   if (isNaN(num)) return '—';
@@ -20,12 +25,10 @@ function formatMoney(value, currency = 'BRL') {
 function formatQuantity(value) {
   const num = parseFloat(value);
   if (isNaN(num)) return '—';
-  // Show up to 8 decimals, but trim trailing zeros
-  const formatted = num.toLocaleString('pt-BR', {
+  return num.toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 8,
   });
-  return formatted;
 }
 
 export default function Dashboard() {
@@ -67,7 +70,6 @@ export default function Dashboard() {
     loadPositions();
   }, [activePortfolioId]);
 
-  // Filtered positions
   const filtered = positionList.filter((p) => {
     if (!showRedeemed && parseFloat(p.quantity) === 0) return false;
     if (filterClass && p.asset_class !== filterClass) return false;
@@ -83,190 +85,218 @@ export default function Dashboard() {
   const displayMoney = (val) => hideValues ? '•••••' : formatMoney(val);
   const displayQuantity = (val) => hideValues ? '•••••' : formatQuantity(val);
 
-  // Summary calculations
   const totalCost = positionList.reduce((s, p) => s + parseFloat(p.total_cost || 0), 0);
   const totalRealized = positionList.reduce((s, p) => s + parseFloat(p.realized_result || 0), 0);
   const activeAssets = positionList.filter((p) => parseFloat(p.quantity) > 0).length;
 
-  // Unique classes for filter
   const classes = [...new Set(positionList.map((p) => p.asset_class))].sort();
 
   if (!activePortfolioId) {
     return (
-      <div className="empty-state">
-        <div className="icon">📁</div>
-        <h3>Nenhuma carteira selecionada</h3>
-        <p>Crie uma carteira em Configurações para começar.</p>
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <FolderOpen className="w-12 h-12 text-muted-foreground/30 mb-4" />
+        <h3 className="text-lg font-semibold mb-2">Nenhuma carteira selecionada</h3>
+        <p className="text-sm text-muted-foreground max-w-sm">Crie uma carteira em Configurações para começar.</p>
       </div>
     );
   }
 
   return (
-    <>
+    <div className="space-y-6">
       {/* Action bar */}
-      <div className="flex items-center justify-between mb-24">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <h2 style={{ fontSize: '1.3rem', fontWeight: 700 }}>Posições Consolidadas</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px' }}>
+          <h2 className="text-xl font-semibold tracking-tight">Posições Consolidadas</h2>
+          <p className="text-muted-foreground text-sm mt-0.5">
             {portfolioList.find((p) => p.id === activePortfolioId)?.name || ''}
           </p>
         </div>
-        <div className="search-input-wrapper" style={{ margin: '0 20px', flex: 1, maxWidth: '400px' }}>
-          <span className="search-icon">🔍</span>
-          <input 
-            className="search-input"
-            placeholder="Buscar por ticker ou nome..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <div className="flex gap-12">
-          <button className="btn btn-secondary" onClick={() => setShowImport(true)}>
-            📥 Importar Eventos
-          </button>
-          <button className="btn btn-primary" onClick={() => setShowEventForm(true)}>
-            + Novo Evento
-          </button>
+
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              className="pl-8 w-[240px]"
+              placeholder="Buscar ticker ou nome..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          <Button variant="outline" onClick={() => setShowImport(true)}>
+            <Download className="w-4 h-4" />
+            Importar
+          </Button>
+          <Button onClick={() => setShowEventForm(true)}>
+            <Plus className="w-4 h-4" />
+            Novo Evento
+          </Button>
         </div>
       </div>
 
       {/* Summary cards */}
-      <div className="summary-grid">
-        <div className="summary-card">
-          <div className="label">Custo Total</div>
-          <div className="value">{hideValues ? '•••••' : `R$ ${formatMoney(totalCost)}`}</div>
-        </div>
-        <div className="summary-card">
-          <div className="label">Resultado Realizado</div>
-          <div className={`value ${!hideValues && totalRealized >= 0 ? 'positive' : !hideValues ? 'negative' : ''}`}>
-            {hideValues ? '•••••' : `R$ ${formatMoney(totalRealized)}`}
-          </div>
-        </div>
-        <div className="summary-card">
-          <div className="label">Ativos em Carteira</div>
-          <div className="value">{activeAssets}</div>
-        </div>
-        <div className="summary-card">
-          <div className="label">Total de Ativos</div>
-          <div className="value">{positionList.length}</div>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Custo Total</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold tabular-nums">
+              {hideValues ? '•••••' : `R$ ${formatMoney(totalCost)}`}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Resultado Realizado</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className={`text-2xl font-bold tabular-nums ${!hideValues && totalRealized >= 0 ? 'text-emerald-500' : !hideValues ? 'text-red-500' : ''}`}>
+              {hideValues ? '•••••' : `R$ ${formatMoney(totalRealized)}`}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Ativos em Carteira</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{activeAssets}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total de Ativos</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{positionList.length}</div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Filter */}
-      <div className="flex items-center justify-between mb-16">
-        <div className="flex items-center gap-8">
+      {/* Filter & Toggles */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
           {classes.length > 1 && (
             <>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Filtrar:</span>
-              <button
-                className={`btn btn-sm ${!filterClass ? 'btn-primary' : 'btn-secondary'}`}
+              <span className="text-xs font-medium text-muted-foreground mr-1">Filtrar:</span>
+              <Button
+                variant={!filterClass ? "default" : "outline"}
+                size="xs"
                 onClick={() => setFilterClass('')}
               >
                 Todos
-              </button>
+              </Button>
               {classes.map((c) => (
-                <button
+                <Button
                   key={c}
-                  className={`btn btn-sm ${filterClass === c ? 'btn-primary' : 'btn-secondary'}`}
+                  variant={filterClass === c ? "default" : "outline"}
+                  size="xs"
                   onClick={() => setFilterClass(c)}
                 >
                   {c}
-                </button>
+                </Button>
               ))}
             </>
           )}
         </div>
-        <div className="flex items-center gap-8">
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Exibir resgatados</span>
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={showRedeemed}
-              onChange={(e) => setShowRedeemed(e.target.checked)}
-            />
-            <span className="toggle-slider"></span>
+        <div className="flex items-center gap-2">
+          <label htmlFor="show-redeemed" className="text-sm text-muted-foreground cursor-pointer">
+            Exibir resgatados
           </label>
+          <Switch
+            id="show-redeemed"
+            checked={showRedeemed}
+            onCheckedChange={setShowRedeemed}
+          />
         </div>
       </div>
 
       {/* Positions table */}
       {loading ? (
-        <div className="loading-container">
-          <div className="spinner" />
-          <span>Carregando posições...</span>
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin mb-3" />
+          <span className="text-sm">Carregando posições...</span>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="empty-state">
-          <div className="icon">📭</div>
-          <h3>Nenhuma posição encontrada</h3>
-          <p>Lance um evento ou importe o Dados.xlsx para começar.</p>
-        </div>
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <Inbox className="w-10 h-10 text-muted-foreground/40 mb-3" />
+            <h3 className="text-base font-medium mb-1">Nenhuma posição encontrada</h3>
+            <p className="text-muted-foreground text-sm max-w-sm">Lance um evento ou importe os dados para começar.</p>
+          </CardContent>
+        </Card>
       ) : (
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Ticker</th>
-                <th>Classe</th>
-                <th>Moeda</th>
-                <th className="right">Quantidade</th>
-                <th className="right">Custo Total</th>
-                <th className="right">Preço Médio</th>
-                <th className="right">Resultado Realizado</th>
-                <th>Último Evento</th>
-              </tr>
-            </thead>
-            <tbody>
+        <Card className="overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Ticker</TableHead>
+                <TableHead>Classe</TableHead>
+                <TableHead>Moeda</TableHead>
+                <TableHead className="text-right">Quantidade</TableHead>
+                <TableHead className="text-right">Custo Total</TableHead>
+                <TableHead className="text-right">Preço Médio</TableHead>
+                <TableHead className="text-right">Resultado</TableHead>
+                <TableHead>Último Evento</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {filtered.map((pos) => {
                 const realized = parseFloat(pos.realized_result || 0);
                 const qty = parseFloat(pos.quantity || 0);
                 return (
-                  <tr
+                  <TableRow
                     key={`${pos.portfolio_id}-${pos.asset_id}`}
-                    className="clickable"
+                    className="cursor-pointer"
                     onClick={() => navigate(`/assets/${pos.asset_id}`)}
                   >
-                    <td>
-                      <strong style={{ color: 'var(--text-accent)' }}>
-                        {pos.current_ticker || `#${pos.asset_id}`}
-                      </strong>
-                      {pos.duplicate_flag && <span className="badge badge-warning" style={{marginLeft: '8px'}} title="Possui evento duplicado pendente de análise">🔴</span>}
-                    </td>
-                    <td><span className="badge badge-class">{pos.asset_class}</span></td>
-                    <td className="text-muted">{pos.currency}</td>
-                    <td className={`right mono ${qty === 0 ? 'text-muted' : ''}`}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">
+                          {pos.current_ticker || `#${pos.asset_id}`}
+                        </span>
+                        {pos.duplicate_flag && (
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-500" title="Duplicado pendente de análise" />
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{pos.asset_class}</Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{pos.currency}</TableCell>
+                    <TableCell className={`text-right font-mono text-sm ${qty === 0 ? 'text-muted-foreground/50' : ''}`}>
                       {displayQuantity(pos.quantity)}
-                    </td>
-                    <td className="right mono">{displayMoney(pos.total_cost)}</td>
-                    <td className="right mono">{displayMoney(pos.average_price)}</td>
-                    <td className={`right mono ${!hideValues && realized > 0 ? 'text-positive' : !hideValues && realized < 0 ? 'text-negative' : ''}`}>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm">{displayMoney(pos.total_cost)}</TableCell>
+                    <TableCell className="text-right font-mono text-sm">{displayMoney(pos.average_price)}</TableCell>
+                    <TableCell className={`text-right font-mono text-sm ${!hideValues && realized > 0 ? 'text-emerald-500' : !hideValues && realized < 0 ? 'text-red-500' : ''}`}>
                       {displayMoney(pos.realized_result)}
-                    </td>
-                    <td className="text-muted">{pos.last_event_date || '—'}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">{pos.last_event_date || '—'}</TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
 
-      {/* Event form modal */}
-      {showEventForm && (
-        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowEventForm(false)}>
-          <div className={`modal ${isLargeModal ? 'modal-large' : ''}`}>
-            <div className="modal-header">
-              <h2 className="modal-title">Novo Evento</h2>
-              <button className="modal-close" onClick={() => setShowEventForm(false)}>&times;</button>
-            </div>
-            <EventForm
-              onSuccess={() => { setShowEventForm(false); loadPositions(); }}
-              onCancel={() => setShowEventForm(false)}
-              onModeChange={setIsLargeModal}
-            />
-          </div>
-        </div>
-      )}
+      {/* Event form dialog */}
+      <Dialog open={showEventForm} onOpenChange={setShowEventForm}>
+        <DialogContent className={isLargeModal ? 'sm:max-w-3xl' : 'sm:max-w-xl'}>
+          <DialogHeader>
+            <DialogTitle>Novo Evento</DialogTitle>
+          </DialogHeader>
+          <EventForm
+            onSuccess={() => { setShowEventForm(false); loadPositions(); }}
+            onCancel={() => setShowEventForm(false)}
+            onModeChange={setIsLargeModal}
+          />
+        </DialogContent>
+      </Dialog>
 
       {/* Import modal */}
       {showImport && (
@@ -276,6 +306,6 @@ export default function Dashboard() {
           onSuccess={loadPositions}
         />
       )}
-    </>
+    </div>
   );
 }

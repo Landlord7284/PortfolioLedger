@@ -1,6 +1,13 @@
 import { useState, useContext } from 'react';
 import { AppContext } from '../App';
 import { portfolios as portfolioApi } from '../api/client';
+import { Plus, Check, X, Trash2, Edit2, AlertTriangle, FolderOpen, Loader2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 export default function Settings() {
   const { portfolioList, refreshPortfolios, activePortfolioId, setActivePortfolioId } = useContext(AppContext);
@@ -77,142 +84,158 @@ export default function Settings() {
   };
 
   return (
-    <>
-      <h2 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: '24px' }}>
-        Gerenciar Carteiras
-      </h2>
-
-      {error && <div className="alert alert-error">{error}</div>}
-
-      {/* Create form */}
-      <div className="card mb-24">
-        <div className="card-title mb-16">Nova Carteira</div>
-        <form onSubmit={handleCreate} className="flex gap-12 items-center">
-          <input
-            className="form-input"
-            style={{ flex: 1 }}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Nome da carteira..."
-            required
-          />
-          <button type="submit" className="btn btn-primary" disabled={creating}>
-            {creating ? 'Criando...' : '+ Criar'}
-          </button>
-        </form>
+    <div className="space-y-6 max-w-4xl">
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight">Configurações</h2>
+        <p className="text-muted-foreground text-sm mt-0.5">Gerencie suas carteiras e preferências.</p>
       </div>
 
-      {/* Portfolio list */}
-      {portfolioList.length === 0 ? (
-        <div className="empty-state">
-          <div className="icon">📁</div>
-          <h3>Nenhuma carteira cadastrada</h3>
-          <p>Crie sua primeira carteira para começar a registrar eventos.</p>
-        </div>
-      ) : (
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Nome</th>
-                <th>Consolidada</th>
-                <th>Criada em</th>
-                <th>Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {portfolioList.map((p) => (
-                <tr key={p.id}>
-                  <td className="text-muted mono">{p.id}</td>
-                  <td>
-                    {editingId === p.id ? (
-                      <div className="flex gap-8">
-                        <input
-                          className="form-input"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleRename(p.id)}
-                          autoFocus
-                          style={{ padding: '4px 8px', fontSize: '0.85rem' }}
-                        />
-                        <button className="btn btn-sm btn-primary" onClick={() => handleRename(p.id)}>✓</button>
-                        <button className="btn btn-sm btn-secondary" onClick={() => setEditingId(null)}>✕</button>
-                      </div>
-                    ) : (
-                      <strong>{p.name}</strong>
-                    )}
-                  </td>
-                  <td>
-                    <label className="toggle">
-                      <input
-                        type="checkbox"
-                        checked={p.consolidated}
-                        onChange={() => handleToggleConsolidated(p.id, p.consolidated)}
-                      />
-                      <span className="toggle-slider"></span>
-                    </label>
-                  </td>
-                  <td className="text-muted">{p.created_at?.slice(0, 10)}</td>
-                  <td>
-                    <div className="flex gap-8">
-                      <button
-                        className="btn btn-sm btn-secondary"
-                        onClick={() => { setEditingId(p.id); setEditName(p.name); }}
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        className="btn btn-sm btn-danger"
-                        onClick={() => handleDeleteRequest(p)}
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {error && (
+        <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p>{error}</p>
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-      {portfolioToDelete && (
-        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setPortfolioToDelete(null)}>
-          <div className="modal">
-            <div className="modal-header">
-              <h2 className="modal-title">Excluir Carteira</h2>
-              <button className="modal-close" onClick={() => setPortfolioToDelete(null)}>&times;</button>
-            </div>
-            <div className="alert alert-danger mb-16">
-              <strong>Atenção!</strong> Esta ação excluirá a carteira <strong>{portfolioToDelete.name}</strong> e <strong>todos os seus eventos</strong> definitivamente.
-            </div>
-            <p className="mb-16">
-              Para confirmar a exclusão, digite o nome da carteira (<strong>{portfolioToDelete.name}</strong>) abaixo:
+      {/* Create form */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Nova Carteira</CardTitle>
+          <CardDescription>Crie uma nova carteira para segregar seus investimentos.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleCreate} className="flex gap-3 items-center">
+            <Input
+              className="flex-1"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Nome da carteira..."
+              required
+            />
+            <Button type="submit" disabled={creating}>
+              {creating ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Criando...</>
+              ) : (
+                <><Plus className="w-4 h-4" /> Criar</>
+              )}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Portfolio list */}
+      <div className="space-y-3">
+        <h3 className="text-base font-semibold">Carteiras Cadastradas</h3>
+
+        {portfolioList.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <FolderOpen className="w-10 h-10 text-muted-foreground/40 mb-3" />
+              <h3 className="text-base font-medium mb-1">Nenhuma carteira cadastrada</h3>
+              <p className="text-muted-foreground text-sm max-w-sm">Crie sua primeira carteira acima para começar.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-16">ID</TableHead>
+                  <TableHead>Nome</TableHead>
+                  <TableHead className="w-28 text-center">Consolidada</TableHead>
+                  <TableHead className="w-28">Criada em</TableHead>
+                  <TableHead className="w-20 text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {portfolioList.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="text-muted-foreground font-mono text-xs">{p.id}</TableCell>
+                    <TableCell>
+                      {editingId === p.id ? (
+                        <div className="flex gap-2 items-center">
+                          <Input
+                            className="h-8 text-sm w-full max-w-[200px]"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleRename(p.id)}
+                            autoFocus
+                          />
+                          <Button size="icon-sm" variant="ghost" onClick={() => handleRename(p.id)}>
+                            <Check className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button size="icon-sm" variant="ghost" onClick={() => setEditingId(null)}>
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="font-medium">{p.name}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={p.consolidated}
+                        onCheckedChange={() => handleToggleConsolidated(p.id, p.consolidated)}
+                      />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">{p.created_at?.slice(0, 10)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button size="icon-sm" variant="ghost" onClick={() => { setEditingId(p.id); setEditName(p.name); }}>
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button size="icon-sm" variant="ghost" className="text-destructive" onClick={() => handleDeleteRequest(p)}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        )}
+      </div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!portfolioToDelete} onOpenChange={(v) => { if (!v) setPortfolioToDelete(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Excluir Carteira</DialogTitle>
+            <DialogDescription>
+              Esta ação excluirá a carteira <strong>{portfolioToDelete?.name}</strong> e <strong>todos os seus eventos</strong> definitivamente. Não há como reverter.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Para confirmar, digite o nome da carteira (<strong>{portfolioToDelete?.name}</strong>):
             </p>
-            <input 
-              className="form-input mb-16" 
-              style={{ width: '100%' }}
+            <Input
               value={deleteConfirmText}
               onChange={(e) => setDeleteConfirmText(e.target.value)}
-              placeholder={portfolioToDelete.name}
+              placeholder={portfolioToDelete?.name}
             />
-            <div className="modal-footer" style={{ border: 'none', padding: 0 }}>
-              <button className="btn btn-secondary" onClick={() => setPortfolioToDelete(null)} disabled={deleting}>
-                Cancelar
-              </button>
-              <button 
-                className="btn btn-danger" 
-                onClick={confirmDelete}
-                disabled={deleteConfirmText !== portfolioToDelete.name || deleting}
-              >
-                {deleting ? 'Excluindo...' : 'Excluir Permanentemente'}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
-    </>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPortfolioToDelete(null)} disabled={deleting}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={deleteConfirmText !== portfolioToDelete?.name || deleting}
+            >
+              {deleting ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Excluindo...</>
+              ) : (
+                <><Trash2 className="w-4 h-4" /> Excluir</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

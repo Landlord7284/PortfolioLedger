@@ -3,6 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { assets as assetsApi, events as eventsApi, positions as posApi } from '../api/client';
 import EventForm from '../components/EventForm';
+import { ArrowLeft, Edit2, Check, X, Plus, Trash2, AlertCircle, HelpCircle, Loader2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 
 function formatMoney(value) {
   const num = parseFloat(value);
@@ -84,7 +92,7 @@ function AssetMetadataCard({ asset, onSave }) {
 
   const fields = [];
   const c = asset.asset_class;
-  
+
   let nameLabel = 'Nome da Empresa/Emissor';
   if (['FII', 'FI-INFRA', 'ETF'].includes(c)) {
     nameLabel = 'Nome do Fundo';
@@ -93,7 +101,7 @@ function AssetMetadataCard({ asset, onSave }) {
   }
 
   fields.push({ name: 'name', label: nameLabel });
-  
+
   if (['Ação', 'BDR'].includes(c)) {
     fields.push({ name: 'cnpj', label: 'CNPJ' });
     fields.push({ name: 'sector', label: 'Setor' });
@@ -113,26 +121,30 @@ function AssetMetadataCard({ asset, onSave }) {
   }
 
   return (
-    <div className="card mb-24">
-      <div className="flex justify-between items-center mb-16">
-        <h3 style={{ margin: 0, fontSize: '1rem' }}>Informações do Ativo</h3>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between border-b">
+        <CardTitle className="text-base">Informações Cadastrais</CardTitle>
         {!editing ? (
-          <button className="btn btn-sm btn-secondary" onClick={() => setEditing(true)}>✏️ Editar</button>
+          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+            <Edit2 className="w-4 h-4" /> Editar
+          </Button>
         ) : (
-          <div className="flex gap-8">
-            <button className="btn btn-sm btn-secondary" onClick={() => setEditing(false)}>Cancelar</button>
-            <button className="btn btn-sm btn-primary" onClick={handleSave} disabled={saving}>Salvar</button>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancelar</Button>
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salvar'}
+            </Button>
           </div>
         )}
-      </div>
-
-      <div className="form-row">
-        {fields.map(f => (
-          <div className="form-group" key={f.name}>
-            <label className="form-label">{f.label}</label>
-            {editing ? (
-                <input
-                  className="form-input"
+      </CardHeader>
+      <CardContent className="pt-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {fields.map(f => (
+            <div className="flex flex-col gap-1.5" key={f.name}>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{f.label}</label>
+              {editing ? (
+                <Input
+                  className="h-8 text-sm"
                   type={f.type || 'text'}
                   name={f.name}
                   value={formData[f.name]}
@@ -140,19 +152,20 @@ function AssetMetadataCard({ asset, onSave }) {
                   placeholder={f.placeholder || ''}
                 />
               ) : (
-                <div style={{ color: 'var(--text-primary)', padding: '8px 0' }}>
+                <div className="text-sm font-medium py-1">
                   {f.name === 'maturity_date' && asset[f.name] ? formatDateToBr(asset[f.name]) : (asset[f.name] || '—')}
                 </div>
               )}
-          </div>
-        ))}
-      </div>
-    </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
-// Correction Modal
-function CorrectionModal({ event, onClose, onSuccess }) {
+// Correction Modal using Dialog
+function CorrectionModal({ event, open, onClose, onSuccess }) {
   const [eventType, setEventType] = useState(event.event_type);
   const [eventDate, setEventDate] = useState(event.event_date);
   const [quantity, setQuantity] = useState(event.quantity);
@@ -187,52 +200,59 @@ function CorrectionModal({ event, onClose, onSuccess }) {
     'Resgate Antecipado', 'Resgate Vencimento',
   ];
 
+  const selectClassName = "flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
   return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <div className="modal-header">
-          <h2 className="modal-title">Editar / Corrigir Evento #{event.id}</h2>
-          <button className="modal-close" onClick={onClose}>&times;</button>
-        </div>
-        <form onSubmit={handleSubmit}>
-          {error && <div className="alert alert-error">{error}</div>}
-          <div className="alert alert-warning mb-16">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Corrigir Evento #{event.id}</DialogTitle>
+          <DialogDescription>
             A edição cria automaticamente um estorno do evento original e lança o evento corrigido.
-          </div>
-          <div className="form-group mb-16">
-            <label className="form-label">Tipo de Evento</label>
-            <select className="form-select" value={eventType} onChange={(e) => setEventType(e.target.value)}>
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && <div className="p-3 bg-destructive/10 text-destructive rounded-lg text-sm">{error}</div>}
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase">Tipo de Evento</label>
+            <select className={selectClassName} value={eventType} onChange={(e) => setEventType(e.target.value)}>
               {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
-          <div className="form-row mb-16">
-            <div className="form-group">
-              <label className="form-label">Data</label>
-              <input type="date" className="form-input" value={eventDate} onChange={(e) => setEventDate(e.target.value)} required />
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase">Data</label>
+              <Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} required />
             </div>
-            <div className="form-group">
-              <label className="form-label">Quantidade</label>
-              <input className="form-input" value={quantity} onChange={(e) => setQuantity(e.target.value)} required />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Valor</label>
-              <input className="form-input" value={eventValue} onChange={(e) => setEventValue(e.target.value)} required />
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase">Quantidade</label>
+              <Input value={quantity} onChange={(e) => setQuantity(e.target.value)} required />
             </div>
           </div>
-          <div className="form-group mb-16">
-            <label className="form-label">Notas</label>
-            <input className="form-input" value={notes} onChange={(e) => setNotes(e.target.value)} />
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase">Valor Total</label>
+            <Input value={eventValue} onChange={(e) => setEventValue(e.target.value)} required />
           </div>
-          <div className="modal-footer" style={{ border: 'none', padding: 0 }}>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>Salvar Correção</button>
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase">Notas</label>
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salvar Correção'}
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
-
 
 export default function AssetDetail() {
   const { assetId } = useParams();
@@ -338,21 +358,21 @@ export default function AssetDetail() {
 
   if (loading) {
     return (
-      <div className="loading-container">
-        <div className="spinner" />
-        <span>Carregando ativo...</span>
+      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin mb-3" />
+        <span className="text-sm">Carregando ativo...</span>
       </div>
     );
   }
 
   if (!asset) {
     return (
-      <div className="empty-state">
-        <div className="icon">❓</div>
-        <h3>Ativo não encontrado</h3>
-        <button className="btn btn-secondary mt-16" onClick={() => navigate('/')}>
-          ← Voltar ao Dashboard
-        </button>
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <HelpCircle className="w-12 h-12 text-muted-foreground/30 mb-4" />
+        <h3 className="text-lg font-semibold mb-2">Ativo não encontrado</h3>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/')}>
+          <ArrowLeft className="w-4 h-4" /> Voltar ao Dashboard
+        </Button>
       </div>
     );
   }
@@ -361,205 +381,238 @@ export default function AssetDetail() {
   const orderedEventList = [...eventList].reverse();
 
   return (
-    <>
-      <button className="btn btn-secondary btn-sm mb-24" onClick={() => navigate('/')}>
-        ← Voltar
-      </button>
+    <div className="space-y-6">
+      <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => navigate('/')}>
+        <ArrowLeft className="w-4 h-4" /> Voltar
+      </Button>
 
-      <div className="flex items-center justify-between mb-24">
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
         <div>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 700 }}>
-            <span style={{ color: 'var(--text-accent)' }}>
-              {asset.current_ticker || `Ativo #${asset.id}`}
-            </span>
-            {asset.duplicate_flag && <span className="badge badge-warning" style={{marginLeft: '12px'}}>⚠️ Duplicado detectado</span>}
+          <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3">
+            {asset.current_ticker || `Ativo #${asset.id}`}
+            {asset.duplicate_flag && (
+              <Badge variant="outline" className="text-xs gap-1">
+                <AlertCircle className="w-3 h-3" /> Duplicado detectado
+              </Badge>
+            )}
           </h2>
-          <div className="flex items-center gap-8 mt-8">
-            <span className="badge badge-class">{asset.asset_class}</span>
-            <span className="text-muted">{asset.currency}</span>
+          <div className="flex items-center gap-2 mt-2">
+            <Badge variant="secondary">{asset.asset_class}</Badge>
+            <span className="text-sm text-muted-foreground font-medium">{asset.currency}</span>
           </div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowEventForm(true)}>
-          + Novo Evento
-        </button>
+        <Button onClick={() => setShowEventForm(true)}>
+          <Plus className="w-4 h-4" /> Novo Evento
+        </Button>
       </div>
 
-      {error && <div className="alert alert-error mb-16">{error}</div>}
-
-      <AssetMetadataCard 
-        asset={asset} 
-        onSave={(data) => assetsApi.updateMetadata(asset.id, data).then(setAsset)} 
-      />
-
-      {position && (
-        <div className="summary-grid mb-24">
-          <div className="summary-card">
-            <div className="label">Quantidade</div>
-            <div className="value">{displayQuantity(position.quantity)}</div>
-          </div>
-          <div className="summary-card">
-            <div className="label">Custo Total</div>
-            <div className="value">R$ {displayMoney(position.total_cost)}</div>
-          </div>
-          <div className="summary-card">
-            <div className="label">Preço Médio</div>
-            <div className="value">R$ {displayMoney(position.average_price)}</div>
-          </div>
-          <div className="summary-card">
-            <div className="label">Resultado Realizado</div>
-            <div className={`value ${!hideValues && parseFloat(position.realized_result) >= 0 ? 'positive' : !hideValues ? 'negative' : ''}`}>
-              R$ {displayMoney(position.realized_result)}
-            </div>
-          </div>
+      {error && (
+        <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p>{error}</p>
         </div>
       )}
 
-      <div className="card">
-        <div className="card-header">
+      <AssetMetadataCard
+        asset={asset}
+        onSave={(data) => assetsApi.updateMetadata(asset.id, data).then(setAsset)}
+      />
+
+      {position && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Quantidade</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold font-mono">{displayQuantity(position.quantity)}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Custo Total</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold font-mono">R$ {displayMoney(position.total_cost)}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Preço Médio</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold font-mono">R$ {displayMoney(position.average_price)}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Resultado Realizado</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl font-bold font-mono ${!hideValues && parseFloat(position.realized_result) >= 0 ? 'text-emerald-500' : !hideValues ? 'text-red-500' : ''}`}>
+                R$ {displayMoney(position.realized_result)}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between border-b">
           <div>
-            <div className="card-title">Histórico de Eventos (Ledger)</div>
-            <div className="card-subtitle">{eventList.length} evento(s) registrado(s)</div>
+            <CardTitle>Histórico de Eventos (Ledger)</CardTitle>
+            <CardDescription>{eventList.length} evento(s) registrado(s)</CardDescription>
           </div>
-          <div className="flex gap-8 items-center">
+          <div className="flex gap-2 items-center">
             {selectedEvents.size > 0 && (
               <>
-                <button className="btn btn-sm btn-secondary" onClick={() => setSelectedEvents(new Set())}>
+                <Button variant="outline" size="sm" onClick={() => setSelectedEvents(new Set())}>
                   Limpar Seleção
-                </button>
-                <button className="btn btn-sm btn-danger" onClick={handleBulkDelete}>
-                  🗑️ Excluir Selecionados ({selectedEvents.size})
-                </button>
+                </Button>
+                <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+                  <Trash2 className="w-4 h-4" /> Excluir ({selectedEvents.size})
+                </Button>
               </>
             )}
             {validEvents.length === 0 && eventList.length > 0 && (
-               <button className="btn btn-sm btn-danger" onClick={handleDeleteAsset}>
-                 ⚠️ Excluir Ativo Completamente
-               </button>
+               <Button variant="destructive" size="sm" onClick={handleDeleteAsset}>
+                 <AlertCircle className="w-4 h-4" /> Excluir Ativo Completamente
+               </Button>
             )}
             {eventList.length === 0 && (
-               <button className="btn btn-sm btn-danger" onClick={handleDeleteAsset}>
-                 ⚠️ Excluir Ativo
-               </button>
+               <Button variant="destructive" size="sm" onClick={handleDeleteAsset}>
+                 <AlertCircle className="w-4 h-4" /> Excluir Ativo
+               </Button>
             )}
           </div>
-        </div>
+        </CardHeader>
 
         {eventList.length === 0 ? (
-          <div className="empty-state" style={{ padding: '40px' }}>
-            <p className="text-muted">Nenhum evento registrado para este ativo nesta carteira.</p>
-          </div>
+          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <p className="text-muted-foreground text-sm">Nenhum evento registrado para este ativo nesta carteira.</p>
+          </CardContent>
         ) : (
-          <div className="table-container" style={{ border: 'none' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: '40px' }}>
-                    <input 
-                      type="checkbox" 
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10 text-center">
+                    <input
+                      type="checkbox"
+                      className="rounded"
                       onChange={(e) => setSelectedEvents(e.target.checked ? new Set(validEvents.map(ev => ev.id)) : new Set())}
                       checked={validEvents.length > 0 && selectedEvents.size === validEvents.length}
                     />
-                  </th>
-                  <th>Data</th>
-                  <th>Evento</th>
-                  <th className="right">Quantidade</th>
-                  <th className="right">Valor</th>
-                  <th className="right">Resultado</th>
-                  <th>Status</th>
-                  <th>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
+                  </TableHead>
+                  <TableHead>Data</TableHead>
+                  <TableHead>Evento</TableHead>
+                  <TableHead className="text-right">Quantidade</TableHead>
+                  <TableHead className="text-right">Valor</TableHead>
+                  <TableHead className="text-right">Resultado</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {orderedEventList.map((ev) => {
                   const isCancelled = ev.is_cancelled;
                   const isStorno = ev.is_storno;
                   const isInteractive = !isCancelled && !isStorno;
-                  
+
                   return (
-                    <tr key={ev.id} style={!isInteractive ? { opacity: 0.5 } : {}}>
-                      <td>
+                    <TableRow key={ev.id} className={!isInteractive ? 'opacity-50' : ''}>
+                      <TableCell className="text-center">
                         {isInteractive && (
-                          <input 
-                            type="checkbox" 
+                          <input
+                            type="checkbox"
+                            className="rounded"
                             checked={selectedEvents.has(ev.id)}
                             onChange={() => toggleSelect(ev.id)}
                           />
                         )}
-                      </td>
-                      <td className="mono">{formatDateToBr(ev.event_date)}</td>
-                      <td>
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">{formatDateToBr(ev.event_date)}</TableCell>
+                      <TableCell>
                         {isCancelled ? (
-                          <span className="badge badge-cancelled">{ev.event_type}</span>
+                          <Badge variant="destructive" className="line-through">{ev.event_type}</Badge>
                         ) : isStorno ? (
-                          <span className="badge badge-storno">⤺ Estorno</span>
+                          <Badge variant="outline">⤺ Estorno</Badge>
                         ) : (
-                          <span className="badge badge-event">
+                          <Badge variant="secondary">
                             {ev.duplicate_flag && "⚠️ "}
                             {ev.event_type}
-                          </span>
+                          </Badge>
                         )}
-                      </td>
-                      <td className="right mono">{displayQuantity(ev.quantity)}</td>
-                      <td className="right mono">{displayMoney(ev.event_value)}</td>
-                      <td className={`right mono ${!hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) > 0 ? 'text-positive' : !hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) < 0 ? 'text-negative' : ''}`}>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">{displayQuantity(ev.quantity)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{displayMoney(ev.event_value)}</TableCell>
+                      <TableCell className={`text-right font-mono text-sm ${!hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) > 0 ? 'text-emerald-500' : !hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) < 0 ? 'text-red-500' : ''}`}>
                         {ev.realized_event_result ? displayMoney(ev.realized_event_result) : '—'}
-                      </td>
-                      <td>
-                        {isCancelled && <span className="text-negative" style={{ fontSize: '0.75rem' }}>Cancelado</span>}
-                        {isStorno && <span className="text-muted" style={{ fontSize: '0.75rem' }}>Ref: #{ev.storno_of}</span>}
-                        {ev.correction_of && <span className="text-muted" style={{ fontSize: '0.75rem' }}>Corr: #{ev.correction_of}</span>}
-                        {!isCancelled && !isStorno && !ev.correction_of && <span className="text-positive" style={{ fontSize: '0.75rem' }}>Ativo</span>}
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
+                        {isCancelled && <span className="text-destructive text-xs font-medium">Cancelado</span>}
+                        {isStorno && <span className="text-muted-foreground text-xs font-medium">Ref: #{ev.storno_of}</span>}
+                        {ev.correction_of && <span className="text-muted-foreground text-xs font-medium">Corr: #{ev.correction_of}</span>}
+                        {!isCancelled && !isStorno && !ev.correction_of && <span className="text-emerald-500 text-xs font-medium">Ativo</span>}
+                      </TableCell>
+                      <TableCell className="text-right">
                         {isInteractive && (
-                          <div className="flex gap-8">
+                          <div className="flex justify-end gap-1">
                             {ev.duplicate_flag ? (
                               <>
-                                <button className="btn btn-sm btn-primary" onClick={() => handleResolveDuplicate(ev.id, true)}>Confirmar</button>
-                                <button className="btn btn-sm btn-danger" onClick={() => handleResolveDuplicate(ev.id, false)}>Ignorar</button>
+                                <Button size="xs" onClick={() => handleResolveDuplicate(ev.id, true)}>
+                                  <Check className="w-3 h-3" /> Confirmar
+                                </Button>
+                                <Button size="xs" variant="destructive" onClick={() => handleResolveDuplicate(ev.id, false)}>
+                                  <X className="w-3 h-3" /> Ignorar
+                                </Button>
                               </>
                             ) : (
                               <>
-                                <button className="btn btn-sm btn-secondary" onClick={() => setEditingEvent(ev)}>✏️</button>
-                                <button className="btn btn-sm btn-danger" onClick={() => handleDelete(ev.id)}>🗑️</button>
+                                <Button size="icon-sm" variant="ghost" onClick={() => setEditingEvent(ev)}>
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button size="icon-sm" variant="ghost" className="text-destructive" onClick={() => handleDelete(ev.id)}>
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
                               </>
                             )}
                           </div>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
-      </div>
+      </Card>
 
-      {showEventForm && (
-        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowEventForm(false)}>
-          <div className={`modal ${isLargeModal ? 'modal-large' : ''}`}>
-            <div className="modal-header">
-              <h2 className="modal-title">Novo Evento — {asset.current_ticker}</h2>
-              <button className="modal-close" onClick={() => setShowEventForm(false)}>&times;</button>
-            </div>
-            <EventForm
-              assetId={Number(assetId)}
-              onSuccess={() => { setShowEventForm(false); load(); }}
-              onCancel={() => setShowEventForm(false)}
-              onModeChange={setIsLargeModal}
-            />
-          </div>
-        </div>
-      )}
+      {/* Event form dialog */}
+      <Dialog open={showEventForm} onOpenChange={setShowEventForm}>
+        <DialogContent className={isLargeModal ? 'sm:max-w-3xl' : 'sm:max-w-xl'}>
+          <DialogHeader>
+            <DialogTitle>Novo Evento — {asset.current_ticker}</DialogTitle>
+          </DialogHeader>
+          <EventForm
+            assetId={Number(assetId)}
+            onSuccess={() => { setShowEventForm(false); load(); }}
+            onCancel={() => setShowEventForm(false)}
+            onModeChange={setIsLargeModal}
+          />
+        </DialogContent>
+      </Dialog>
 
+      {/* Correction dialog */}
       {editingEvent && (
-        <CorrectionModal 
-          event={editingEvent} 
+        <CorrectionModal
+          event={editingEvent}
+          open={!!editingEvent}
           onClose={() => setEditingEvent(null)}
           onSuccess={() => { setEditingEvent(null); load(); }}
         />
       )}
-    </>
+    </div>
   );
 }
