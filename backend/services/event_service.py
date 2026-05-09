@@ -366,8 +366,17 @@ def delete_event(
         raise ValueError(f"Evento {event_id} já está cancelado.")
 
     conn.execute(
-        "UPDATE events SET is_cancelled = 1 WHERE id = ?", (event_id,)
+        "UPDATE events SET is_cancelled = 1, duplicate_flag = 0 WHERE id = ?", (event_id,)
     )
+
+    # Check if we should clear the asset's duplicate_flag
+    other_dup = conn.execute(
+        "SELECT 1 FROM events WHERE asset_id = ? AND duplicate_flag = 1 AND is_cancelled = 0 LIMIT 1",
+        (original["asset_id"],)
+    ).fetchone()
+    if not other_dup:
+        conn.execute("UPDATE assets SET duplicate_flag = 0 WHERE id = ?", (original["asset_id"],))
+
 
     # Recalculate position
     recalculate_position(conn, original["asset_id"], original["portfolio_id"])
@@ -399,7 +408,7 @@ def delete_events_bulk(
             continue
 
         conn.execute(
-            "UPDATE events SET is_cancelled = 1 WHERE id = ?", (event_id,)
+            "UPDATE events SET is_cancelled = 1, duplicate_flag = 0 WHERE id = ?", (event_id,)
         )
         affected.add((original["asset_id"], original["portfolio_id"]))
 
@@ -409,6 +418,14 @@ def delete_events_bulk(
     # Recalculate all affected positions
     for asset_id, portfolio_id in affected:
         recalculate_position(conn, asset_id, portfolio_id)
+        
+        # Check if we should clear the asset's duplicate_flag
+        other_dup = conn.execute(
+            "SELECT 1 FROM events WHERE asset_id = ? AND duplicate_flag = 1 AND is_cancelled = 0 LIMIT 1",
+            (asset_id,)
+        ).fetchone()
+        if not other_dup:
+            conn.execute("UPDATE assets SET duplicate_flag = 0 WHERE id = ?", (asset_id,))
 
     return results
 

@@ -12,24 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-
-function formatMoney(value, currency = 'BRL') {
-  const num = parseFloat(value);
-  if (isNaN(num)) return '—';
-  return num.toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function formatQuantity(value) {
-  const num = parseFloat(value);
-  if (isNaN(num)) return '—';
-  return num.toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 8,
-  });
-}
+import { formatMoney, formatQuantity } from '@/lib/formatters';
 
 export default function Dashboard() {
   const { activePortfolioId, portfolioList, hideValues } = useContext(AppContext);
@@ -82,8 +65,8 @@ export default function Dashboard() {
     return true;
   });
 
-  const displayMoney = (val) => hideValues ? '•••••' : formatMoney(val);
-  const displayQuantity = (val) => hideValues ? '•••••' : formatQuantity(val);
+  const displayMoney = (val) => formatMoney(val, hideValues);
+  const displayQuantity = (val, assetClass) => formatQuantity(val, assetClass, hideValues);
 
   const totalCost = positionList.reduce((s, p) => s + parseFloat(p.total_cost || 0), 0);
   const totalRealized = positionList.reduce((s, p) => s + parseFloat(p.realized_result || 0), 0);
@@ -268,12 +251,12 @@ export default function Dashboard() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{pos.currency}</TableCell>
                     <TableCell className={`text-right font-mono text-sm ${qty === 0 ? 'text-muted-foreground/50' : ''}`}>
-                      {displayQuantity(pos.quantity)}
+                      {displayQuantity(pos.quantity, pos.asset_class)}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-sm">{displayMoney(pos.total_cost)}</TableCell>
-                    <TableCell className="text-right font-mono text-sm">{displayMoney(pos.average_price)}</TableCell>
+                    <TableCell className="text-right font-mono text-sm">R$ {displayMoney(pos.total_cost)}</TableCell>
+                    <TableCell className="text-right font-mono text-sm">R$ {displayMoney(pos.average_price)}</TableCell>
                     <TableCell className={`text-right font-mono text-sm ${!hideValues && realized > 0 ? 'text-emerald-500' : !hideValues && realized < 0 ? 'text-red-500' : ''}`}>
-                      {displayMoney(pos.realized_result)}
+                      R$ {displayMoney(pos.realized_result)}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">{pos.last_event_date || '—'}</TableCell>
                   </TableRow>
@@ -286,7 +269,7 @@ export default function Dashboard() {
 
       {/* Event form dialog */}
       <Dialog open={showEventForm} onOpenChange={setShowEventForm}>
-        <DialogContent className={isLargeModal ? 'sm:max-w-3xl' : 'sm:max-w-xl'}>
+        <DialogContent className={isLargeModal ? 'sm:max-w-4xl' : 'sm:max-w-xl'}>
           <DialogHeader>
             <DialogTitle>Novo Evento</DialogTitle>
           </DialogHeader>

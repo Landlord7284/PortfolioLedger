@@ -10,38 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
-
-function formatMoney(value) {
-  const num = parseFloat(value);
-  if (isNaN(num)) return '—';
-  return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatQuantity(value) {
-  const num = parseFloat(value);
-  if (isNaN(num)) return '—';
-  return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
-}
-
-function formatDateToBr(isoStr) {
-  if (!isoStr) return '';
-  const [y, m, d] = isoStr.split('-');
-  return `${d}/${m}/${y}`;
-}
-
-function parseBrToDate(brStr) {
-  if (!brStr || brStr.length !== 10) return '';
-  const [d, m, y] = brStr.split('/');
-  return `${y}-${m}-${d}`;
-}
-
-function handleDateMask(value) {
-  let v = value.replace(/\D/g, '');
-  if (v.length > 2) v = v.slice(0, 2) + '/' + v.slice(2);
-  if (v.length > 5) v = v.slice(0, 5) + '/' + v.slice(5, 9);
-  return v;
-}
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DatePicker } from "@/components/ui/date-picker";
+import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput, formatMoney, formatQuantity, getQuantityDecimals } from '@/lib/formatters';
 
 // Editable Metadata Component
 function AssetMetadataCard({ asset, onSave }) {
@@ -58,7 +30,7 @@ function AssetMetadataCard({ asset, onSave }) {
         sector: asset.sector || '',
         subsector: asset.subsector || '',
         segment: asset.segment || '',
-        maturity_date: formatDateToBr(asset.maturity_date) || '',
+        maturity_date: asset.maturity_date || '',
       });
     }
   }, [asset]);
@@ -67,21 +39,17 @@ function AssetMetadataCard({ asset, onSave }) {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    if (name === 'maturity_date') {
-      setFormData({ ...formData, [name]: handleDateMask(value) });
-    } else {
-      setFormData({ ...formData, [name]: value });
-    }
+    setFormData({ ...formData, [name]: value });
+  };
+
+  const handleDateChange = (val) => {
+    setFormData({ ...formData, maturity_date: val });
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const payload = { ...formData };
-      if (payload.maturity_date) {
-        payload.maturity_date = parseBrToDate(payload.maturity_date);
-      }
-      await onSave(payload);
+      await onSave({ ...formData });
       setEditing(false);
     } catch (err) {
       alert(err.message);
@@ -109,7 +77,7 @@ function AssetMetadataCard({ asset, onSave }) {
     fields.push({ name: 'segment', label: 'Segmento' });
   } else if (['Debênture', 'CRI', 'CRA', 'Tesouro Direto'].includes(c)) {
     if (c !== 'Tesouro Direto') fields.push({ name: 'isin', label: 'Código ISIN' });
-    fields.push({ name: 'maturity_date', label: 'Vencimento', type: 'text', placeholder: 'DD/MM/YYYY' });
+    fields.push({ name: 'maturity_date', label: 'Vencimento', type: 'date' });
   } else if (c === 'ETF') {
     fields.push({ name: 'cnpj', label: 'CNPJ' });
     fields.push({ name: 'isin', label: 'Código ISIN' });
@@ -119,6 +87,12 @@ function AssetMetadataCard({ asset, onSave }) {
   } else if (['Stock', 'REIT'].includes(c)) {
     fields.push({ name: 'isin', label: 'Código ISIN' });
   }
+
+  const formatDisplayDate = (isoStr) => {
+    if (!isoStr) return '—';
+    const [y, m, d] = isoStr.split('-');
+    return `${d}/${m}/${y}`;
+  };
 
   return (
     <Card>
@@ -143,17 +117,20 @@ function AssetMetadataCard({ asset, onSave }) {
             <div className="flex flex-col gap-1.5" key={f.name}>
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{f.label}</label>
               {editing ? (
-                <Input
-                  className="h-8 text-sm"
-                  type={f.type || 'text'}
-                  name={f.name}
-                  value={formData[f.name]}
-                  onChange={handleChange}
-                  placeholder={f.placeholder || ''}
-                />
+                f.type === 'date' ? (
+                  <DatePicker value={formData[f.name]} onChange={handleDateChange} />
+                ) : (
+                  <Input
+                    className="h-9 text-sm"
+                    name={f.name}
+                    value={formData[f.name]}
+                    onChange={handleChange}
+                    placeholder={f.placeholder || ''}
+                  />
+                )
               ) : (
-                <div className="text-sm font-medium py-1">
-                  {f.name === 'maturity_date' && asset[f.name] ? formatDateToBr(asset[f.name]) : (asset[f.name] || '—')}
+                <div className="text-sm font-medium py-1 h-9 flex items-center">
+                  {f.name === 'maturity_date' && asset[f.name] ? formatDisplayDate(asset[f.name]) : (asset[f.name] || '—')}
                 </div>
               )}
             </div>
@@ -165,14 +142,32 @@ function AssetMetadataCard({ asset, onSave }) {
 }
 
 // Correction Modal using Dialog
-function CorrectionModal({ event, open, onClose, onSuccess }) {
+function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
+  const EVENT_TYPES = [
+    'Compra', 'Venda', 'Desdobramento', 'Grupamento',
+    'Bonificação', 'Amortização', 'Cisão',
+    'Resgate Antecipado', 'Resgate Vencimento',
+  ];
+
+  const VALUE_IGNORED = ['Desdobramento', 'Grupamento'];
+
   const [eventType, setEventType] = useState(event.event_type);
   const [eventDate, setEventDate] = useState(event.event_date);
-  const [quantity, setQuantity] = useState(event.quantity);
-  const [eventValue, setEventValue] = useState(event.event_value);
+  
+  // Format the quantity to local format (replace dot with comma) if it comes with dot
+  const initialQty = event.quantity ? event.quantity.replace('.', ',') : '';
+  const initialVal = event.event_value ? event.event_value.replace('.', ',') : '';
+  
+  const [quantity, setQuantity] = useState(initialQty);
+  const [eventValue, setEventValue] = useState(initialVal);
   const [notes, setNotes] = useState(event.notes || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  const normalizeValue = (val, evType) => {
+    if (VALUE_IGNORED.includes(evType)) return '0';
+    return currencyToBackend(val) || '0';
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -183,7 +178,7 @@ function CorrectionModal({ event, open, onClose, onSuccess }) {
         event_type: eventType,
         event_date: eventDate,
         quantity: quantity.replace(',', '.'),
-        event_value: eventValue.replace(',', '.'),
+        event_value: normalizeValue(eventValue, eventType),
         notes: notes || null,
       });
       onSuccess();
@@ -193,14 +188,6 @@ function CorrectionModal({ event, open, onClose, onSuccess }) {
       setSaving(false);
     }
   };
-
-  const EVENT_TYPES = [
-    'Compra', 'Venda', 'Desdobramento', 'Grupamento',
-    'Bonificação', 'Amortização', 'Cisão',
-    'Resgate Antecipado', 'Resgate Vencimento',
-  ];
-
-  const selectClassName = "flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -216,29 +203,44 @@ function CorrectionModal({ event, open, onClose, onSuccess }) {
 
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground uppercase">Tipo de Evento</label>
-            <select className={selectClassName} value={eventType} onChange={(e) => setEventType(e.target.value)}>
-              {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <Select value={eventType} onValueChange={setEventType}>
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EVENT_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-xs font-medium text-muted-foreground uppercase">Data</label>
-              <Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} required />
+              <DatePicker value={eventDate} onChange={setEventDate} />
             </div>
             <div className="space-y-2">
               <label className="text-xs font-medium text-muted-foreground uppercase">Quantidade</label>
-              <Input value={quantity} onChange={(e) => setQuantity(e.target.value)} required />
+              <Input 
+                value={quantity} 
+                onChange={(e) => setQuantity(sanitizeQuantityInput(e.target.value, assetClass))} 
+                required 
+              />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase">Valor Total</label>
-            <Input value={eventValue} onChange={(e) => setEventValue(e.target.value)} required />
-          </div>
+          {!VALUE_IGNORED.includes(eventType) && (
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase">Valor Total</label>
+              <Input 
+                value={eventValue} 
+                onChange={(e) => setEventValue(applyCurrencyMask(e.target.value))} 
+                required 
+              />
+            </div>
+          )}
 
           <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase">Notas</label>
+            <label className="text-xs font-medium text-muted-foreground uppercase">Notas (Opcional)</label>
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
 
@@ -269,6 +271,9 @@ export default function AssetDetail() {
   const [error, setError] = useState('');
   const [selectedEvents, setSelectedEvents] = useState(new Set());
 
+  // Alert Dialog State
+  const [alertTarget, setAlertTarget] = useState(null); // { type, payload, title, desc, actionLabel, actionFn, variant }
+
   const load = async () => {
     setLoading(true);
     try {
@@ -296,54 +301,86 @@ export default function AssetDetail() {
     if (activePortfolioId) load();
   }, [assetId, activePortfolioId]);
 
-  const handleDelete = async (eventId) => {
-    if (!confirm('Confirma a exclusão deste evento?')) return;
-    setError('');
-    try {
-      await eventsApi.delete(eventId);
-      load();
-    } catch (err) {
-      setError(err.message);
-    }
+  const displayError = (msg) => {
+    setError(msg);
+    setTimeout(() => setError(''), 5000);
   };
 
-  const handleBulkDelete = async () => {
-    if (!confirm(`Confirma a exclusão de ${selectedEvents.size} evento(s)?`)) return;
+  const executeAlertAction = async () => {
+    if (!alertTarget || !alertTarget.actionFn) return;
     setError('');
     try {
-      await eventsApi.bulkDelete(Array.from(selectedEvents));
-      setSelectedEvents(new Set());
-      load();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const handleResolveDuplicate = async (eventId, confirmDuplicate) => {
-    if (!confirm(confirmDuplicate ? 'Confirmar este evento como válido e remover alerta?' : 'Ignorar e excluir este evento duplicado?')) return;
-    setError('');
-    try {
-      if (confirmDuplicate) {
-        await eventsApi.resolveDuplicate(eventId);
+      await alertTarget.actionFn(alertTarget.payload);
+      if (alertTarget.type === 'asset-delete') {
+        navigate('/');
       } else {
-        await eventsApi.resolveDuplicate(eventId);
-        await eventsApi.delete(eventId);
+        if (alertTarget.type === 'bulk-delete') {
+          setSelectedEvents(new Set());
+        }
+        load();
       }
-      load();
     } catch (err) {
-      setError(err.message);
+      displayError(err.message);
+    } finally {
+      setAlertTarget(null);
     }
   };
 
-  const handleDeleteAsset = async () => {
-    if (!confirm(`Tem certeza que deseja excluir completamente o ativo ${asset.current_ticker} do banco de dados?`)) return;
-    setError('');
-    try {
-      await assetsApi.delete(asset.id);
-      navigate('/');
-    } catch (err) {
-      setError(err.message);
-    }
+  const confirmDelete = (eventId) => {
+    setAlertTarget({
+      type: 'individual-delete',
+      payload: eventId,
+      title: 'Excluir evento',
+      desc: 'Tem certeza que deseja excluir este evento? Esta ação criará um cancelamento lógico.',
+      actionLabel: 'Excluir',
+      variant: 'destructive',
+      actionFn: (id) => eventsApi.delete(id)
+    });
+  };
+
+  const confirmBulkDelete = () => {
+    setAlertTarget({
+      type: 'bulk-delete',
+      payload: Array.from(selectedEvents),
+      title: 'Excluir eventos em lote',
+      desc: `Confirma a exclusão de ${selectedEvents.size} evento(s) selecionado(s)?`,
+      actionLabel: 'Excluir',
+      variant: 'destructive',
+      actionFn: (ids) => eventsApi.bulkDelete(ids)
+    });
+  };
+
+  const confirmDeleteAsset = () => {
+    setAlertTarget({
+      type: 'asset-delete',
+      payload: asset.id,
+      title: 'Excluir Ativo Completamente',
+      desc: `Tem certeza que deseja excluir completamente o ativo ${asset.current_ticker} do banco de dados? Isso apagará todos os registros vinculados.`,
+      actionLabel: 'Excluir Completamente',
+      variant: 'destructive',
+      actionFn: (id) => assetsApi.delete(id)
+    });
+  };
+
+  const confirmResolveDuplicate = (eventId, confirm) => {
+    setAlertTarget({
+      type: 'duplicate',
+      payload: { eventId, confirm },
+      title: confirm ? 'Confirmar Evento Válido' : 'Excluir Evento Duplicado',
+      desc: confirm 
+        ? 'Ao confirmar, este evento será marcado como válido e o alerta será removido.' 
+        : 'Tem certeza que deseja excluir este evento considerado duplicado?',
+      actionLabel: confirm ? 'Confirmar Evento' : 'Excluir',
+      variant: confirm ? 'default' : 'destructive',
+      actionFn: async ({ eventId, confirm }) => {
+        if (confirm) {
+          await eventsApi.resolveDuplicate(eventId);
+        } else {
+          await eventsApi.resolveDuplicate(eventId);
+          await eventsApi.delete(eventId);
+        }
+      }
+    });
   };
 
   const toggleSelect = (id) => {
@@ -353,8 +390,14 @@ export default function AssetDetail() {
     setSelectedEvents(next);
   };
 
-  const displayMoney = (val) => hideValues ? '•••••' : formatMoney(val);
-  const displayQuantity = (val) => hideValues ? '•••••' : formatQuantity(val);
+  const displayMoney = (val) => formatMoney(val, hideValues);
+  const displayQuantity = (val) => formatQuantity(val, asset?.asset_class, hideValues);
+
+  const formatDisplayDate = (isoStr) => {
+    if (!isoStr) return '';
+    const [y, m, d] = isoStr.split('-');
+    return `${d}/${m}/${y}`;
+  };
 
   if (loading) {
     return (
@@ -407,7 +450,7 @@ export default function AssetDetail() {
       </div>
 
       {error && (
-        <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm">
+        <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm transition-all">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
           <p>{error}</p>
         </div>
@@ -469,18 +512,18 @@ export default function AssetDetail() {
                 <Button variant="outline" size="sm" onClick={() => setSelectedEvents(new Set())}>
                   Limpar Seleção
                 </Button>
-                <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+                <Button variant="destructive" size="sm" onClick={confirmBulkDelete}>
                   <Trash2 className="w-4 h-4" /> Excluir ({selectedEvents.size})
                 </Button>
               </>
             )}
             {validEvents.length === 0 && eventList.length > 0 && (
-               <Button variant="destructive" size="sm" onClick={handleDeleteAsset}>
+               <Button variant="destructive" size="sm" onClick={confirmDeleteAsset}>
                  <AlertCircle className="w-4 h-4" /> Excluir Ativo Completamente
                </Button>
             )}
             {eventList.length === 0 && (
-               <Button variant="destructive" size="sm" onClick={handleDeleteAsset}>
+               <Button variant="destructive" size="sm" onClick={confirmDeleteAsset}>
                  <AlertCircle className="w-4 h-4" /> Excluir Ativo
                </Button>
             )}
@@ -531,7 +574,7 @@ export default function AssetDetail() {
                           />
                         )}
                       </TableCell>
-                      <TableCell className="font-mono text-sm">{formatDateToBr(ev.event_date)}</TableCell>
+                      <TableCell className="font-mono text-sm">{formatDisplayDate(ev.event_date)}</TableCell>
                       <TableCell>
                         {isCancelled ? (
                           <Badge variant="destructive" className="line-through">{ev.event_type}</Badge>
@@ -545,9 +588,9 @@ export default function AssetDetail() {
                         )}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">{displayQuantity(ev.quantity)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{displayMoney(ev.event_value)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">R$ {displayMoney(ev.event_value)}</TableCell>
                       <TableCell className={`text-right font-mono text-sm ${!hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) > 0 ? 'text-emerald-500' : !hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) < 0 ? 'text-red-500' : ''}`}>
-                        {ev.realized_event_result ? displayMoney(ev.realized_event_result) : '—'}
+                        {ev.realized_event_result ? `R$ ${displayMoney(ev.realized_event_result)}` : '—'}
                       </TableCell>
                       <TableCell>
                         {isCancelled && <span className="text-destructive text-xs font-medium">Cancelado</span>}
@@ -560,10 +603,10 @@ export default function AssetDetail() {
                           <div className="flex justify-end gap-1">
                             {ev.duplicate_flag ? (
                               <>
-                                <Button size="xs" onClick={() => handleResolveDuplicate(ev.id, true)}>
+                                <Button size="xs" onClick={() => confirmResolveDuplicate(ev.id, true)}>
                                   <Check className="w-3 h-3" /> Confirmar
                                 </Button>
-                                <Button size="xs" variant="destructive" onClick={() => handleResolveDuplicate(ev.id, false)}>
+                                <Button size="xs" variant="destructive" onClick={() => confirmResolveDuplicate(ev.id, false)}>
                                   <X className="w-3 h-3" /> Ignorar
                                 </Button>
                               </>
@@ -572,7 +615,7 @@ export default function AssetDetail() {
                                 <Button size="icon-sm" variant="ghost" onClick={() => setEditingEvent(ev)}>
                                   <Edit2 className="w-3.5 h-3.5" />
                                 </Button>
-                                <Button size="icon-sm" variant="ghost" className="text-destructive" onClick={() => handleDelete(ev.id)}>
+                                <Button size="icon-sm" variant="ghost" className="text-destructive" onClick={() => confirmDelete(ev.id)}>
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </Button>
                               </>
@@ -608,11 +651,30 @@ export default function AssetDetail() {
       {editingEvent && (
         <CorrectionModal
           event={editingEvent}
+          assetClass={asset.asset_class}
           open={!!editingEvent}
           onClose={() => setEditingEvent(null)}
           onSuccess={() => { setEditingEvent(null); load(); }}
         />
       )}
+
+      {/* Global Alert Dialog */}
+      <AlertDialog open={!!alertTarget} onOpenChange={(open) => !open && setAlertTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{alertTarget?.title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {alertTarget?.desc}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={executeAlertAction} className={alertTarget?.variant === 'destructive' ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''}>
+              {alertTarget?.actionLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

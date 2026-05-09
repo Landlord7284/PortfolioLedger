@@ -161,7 +161,7 @@ def resolve_duplicate(event_id: int):
         # Check if asset has other duplicates
         asset_id = ev["asset_id"]
         other_dup = conn.execute(
-            "SELECT 1 FROM events WHERE asset_id = ? AND duplicate_flag = 1 LIMIT 1",
+            "SELECT 1 FROM events WHERE asset_id = ? AND duplicate_flag = 1 AND is_cancelled = 0 LIMIT 1",
             (asset_id,)
         ).fetchone()
         if not other_dup:
