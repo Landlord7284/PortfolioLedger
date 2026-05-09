@@ -9,4 +9,5 @@ dist/
 build/
 .env
 .venv/
+backend/ledger.db
 
