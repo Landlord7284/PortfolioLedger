@@ -16,6 +16,25 @@ function formatQuantity(value) {
   return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
 }
 
+function formatDateToBr(isoStr) {
+  if (!isoStr) return '';
+  const [y, m, d] = isoStr.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function parseBrToDate(brStr) {
+  if (!brStr || brStr.length !== 10) return '';
+  const [d, m, y] = brStr.split('/');
+  return `${y}-${m}-${d}`;
+}
+
+function handleDateMask(value) {
+  let v = value.replace(/\D/g, '');
+  if (v.length > 2) v = v.slice(0, 2) + '/' + v.slice(2);
+  if (v.length > 5) v = v.slice(0, 5) + '/' + v.slice(5, 9);
+  return v;
+}
+
 // Editable Metadata Component
 function AssetMetadataCard({ asset, onSave }) {
   const [editing, setEditing] = useState(false);
@@ -31,19 +50,30 @@ function AssetMetadataCard({ asset, onSave }) {
         sector: asset.sector || '',
         subsector: asset.subsector || '',
         segment: asset.segment || '',
-        maturity_date: asset.maturity_date || '',
+        maturity_date: formatDateToBr(asset.maturity_date) || '',
       });
     }
   }, [asset]);
 
   if (!asset) return null;
 
-  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    if (name === 'maturity_date') {
+      setFormData({ ...formData, [name]: handleDateMask(value) });
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSave(formData);
+      const payload = { ...formData };
+      if (payload.maturity_date) {
+        payload.maturity_date = parseBrToDate(payload.maturity_date);
+      }
+      await onSave(payload);
       setEditing(false);
     } catch (err) {
       alert(err.message);
@@ -54,16 +84,24 @@ function AssetMetadataCard({ asset, onSave }) {
 
   const fields = [];
   const c = asset.asset_class;
-  fields.push({ name: 'name', label: 'Nome da Empresa/Emissor' });
+  
+  let nameLabel = 'Nome da Empresa/Emissor';
+  if (['FII', 'FI-INFRA', 'ETF'].includes(c)) {
+    nameLabel = 'Nome do Fundo';
+  } else if (c === 'Tesouro Direto') {
+    nameLabel = 'Nome do Título';
+  }
+
+  fields.push({ name: 'name', label: nameLabel });
   
   if (['Ação', 'BDR'].includes(c)) {
     fields.push({ name: 'cnpj', label: 'CNPJ' });
     fields.push({ name: 'sector', label: 'Setor' });
     fields.push({ name: 'subsector', label: 'Subsetor' });
     fields.push({ name: 'segment', label: 'Segmento' });
-  } else if (['Debênture', 'CRI', 'CRA'].includes(c)) {
-    fields.push({ name: 'isin', label: 'Código ISIN' });
-    fields.push({ name: 'maturity_date', label: 'Vencimento', type: 'date' });
+  } else if (['Debênture', 'CRI', 'CRA', 'Tesouro Direto'].includes(c)) {
+    if (c !== 'Tesouro Direto') fields.push({ name: 'isin', label: 'Código ISIN' });
+    fields.push({ name: 'maturity_date', label: 'Vencimento', type: 'text', placeholder: 'DD/MM/YYYY' });
   } else if (c === 'ETF') {
     fields.push({ name: 'cnpj', label: 'CNPJ' });
     fields.push({ name: 'isin', label: 'Código ISIN' });
@@ -72,10 +110,6 @@ function AssetMetadataCard({ asset, onSave }) {
     fields.push({ name: 'segment', label: 'Segmento' });
   } else if (['Stock', 'REIT'].includes(c)) {
     fields.push({ name: 'isin', label: 'Código ISIN' });
-  }
-
-  if (fields.length === 1 && fields[0].name === 'name') {
-    // Basic fallback for other classes
   }
 
   return (
@@ -97,18 +131,19 @@ function AssetMetadataCard({ asset, onSave }) {
           <div className="form-group" key={f.name}>
             <label className="form-label">{f.label}</label>
             {editing ? (
-              <input
-                className="form-input"
-                type={f.type || 'text'}
-                name={f.name}
-                value={formData[f.name]}
-                onChange={handleChange}
-              />
-            ) : (
-              <div style={{ color: 'var(--text-primary)', padding: '8px 0' }}>
-                {asset[f.name] || '—'}
-              </div>
-            )}
+                <input
+                  className="form-input"
+                  type={f.type || 'text'}
+                  name={f.name}
+                  value={formData[f.name]}
+                  onChange={handleChange}
+                  placeholder={f.placeholder || ''}
+                />
+              ) : (
+                <div style={{ color: 'var(--text-primary)', padding: '8px 0' }}>
+                  {f.name === 'maturity_date' && asset[f.name] ? formatDateToBr(asset[f.name]) : (asset[f.name] || '—')}
+                </div>
+              )}
           </div>
         ))}
       </div>
@@ -214,12 +249,6 @@ export default function AssetDetail() {
   const [error, setError] = useState('');
   const [selectedEvents, setSelectedEvents] = useState(new Set());
 
-  const formatDateToBr = (isoStr) => {
-    if (!isoStr) return '';
-    const [y, m, d] = isoStr.split('-');
-    return `${d}/${m}/${y}`;
-  };
-
   const load = async () => {
     setLoading(true);
     try {
@@ -277,6 +306,7 @@ export default function AssetDetail() {
       if (confirmDuplicate) {
         await eventsApi.resolveDuplicate(eventId);
       } else {
+        await eventsApi.resolveDuplicate(eventId);
         await eventsApi.delete(eventId);
       }
       load();

@@ -64,7 +64,8 @@ def update_portfolio(
 
 
 def delete_portfolio(conn: sqlite3.Connection, portfolio_id: int) -> bool:
-    """Delete a portfolio and cascade delete its events."""
+    """Delete a portfolio and cascade delete its events and positions."""
+    conn.execute("DELETE FROM positions WHERE portfolio_id = ?", (portfolio_id,))
     conn.execute("DELETE FROM events WHERE portfolio_id = ?", (portfolio_id,))
     cur = conn.execute("DELETE FROM portfolios WHERE id = ?", (portfolio_id,))
     return cur.rowcount > 0
