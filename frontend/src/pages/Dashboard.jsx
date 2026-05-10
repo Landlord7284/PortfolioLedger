@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
 
 export default function Dashboard() {
@@ -45,6 +46,7 @@ export default function Dashboard() {
       setPositionList(data);
     } catch (err) {
       console.error('Failed to load positions:', err);
+      toast.error(err.message || 'Falha ao carregar posições.');
     } finally {
       setLoading(false);
     }

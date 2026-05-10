@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { toast } from 'sonner';
 
 export default function ImportModal({ portfolioId, onClose, onSuccess }) {
   const [file, setFile] = useState(null);
@@ -21,10 +22,18 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
       const res = await importXlsx(portfolioId, file);
       setResult(res);
       if (res.imported > 0) {
+        toast.success(`Importação concluída: ${res.imported} evento(s) importado(s).`);
+      } else if (res.duplicates > 0 || res.skipped > 0) {
+        toast.warning('Importação concluída sem novos eventos.');
+      } else {
+        toast.info('Importação concluída.');
+      }
+      if (res.imported > 0) {
         onSuccess?.();
       }
     } catch (err) {
       setError(err.message);
+      toast.error(err.message || 'Falha na importação da planilha.');
     } finally {
       setImporting(false);
     }

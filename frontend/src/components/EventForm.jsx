@@ -14,6 +14,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
+import { toast } from 'sonner';
 import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput } from '@/lib/formatters';
 
 const EVENT_TYPES = [
@@ -122,7 +123,10 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   ]);
 
   useEffect(() => {
-    assetsApi.list().then(setAssetList).catch(console.error);
+    assetsApi.list().then(setAssetList).catch((err) => {
+      console.error(err);
+      toast.error(err.message || 'Falha ao carregar lista de ativos.');
+    });
   }, []);
 
   const assetOptions = assetList.map((a) => ({
@@ -204,6 +208,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
           };
         });
         await eventsApi.bulkCreate({ events: payload });
+        toast.success(`${payload.length} evento(s) lançado(s) com sucesso.`);
       } else {
         let targetAssetId = selectedAssetId;
 
@@ -232,11 +237,13 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
           event_value: normalizeValue(eventValue, eventType),
           notes: notes || null,
         });
+        toast.success('Evento lançado com sucesso.');
       }
 
       onSuccess?.();
     } catch (err) {
       setError(err.message);
+      toast.error(err.message || 'Falha ao lançar evento.');
     } finally {
       setCreating(false);
     }

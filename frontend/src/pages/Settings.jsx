@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { toast } from 'sonner';
 
 export default function Settings() {
   const { portfolioList, refreshPortfolios, activePortfolioId, setActivePortfolioId } = useContext(AppContext);
@@ -35,8 +36,10 @@ export default function Settings() {
       if (!activePortfolioId) {
         setActivePortfolioId(p.id);
       }
+      toast.success('Carteira criada com sucesso.');
     } catch (err) {
       setError(err.message);
+      toast.error(err.message || 'Falha ao criar carteira.');
     } finally {
       setCreating(false);
     }
@@ -46,8 +49,10 @@ export default function Settings() {
     try {
       await portfolioApi.update(id, { consolidated: !current });
       await refreshPortfolios();
+      toast.success('Status de consolidação atualizado.');
     } catch (err) {
       setError(err.message);
+      toast.error(err.message || 'Falha ao atualizar carteira.');
     }
   };
 
@@ -57,8 +62,10 @@ export default function Settings() {
       await portfolioApi.update(id, { name: editName.trim() });
       setEditingId(null);
       await refreshPortfolios();
+      toast.success('Nome da carteira atualizado.');
     } catch (err) {
       setError(err.message);
+      toast.error(err.message || 'Falha ao renomear carteira.');
     }
   };
 
@@ -77,8 +84,10 @@ export default function Settings() {
       }
       setPortfolioToDelete(null);
       await refreshPortfolios();
+      toast.success('Carteira excluída com sucesso.');
     } catch (err) {
       setError(err.message);
+      toast.error(err.message || 'Falha ao excluir carteira.');
     } finally {
       setDeleting(false);
     }

@@ -16,6 +16,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { toast } from 'sonner';
 import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput, formatMoney, formatQuantity, getQuantityDecimals } from '@/lib/formatters';
 
 // Editable Metadata Component
@@ -57,8 +58,10 @@ function AssetMetadataCard({ asset, onSave }) {
     try {
       await onSave({ ...formData });
       setEditing(false);
+      toast.success('Informações cadastrais atualizadas.');
     } catch (err) {
       setSaveError(err.message);
+      toast.error(err.message || 'Falha ao salvar informações cadastrais.');
     } finally {
       setSaving(false);
     }
@@ -192,9 +195,11 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
         event_value: normalizeValue(eventValue, eventType),
         notes: notes || null,
       });
+      toast.success('Evento corrigido com sucesso.');
       onSuccess();
     } catch (err) {
       setError(err.message);
+      toast.error(err.message || 'Falha ao corrigir evento.');
     } finally {
       setSaving(false);
     }
@@ -307,6 +312,7 @@ export default function AssetDetail() {
       }
     } catch (err) {
       console.error(err);
+      toast.error(err.message || 'Falha ao carregar dados do ativo.');
     } finally {
       setLoading(false);
     }
@@ -318,6 +324,7 @@ export default function AssetDetail() {
 
   const displayError = (msg) => {
     setError(msg);
+    toast.error(msg);
     setTimeout(() => setError(''), 5000);
   };
 
@@ -326,6 +333,16 @@ export default function AssetDetail() {
     setError('');
     try {
       await alertTarget.actionFn(alertTarget.payload);
+      if (alertTarget.type === 'asset-delete') {
+        toast.success('Ativo excluído com sucesso.');
+      } else if (alertTarget.type === 'bulk-delete') {
+        toast.success(`${selectedEvents.size} evento(s) excluído(s).`);
+      } else if (alertTarget.type === 'individual-delete') {
+        toast.success('Evento excluído com sucesso.');
+      } else if (alertTarget.type === 'duplicate') {
+        toast.success(alertTarget.payload.confirm ? 'Evento duplicado confirmado como válido.' : 'Evento duplicado excluído.');
+      }
+
       if (alertTarget.type === 'asset-delete') {
         navigate('/');
       } else {
