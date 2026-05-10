@@ -11,6 +11,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Calendar } from "@/components/ui/calendar";
 import { DatePicker } from "@/components/ui/date-picker";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput } from '@/lib/formatters';
 
@@ -245,9 +247,9 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
       {/* Mode toggle */}
       {!isNewAsset && (
         <div className="flex items-center justify-end gap-2">
-          <label htmlFor="bulk-mode" className="text-sm text-muted-foreground cursor-pointer">
+          <Label htmlFor="bulk-mode" className="text-sm text-muted-foreground cursor-pointer font-normal">
             Adição em massa
-          </label>
+          </Label>
           <Switch
             id="bulk-mode"
             checked={isBulkMode}
@@ -257,18 +259,18 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
       )}
 
       {error && (
-        <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm">
+        <Alert variant="destructive">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-          <p>{error}</p>
-        </div>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {isBulkMode ? (
         <div className="space-y-3">
           <div className="flex items-center justify-end gap-2 mb-2">
-            <label htmlFor="same-date" className="text-xs font-medium text-muted-foreground cursor-pointer">
+            <Label htmlFor="same-date" className="text-xs font-medium text-muted-foreground cursor-pointer">
               Única Data
-            </label>
+            </Label>
             <Switch
               id="same-date"
               checked={bulkSameDate}
@@ -357,7 +359,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
           {!assetId && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Ativo</label>
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Ativo</Label>
                 <Button
                   type="button"
                   variant="outline"
@@ -371,11 +373,11 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
               {isNewAsset ? (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 border border-border rounded-lg bg-muted/30">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground uppercase">Ticker</label>
+                    <Label className="text-xs font-medium text-muted-foreground uppercase">Ticker</Label>
                     <Input value={newTicker} onChange={(e) => setNewTicker(e.target.value.toUpperCase())} placeholder="Ex: WEGE3" required />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground uppercase">Classe</label>
+                    <Label className="text-xs font-medium text-muted-foreground uppercase">Classe</Label>
                     <Select value={newClass} onValueChange={(val) => { setNewClass(val); setQuantity(''); }}>
                       <SelectTrigger className="h-9">
                         <SelectValue />
@@ -387,7 +389,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
                   </div>
                   {CLASSES_WITH_MATURITY.includes(newClass) && (
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground uppercase">Data de Vencimento</label>
+                      <Label className="text-xs font-medium text-muted-foreground uppercase">Data de Vencimento</Label>
                       <DatePicker value={newMaturityDate} onChange={setNewMaturityDate} />
                     </div>
                   )}
@@ -404,7 +406,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Tipo de Evento</label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Tipo de Evento</Label>
               <Select value={eventType} onValueChange={setEventType}>
                 <SelectTrigger className="h-9">
                   <SelectValue />
@@ -415,14 +417,14 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
               </Select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Data</label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Data</Label>
               <DatePicker value={eventDate} onChange={setEventDate} />
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Quantidade</label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Quantidade</Label>
               <Input 
                 value={quantity} 
                 onChange={(e) => setQuantity(sanitizeQuantityInput(e.target.value, isNewAsset ? newClass : getAssetClass(selectedAssetId)))} 
@@ -432,7 +434,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             </div>
             {!VALUE_IGNORED.includes(eventType) && (
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Total do Evento</label>
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Total do Evento</Label>
                 <Input 
                   value={eventValue} 
                   onChange={(e) => setEventValue(applyCurrencyMask(e.target.value))} 
@@ -444,7 +446,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Observações (Opcional)</label>
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Observações (Opcional)</Label>
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ex: Referente a proventos..." />
           </div>
         </div>

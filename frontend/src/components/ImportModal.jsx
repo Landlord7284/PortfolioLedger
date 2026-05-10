@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function ImportModal({ portfolioId, onClose, onSuccess }) {
   const [file, setFile] = useState(null);
@@ -53,16 +54,16 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
               className="cursor-pointer"
             />
 
-            <div className="p-3 bg-muted rounded-lg flex items-start gap-2 text-sm text-muted-foreground">
+            <Alert>
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              <p>Eventos já existentes serão ignorados e marcados com flag de duplicação para revisão.</p>
-            </div>
+              <AlertDescription>Eventos já existentes serão ignorados e marcados com flag de duplicação para revisão.</AlertDescription>
+            </Alert>
 
             {error && (
-              <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm">
+              <Alert variant="destructive">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <p>{error}</p>
-              </div>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
             )}
 
             <DialogFooter>
@@ -80,10 +81,10 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-lg flex items-center gap-2 text-sm font-medium">
+            <Alert className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="w-5 h-5 shrink-0" />
-              Importação concluída!
-            </div>
+              <AlertTitle className="mb-0">Importação concluída!</AlertTitle>
+            </Alert>
 
             <div className="grid grid-cols-2 gap-3">
               <Card>
@@ -113,9 +114,11 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
             </div>
 
             {result.duplicates > 0 && (
-              <div className="p-3 bg-muted rounded-lg text-sm text-muted-foreground">
-                <strong>{result.duplicates} eventos duplicados</strong> foram ignorados, mas adicionamos uma flag nos ativos/eventos correspondentes para sua revisão.
-              </div>
+              <Alert>
+                <AlertDescription>
+                  <strong>{result.duplicates} eventos duplicados</strong> foram ignorados, mas adicionamos uma flag nos ativos/eventos correspondentes para sua revisão.
+                </AlertDescription>
+              </Alert>
             )}
 
             {result.errors.length > 0 && (

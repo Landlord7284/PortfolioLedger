@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { formatMoney, formatQuantity } from '@/lib/formatters';
 
 export default function Dashboard() {
@@ -186,9 +187,9 @@ export default function Dashboard() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <label htmlFor="show-redeemed" className="text-sm text-muted-foreground cursor-pointer">
+          <Label htmlFor="show-redeemed" className="text-sm text-muted-foreground cursor-pointer font-normal">
             Exibir resgatados
-          </label>
+          </Label>
           <Switch
             id="show-redeemed"
             checked={showRedeemed}

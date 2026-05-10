@@ -13,6 +13,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput, formatMoney, formatQuantity, getQuantityDecimals } from '@/lib/formatters';
 
 // Editable Metadata Component
@@ -115,7 +118,7 @@ function AssetMetadataCard({ asset, onSave }) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {fields.map(f => (
             <div className="flex flex-col gap-1.5" key={f.name}>
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{f.label}</label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{f.label}</Label>
               {editing ? (
                 f.type === 'date' ? (
                   <DatePicker value={formData[f.name]} onChange={handleDateChange} />
@@ -199,10 +202,14 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {error && <div className="p-3 bg-destructive/10 text-destructive rounded-lg text-sm">{error}</div>}
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
           <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase">Tipo de Evento</label>
+            <Label className="text-xs font-medium text-muted-foreground uppercase">Tipo de Evento</Label>
             <Select value={eventType} onValueChange={setEventType}>
               <SelectTrigger className="h-9">
                 <SelectValue />
@@ -215,11 +222,11 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase">Data</label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase">Data</Label>
               <DatePicker value={eventDate} onChange={setEventDate} />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase">Quantidade</label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase">Quantidade</Label>
               <Input 
                 value={quantity} 
                 onChange={(e) => setQuantity(sanitizeQuantityInput(e.target.value, assetClass))} 
@@ -230,7 +237,7 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
 
           {!VALUE_IGNORED.includes(eventType) && (
             <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase">Valor Total</label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase">Valor Total</Label>
               <Input 
                 value={eventValue} 
                 onChange={(e) => setEventValue(applyCurrencyMask(e.target.value))} 
@@ -240,7 +247,7 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
           )}
 
           <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase">Notas (Opcional)</label>
+            <Label className="text-xs font-medium text-muted-foreground uppercase">Notas (Opcional)</Label>
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
 
@@ -450,10 +457,10 @@ export default function AssetDetail() {
       </div>
 
       {error && (
-        <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm transition-all">
+        <Alert variant="destructive" className="transition-all">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <p>{error}</p>
-        </div>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       <AssetMetadataCard
@@ -540,10 +547,10 @@ export default function AssetDetail() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10 text-center">
-                    <input
-                      type="checkbox"
-                      className="rounded"
-                      onChange={(e) => setSelectedEvents(e.target.checked ? new Set(validEvents.map(ev => ev.id)) : new Set())}
+                    <Checkbox
+                      aria-label="Selecionar todos os eventos"
+                      className="mx-auto"
+                      onCheckedChange={(checked) => setSelectedEvents(checked === true ? new Set(validEvents.map(ev => ev.id)) : new Set())}
                       checked={validEvents.length > 0 && selectedEvents.size === validEvents.length}
                     />
                   </TableHead>
@@ -566,11 +573,11 @@ export default function AssetDetail() {
                     <TableRow key={ev.id} className={!isInteractive ? 'opacity-50' : ''}>
                       <TableCell className="text-center">
                         {isInteractive && (
-                          <input
-                            type="checkbox"
-                            className="rounded"
+                          <Checkbox
+                            aria-label={`Selecionar evento ${ev.id}`}
+                            className="mx-auto"
                             checked={selectedEvents.has(ev.id)}
-                            onChange={() => toggleSelect(ev.id)}
+                            onCheckedChange={() => toggleSelect(ev.id)}
                           />
                         )}
                       </TableCell>

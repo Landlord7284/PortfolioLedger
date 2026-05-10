@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function Settings() {
   const { portfolioList, refreshPortfolios, activePortfolioId, setActivePortfolioId } = useContext(AppContext);
@@ -91,10 +92,10 @@ export default function Settings() {
       </div>
 
       {error && (
-        <div className="p-3 bg-destructive/10 text-destructive rounded-lg flex items-start gap-2 text-sm">
+        <Alert variant="destructive">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-          <p>{error}</p>
-        </div>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {/* Create form */}
