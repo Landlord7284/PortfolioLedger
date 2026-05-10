@@ -23,6 +23,7 @@ function AssetMetadataCard({ asset, onSave }) {
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState({});
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
     if (asset) {
@@ -35,6 +36,7 @@ function AssetMetadataCard({ asset, onSave }) {
         segment: asset.segment || '',
         maturity_date: asset.maturity_date || '',
       });
+      setSaveError('');
     }
   }, [asset]);
 
@@ -51,11 +53,12 @@ function AssetMetadataCard({ asset, onSave }) {
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveError('');
     try {
       await onSave({ ...formData });
       setEditing(false);
     } catch (err) {
-      alert(err.message);
+      setSaveError(err.message);
     } finally {
       setSaving(false);
     }
@@ -107,7 +110,7 @@ function AssetMetadataCard({ asset, onSave }) {
           </Button>
         ) : (
           <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancelar</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setSaveError(''); }}>Cancelar</Button>
             <Button size="sm" onClick={handleSave} disabled={saving}>
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salvar'}
             </Button>
@@ -115,6 +118,11 @@ function AssetMetadataCard({ asset, onSave }) {
         )}
       </CardHeader>
       <CardContent className="pt-4">
+        {saveError && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertDescription>{saveError}</AlertDescription>
+          </Alert>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {fields.map(f => (
             <div className="flex flex-col gap-1.5" key={f.name}>
