@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS asset_match_reviews (
     event_date          TEXT,
     candidate_asset_ids TEXT,
     reason              TEXT,
+    operation_payload   TEXT,
     status              TEXT    NOT NULL DEFAULT 'pending',
     created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
     resolved_at         TEXT
@@ -169,6 +170,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "assets", "market", "market TEXT NOT NULL DEFAULT 'BR'")
     _add_column_if_missing(conn, "assets", "merged_into_asset_id", "merged_into_asset_id INTEGER REFERENCES assets(id)")
     _add_column_if_missing(conn, "assets", "merged_at", "merged_at TEXT")
+    _add_column_if_missing(conn, "asset_match_reviews", "operation_payload", "operation_payload TEXT")
 
     conn.execute(
         """

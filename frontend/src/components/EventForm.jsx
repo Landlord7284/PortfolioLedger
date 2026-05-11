@@ -1,7 +1,7 @@
 import { useState, useEffect, useContext } from 'react';
 import { AppContext } from '../App';
 import { events as eventsApi, assets as assetsApi } from '../api/client';
-import { Plus, Trash2, ArrowLeft, Loader2, AlertTriangle, Check, ChevronsUpDown, CalendarIcon } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, Loader2, AlertTriangle, Check, ChevronsUpDown } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,7 +9,6 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Calendar } from "@/components/ui/calendar";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -220,6 +219,11 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             market: newClass === 'ETF' ? newMarket : undefined,
             maturity_date: CLASSES_WITH_MATURITY.includes(newClass) ? (newMaturityDate || null) : null,
             event_date: eventDate,
+            portfolio_id: activePortfolioId,
+            event_type: eventType,
+            quantity: normalizeQuantity(quantity),
+            event_value: normalizeValue(eventValue, eventType),
+            notes: notes || null,
             source: 'event_form',
           });
           targetAssetId = asset.id;

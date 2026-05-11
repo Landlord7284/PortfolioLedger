@@ -15,6 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { formatMoney, formatQuantity } from '@/lib/formatters';
 
 const ASSET_CLASSES = [
   'Ação', 'BDR', 'Criptomoeda', 'Debênture', 'CRI', 'CRA',
@@ -32,6 +33,16 @@ function parseCandidateIds(value) {
     return JSON.parse(value || '[]');
   } catch {
     return [];
+  }
+}
+
+function parseOperationPayload(value) {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
   }
 }
 
@@ -227,7 +238,7 @@ export default function AssetManagement() {
           </CardHeader>
           <CardContent className="space-y-2">
             {reviews.map((review) => (
-              <div key={review.id} className="flex flex-col gap-2 rounded-lg border p-3 md:flex-row md:items-center md:justify-between">
+              <div key={review.id} className="flex flex-col gap-3 rounded-lg border p-3">
                 <div className="text-sm">
                   <span className="font-medium">{review.ticker}</span> · {review.asset_class} · {review.market || 'mercado pendente'}
                   <p className="text-xs text-muted-foreground mt-1">{review.reason || 'Revisão manual necessária.'}</p>
@@ -243,13 +254,42 @@ export default function AssetManagement() {
                       <ExternalLink className="w-4 h-4" /> Abrir #{id}
                     </Button>
                   ))}
-                  <Button size="sm" variant="secondary" onClick={() => createFromReview(review.id)} disabled={!review.market}>
-                    Criar mesmo assim
-                  </Button>
+                  {!parseOperationPayload(review.operation_payload) && (
+                    <Button size="sm" variant="secondary" onClick={() => createFromReview(review.id)} disabled={!review.market}>
+                      Criar mesmo assim
+                    </Button>
+                  )}
                   <Button size="sm" variant="outline" onClick={() => resolveReview(review.id)}>
                     <Check className="w-4 h-4" /> Descartar pendência
                   </Button>
                 </div>
+                {parseOperationPayload(review.operation_payload) && (
+                  <div className="rounded-md border bg-muted/30">
+                    <div className="border-b px-3 py-2 text-xs font-medium uppercase text-muted-foreground">Operação conflitante</div>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Classe</TableHead>
+                            <TableHead>Evento</TableHead>
+                            <TableHead>Data</TableHead>
+                            <TableHead className="text-right">Quantidade</TableHead>
+                            <TableHead className="text-right">Valor</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          <TableRow>
+                            <TableCell><Badge variant="secondary">{parseOperationPayload(review.operation_payload).asset_class || review.asset_class}</Badge></TableCell>
+                            <TableCell>{parseOperationPayload(review.operation_payload).event_type || '-'}</TableCell>
+                            <TableCell>{formatDate(parseOperationPayload(review.operation_payload).event_date || review.event_date)}</TableCell>
+                            <TableCell className="text-right">{formatQuantity(parseOperationPayload(review.operation_payload).quantity, parseOperationPayload(review.operation_payload).asset_class || review.asset_class)}</TableCell>
+                            <TableCell className="text-right">R$ {formatMoney(parseOperationPayload(review.operation_payload).event_value)}</TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </CardContent>

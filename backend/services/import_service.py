@@ -317,7 +317,7 @@ def import_to_ledger(
 
     Returns a summary dict with counts.
     """
-    from backend.services.asset_service import match_asset, create_asset
+    from backend.services.asset_service import match_asset, create_asset, build_operation_payload
     from backend.services.event_service import create_event
     from backend.database import next_sequence
 
@@ -333,6 +333,18 @@ def import_to_ledger(
 
     for i, ev in enumerate(parsed, start=1):
         try:
+            operation_payload = build_operation_payload(
+                ticker=ev["ticker"],
+                asset_class=ev["asset_class"],
+                market=None,
+                event_date=ev["event_date"],
+                portfolio_id=portfolio_id,
+                event_type=ev["event_type"],
+                quantity=ev["quantity"],
+                event_value=ev["event_value"],
+                notes=f"Importado de planilha (linha {i + 1})",
+                source_row=i + 1,
+            )
             # Resolve or create asset through the central ticker + class + market matcher.
             match = match_asset(
                 conn,
@@ -341,6 +353,7 @@ def import_to_ledger(
                 event_date=ev["event_date"],
                 source="import_xlsx",
                 create_review=True,
+                operation_payload=operation_payload,
             )
             if match["status"] == "exact":
                 asset_id = match["asset"]["id"]

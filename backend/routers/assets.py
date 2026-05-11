@@ -42,6 +42,11 @@ def create(body: AssetCreate):
                 subsector=body.subsector,
                 segment=body.segment,
                 event_date=body.event_date,
+                portfolio_id=body.portfolio_id,
+                event_type=body.event_type,
+                quantity=body.quantity,
+                event_value=body.event_value,
+                notes=body.notes,
                 source=body.source or "manual",
             )
         except Exception as e:

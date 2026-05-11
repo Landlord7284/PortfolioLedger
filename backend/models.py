@@ -51,6 +51,11 @@ class AssetCreate(BaseModel):
     sector: Optional[str] = None
     subsector: Optional[str] = None
     segment: Optional[str] = None
+    portfolio_id: Optional[int] = None
+    event_type: Optional[str] = None
+    quantity: Optional[str] = None
+    event_value: Optional[str] = None
+    notes: Optional[str] = None
 
     @field_validator("ticker")
     @classmethod
@@ -129,6 +134,7 @@ class AssetMatchReviewResponse(BaseModel):
     event_date: Optional[str] = None
     candidate_asset_ids: Optional[str] = None
     reason: Optional[str] = None
+    operation_payload: Optional[str] = None
     status: str
     created_at: str
     resolved_at: Optional[str] = None

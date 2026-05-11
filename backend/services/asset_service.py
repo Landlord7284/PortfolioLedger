@@ -66,6 +66,36 @@ def _candidate_dicts(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[
     return result
 
 
+def build_operation_payload(
+    ticker: str,
+    asset_class: str,
+    market: Optional[str],
+    event_date: Optional[str],
+    portfolio_id: Optional[int] = None,
+    event_type: Optional[str] = None,
+    quantity: Optional[str] = None,
+    event_value: Optional[str] = None,
+    notes: Optional[str] = None,
+    source_row: Optional[int] = None,
+) -> dict | None:
+    if not any([portfolio_id, event_type, quantity, event_value, notes, source_row]):
+        return None
+    payload = {
+        "ticker": _normalize_ticker(ticker),
+        "asset_class": AssetClass(asset_class).value,
+        "market": market,
+        "event_date": event_date,
+        "portfolio_id": portfolio_id,
+        "event_type": event_type,
+        "quantity": quantity,
+        "event_value": event_value,
+        "notes": notes,
+    }
+    if source_row is not None:
+        payload["source_row"] = source_row
+    return payload
+
+
 def create_match_review(
     conn: sqlite3.Connection,
     source: str,
@@ -75,7 +105,10 @@ def create_match_review(
     event_date: Optional[str] = None,
     candidate_asset_ids: Optional[list[int]] = None,
     reason: Optional[str] = None,
+    operation_payload: Optional[dict] = None,
 ) -> dict:
+    normalized = _normalize_ticker(ticker)
+    ac = AssetClass(asset_class).value
     existing = conn.execute(
         """
         SELECT * FROM asset_match_reviews
@@ -87,7 +120,7 @@ def create_match_review(
           AND COALESCE(event_date, '') = COALESCE(?, '')
         ORDER BY id DESC LIMIT 1
         """,
-        (source, _normalize_ticker(ticker), AssetClass(asset_class).value, market, event_date),
+        (source, normalized, ac, market, event_date),
     ).fetchone()
     if existing:
         return dict(existing)
@@ -95,17 +128,18 @@ def create_match_review(
     cur = conn.execute(
         """
         INSERT INTO asset_match_reviews (source, ticker, asset_class, market, event_date,
-                                         candidate_asset_ids, reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+                                         candidate_asset_ids, reason, operation_payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             source,
-            _normalize_ticker(ticker),
-            AssetClass(asset_class).value,
+            normalized,
+            ac,
             market,
             event_date,
             json.dumps(candidate_asset_ids or []),
             reason,
+            json.dumps(operation_payload) if operation_payload else None,
         ),
     )
     return dict(conn.execute("SELECT * FROM asset_match_reviews WHERE id = ?", (cur.lastrowid,)).fetchone())
@@ -119,13 +153,15 @@ def match_asset(
     market: Optional[str] = None,
     source: str = "manual",
     create_review: bool = False,
+    operation_payload: Optional[dict] = None,
 ) -> dict:
     ac = AssetClass(asset_class).value
     normalized = _normalize_ticker(ticker)
     resolved_market = _resolve_market(ac, market, normalized, source)
+    review_payload = {**operation_payload, "market": resolved_market} if operation_payload else None
     if resolved_market is None:
         reason = "Mercado do ETF não pôde ser inferido com segurança."
-        review = create_match_review(conn, source, normalized, ac, None, event_date, [], reason) if create_review else None
+        review = create_match_review(conn, source, normalized, ac, None, event_date, [], reason, review_payload) if create_review else None
         return {"status": "probable", "asset": None, "candidates": [], "review": review, "reason": reason, "market": None}
 
     date_clause, date_params = _ticker_date_clause(event_date)
@@ -147,7 +183,7 @@ def match_asset(
     if len(exact_rows) > 1:
         candidates = _candidate_dicts(conn, exact_rows)
         reason = "Mais de um ativo ativo possui o mesmo ticker, classe e mercado no período."
-        review = create_match_review(conn, source, normalized, ac, resolved_market, event_date, [c["id"] for c in candidates], reason) if create_review else None
+        review = create_match_review(conn, source, normalized, ac, resolved_market, event_date, [c["id"] for c in candidates], reason, review_payload) if create_review else None
         return {"status": "probable", "asset": None, "candidates": candidates, "review": review, "reason": reason, "market": resolved_market}
 
     probable_rows = conn.execute(
@@ -163,7 +199,7 @@ def match_asset(
     if probable_rows:
         candidates = _candidate_dicts(conn, probable_rows)
         reason = "Ticker já existe, mas classe, mercado ou período não permitem match exato."
-        review = create_match_review(conn, source, normalized, ac, resolved_market, event_date, [c["id"] for c in candidates], reason) if create_review else None
+        review = create_match_review(conn, source, normalized, ac, resolved_market, event_date, [c["id"] for c in candidates], reason, review_payload) if create_review else None
         return {"status": "probable", "asset": None, "candidates": candidates, "review": review, "reason": reason, "market": resolved_market}
 
     merged_row = conn.execute(
@@ -200,6 +236,12 @@ def create_asset(
     subsector: Optional[str] = None,
     segment: Optional[str] = None,
     event_date: Optional[str] = None,
+    portfolio_id: Optional[int] = None,
+    event_type: Optional[str] = None,
+    quantity: Optional[str] = None,
+    event_value: Optional[str] = None,
+    notes: Optional[str] = None,
+    source_row: Optional[int] = None,
     source: str = "manual",
     allow_existing: bool = True,
     allow_probable: bool = False,
@@ -209,11 +251,35 @@ def create_asset(
         Currency(currency)
     resolved_market = _resolve_market(ac.value, market, ticker, source)
     if resolved_market is None:
-        create_match_review(conn, source, ticker, ac.value, None, event_date, [], "Mercado do ETF deve ser confirmado.")
+        operation_payload = build_operation_payload(
+            ticker=ticker,
+            asset_class=ac.value,
+            market=None,
+            event_date=event_date,
+            portfolio_id=portfolio_id,
+            event_type=event_type,
+            quantity=quantity,
+            event_value=event_value,
+            notes=notes,
+            source_row=source_row,
+        )
+        create_match_review(conn, source, ticker, ac.value, None, event_date, [], "Mercado do ETF deve ser confirmado.", operation_payload)
         raise ValueError("Mercado do ETF deve ser confirmado antes do cadastro.")
     resolved_currency = currency_for_market(resolved_market).value
+    operation_payload = build_operation_payload(
+        ticker=ticker,
+        asset_class=ac.value,
+        market=resolved_market,
+        event_date=event_date,
+        portfolio_id=portfolio_id,
+        event_type=event_type,
+        quantity=quantity,
+        event_value=event_value,
+        notes=notes,
+        source_row=source_row,
+    )
 
-    match = match_asset(conn, ticker, ac.value, event_date, resolved_market, source, create_review=not allow_probable)
+    match = match_asset(conn, ticker, ac.value, event_date, resolved_market, source, create_review=not allow_probable, operation_payload=operation_payload)
     if match["status"] == "exact" and allow_existing:
         return match["asset"]
     if match["status"] == "probable" and not allow_probable:
