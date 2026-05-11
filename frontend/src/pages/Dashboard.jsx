@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { positions as posApi } from '../api/client';
@@ -13,8 +13,36 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
+
+const SORT_OPTIONS = [
+  { value: 'asset-asc', label: 'Ativo A-Z' },
+  { value: 'asset-desc', label: 'Ativo Z-A' },
+  { value: 'balance-asc', label: 'Menor Saldo' },
+  { value: 'balance-desc', label: 'Maior Saldo' },
+  { value: 'share-asc', label: 'Menor Participação' },
+  { value: 'share-desc', label: 'Maior Participação' },
+];
+
+function toNumber(value) {
+  const parsed = parseFloat(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getAssetLabel(position) {
+  return position.current_ticker || `#${position.asset_id}`;
+}
+
+function formatPercent(value, hideValues = false) {
+  if (hideValues) return "•••••";
+  if (!Number.isFinite(value)) return "—";
+  return `${value.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}%`;
+}
 
 export default function Dashboard() {
   const { activePortfolioId, portfolioList, hideValues } = useContext(AppContext);
@@ -24,6 +52,7 @@ export default function Dashboard() {
   const [showImport, setShowImport] = useState(false);
   const [filterClass, setFilterClass] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('asset-asc');
   const [isLargeModal, setIsLargeModal] = useState(false);
   const [showRedeemed, setShowRedeemed] = useState(() => {
     return localStorage.getItem('showRedeemed') === 'true';
@@ -56,24 +85,69 @@ export default function Dashboard() {
     loadPositions();
   }, [activePortfolioId]);
 
-  const filtered = positionList.filter((p) => {
-    if (!showRedeemed && parseFloat(p.quantity) === 0) return false;
-    if (filterClass && p.asset_class !== filterClass) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const ticker = (p.current_ticker || '').toLowerCase();
-      const name = (p.name || '').toLowerCase();
-      return ticker.includes(q) || name.includes(q);
-    }
-    return true;
-  });
+  const positionsWithShare = useMemo(() => {
+    const allocationBase = positionList.filter((p) => showRedeemed || toNumber(p.quantity) !== 0);
+    const portfolioTotal = allocationBase.reduce((sum, p) => sum + Math.max(toNumber(p.total_cost), 0), 0);
+    const classTotals = allocationBase.reduce((totals, p) => {
+      const assetClass = p.asset_class || 'Sem classe';
+      totals[assetClass] = (totals[assetClass] || 0) + Math.max(toNumber(p.total_cost), 0);
+      return totals;
+    }, {});
+
+    return positionList.map((p) => {
+      const totalCost = Math.max(toNumber(p.total_cost), 0);
+      const classTotal = classTotals[p.asset_class || 'Sem classe'] || 0;
+
+      return {
+        ...p,
+        category_share: classTotal > 0 ? (totalCost / classTotal) * 100 : 0,
+        portfolio_share: portfolioTotal > 0 ? (totalCost / portfolioTotal) * 100 : 0,
+      };
+    });
+  }, [positionList, showRedeemed]);
+
+  const filtered = useMemo(() => {
+    const visible = positionsWithShare.filter((p) => {
+      if (!showRedeemed && toNumber(p.quantity) === 0) return false;
+      if (filterClass && p.asset_class !== filterClass) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const ticker = (p.current_ticker || '').toLowerCase();
+        const name = (p.name || '').toLowerCase();
+        return ticker.includes(q) || name.includes(q);
+      }
+      return true;
+    });
+
+    const compareByAsset = (a, b) => getAssetLabel(a).localeCompare(getAssetLabel(b), 'pt-BR', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+
+    return [...visible].sort((a, b) => {
+      switch (sortBy) {
+        case 'asset-desc':
+          return compareByAsset(b, a);
+        case 'balance-asc':
+          return toNumber(a.total_cost) - toNumber(b.total_cost) || compareByAsset(a, b);
+        case 'balance-desc':
+          return toNumber(b.total_cost) - toNumber(a.total_cost) || compareByAsset(a, b);
+        case 'share-asc':
+          return a.portfolio_share - b.portfolio_share || compareByAsset(a, b);
+        case 'share-desc':
+          return b.portfolio_share - a.portfolio_share || compareByAsset(a, b);
+        default:
+          return compareByAsset(a, b);
+      }
+    });
+  }, [positionsWithShare, showRedeemed, filterClass, searchQuery, sortBy]);
 
   const displayMoney = (val) => formatMoney(val, hideValues);
   const displayQuantity = (val, assetClass) => formatQuantity(val, assetClass, hideValues);
 
-  const totalCost = positionList.reduce((s, p) => s + parseFloat(p.total_cost || 0), 0);
-  const totalRealized = positionList.reduce((s, p) => s + parseFloat(p.realized_result || 0), 0);
-  const activeAssets = positionList.filter((p) => parseFloat(p.quantity) > 0).length;
+  const totalCost = positionList.reduce((s, p) => s + toNumber(p.total_cost), 0);
+  const totalRealized = positionList.reduce((s, p) => s + toNumber(p.realized_result), 0);
+  const activeAssets = positionList.filter((p) => toNumber(p.quantity) > 0).length;
 
   const classes = [...new Set(positionList.map((p) => p.asset_class))].sort();
 
@@ -188,7 +262,19 @@ export default function Dashboard() {
             </>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger className="w-[190px]" aria-label="Ordenar posições">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Label htmlFor="show-redeemed" className="text-sm text-muted-foreground cursor-pointer font-normal">
             Exibir resgatados
           </Label>
@@ -216,59 +302,61 @@ export default function Dashboard() {
         </Card>
       ) : (
         <Card className="overflow-hidden">
-          <Table>
-            <TableHeader>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
                 <TableRow>
                   <TableHead>Ticker</TableHead>
                   <TableHead>Classe</TableHead>
-                  <TableHead>Mercado</TableHead>
-                  <TableHead>Moeda</TableHead>
-                <TableHead className="text-right">Quantidade</TableHead>
-                <TableHead className="text-right">Custo Total</TableHead>
-                <TableHead className="text-right">Preço Médio</TableHead>
-                <TableHead className="text-right">Resultado</TableHead>
-                <TableHead>Último Evento</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((pos) => {
-                const realized = parseFloat(pos.realized_result || 0);
-                const qty = parseFloat(pos.quantity || 0);
-                return (
-                  <TableRow
-                    key={`${pos.portfolio_id}-${pos.asset_id}`}
-                    className="cursor-pointer"
-                    onClick={() => navigate(`/assets/${pos.asset_id}`)}
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">
-                          {pos.current_ticker || `#${pos.asset_id}`}
-                        </span>
-                        {pos.duplicate_flag && (
-                          <AlertCircle className="w-3.5 h-3.5 text-amber-500" title="Duplicado pendente de análise" />
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{pos.asset_class}</Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{pos.market || 'BR'}</TableCell>
-                    <TableCell className="text-muted-foreground">{pos.currency}</TableCell>
-                    <TableCell className={`text-right font-mono text-sm ${qty === 0 ? 'text-muted-foreground/50' : ''}`}>
-                      {displayQuantity(pos.quantity, pos.asset_class)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">R$ {displayMoney(pos.total_cost)}</TableCell>
-                    <TableCell className="text-right font-mono text-sm">R$ {displayMoney(pos.average_price)}</TableCell>
-                    <TableCell className={`text-right font-mono text-sm ${!hideValues && realized > 0 ? 'text-emerald-500' : !hideValues && realized < 0 ? 'text-red-500' : ''}`}>
-                      R$ {displayMoney(pos.realized_result)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{pos.last_event_date || '—'}</TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                  <TableHead className="text-right">Quantidade</TableHead>
+                  <TableHead className="text-right">Custo Total</TableHead>
+                  <TableHead className="text-right">Preço Médio</TableHead>
+                  <TableHead className="text-right">Resultado</TableHead>
+                  <TableHead className="text-right">% Categoria</TableHead>
+                  <TableHead className="text-right">% Carteira</TableHead>
+                  <TableHead>Último Evento</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((pos) => {
+                  const realized = toNumber(pos.realized_result);
+                  const qty = toNumber(pos.quantity);
+                  return (
+                    <TableRow
+                      key={`${pos.portfolio_id}-${pos.asset_id}`}
+                      className="cursor-pointer"
+                      onClick={() => navigate(`/assets/${pos.asset_id}`)}
+                    >
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {pos.current_ticker || `#${pos.asset_id}`}
+                          </span>
+                          {pos.duplicate_flag && (
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-500" title="Duplicado pendente de análise" />
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{pos.asset_class}</Badge>
+                      </TableCell>
+                      <TableCell className={`text-right font-mono text-sm ${qty === 0 ? 'text-muted-foreground/50' : ''}`}>
+                        {displayQuantity(pos.quantity, pos.asset_class)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">R$ {displayMoney(pos.total_cost)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">R$ {displayMoney(pos.average_price)}</TableCell>
+                      <TableCell className={`text-right font-mono text-sm ${!hideValues && realized > 0 ? 'text-emerald-500' : !hideValues && realized < 0 ? 'text-red-500' : ''}`}>
+                        R$ {displayMoney(pos.realized_result)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">{formatPercent(pos.category_share, hideValues)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{formatPercent(pos.portfolio_share, hideValues)}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm">{pos.last_event_date || '—'}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         </Card>
       )}
 
