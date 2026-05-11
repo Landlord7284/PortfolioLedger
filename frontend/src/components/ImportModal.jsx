@@ -23,7 +23,7 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
       setResult(res);
       if (res.imported > 0) {
         toast.success(`Importação concluída: ${res.imported} evento(s) importado(s).`);
-      } else if (res.duplicates > 0 || res.skipped > 0) {
+      } else if (res.duplicates > 0 || res.review_count > 0 || res.skipped > 0) {
         toast.warning('Importação concluída sem novos eventos.');
       } else {
         toast.info('Importação concluída.');
@@ -128,6 +128,29 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
                   <strong>{result.duplicates} eventos duplicados</strong> foram ignorados, mas adicionamos uma flag nos ativos/eventos correspondentes para sua revisão.
                 </AlertDescription>
               </Alert>
+            )}
+
+            {result.review_count > 0 && (
+              <Alert>
+                <AlertDescription>
+                  <strong>{result.review_count} item(ns)</strong> foram enviados para revisão em Gestão de Ativos antes de criar ou vincular ativos.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {result.review_details?.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="font-medium text-sm flex items-center gap-1">
+                  <AlertTriangle className="w-4 h-4" /> Revisões pendentes:
+                </h4>
+                <div className="max-h-32 overflow-y-auto space-y-1">
+                  {result.review_details.map((detail, i) => (
+                    <div key={i} className="p-2 bg-muted text-muted-foreground rounded text-xs font-mono">
+                      {detail}
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
             {result.errors.length > 0 && (

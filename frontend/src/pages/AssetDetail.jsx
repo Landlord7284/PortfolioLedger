@@ -473,6 +473,7 @@ export default function AssetDetail() {
           </h2>
           <div className="flex items-center gap-2 mt-2">
             <Badge variant="secondary">{asset.asset_class}</Badge>
+            <span className="text-sm text-muted-foreground font-medium">{asset.market}</span>
             <span className="text-sm text-muted-foreground font-medium">{asset.currency}</span>
           </div>
         </div>

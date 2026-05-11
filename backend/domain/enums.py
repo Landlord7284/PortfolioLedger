@@ -103,3 +103,22 @@ class EventType(str, Enum):
 class Currency(str, Enum):
     BRL = "BRL"
     USD = "USD"
+
+
+class Market(str, Enum):
+    BR = "BR"
+    US = "US"
+
+
+def default_market_for_class(asset_class: str) -> Market | None:
+    """Return the forced market for classes that are not manually ambiguous."""
+    ac = AssetClass(asset_class)
+    if ac in {AssetClass.STOCK, AssetClass.REIT}:
+        return Market.US
+    if ac == AssetClass.ETF:
+        return None
+    return Market.BR
+
+
+def currency_for_market(market: str) -> Currency:
+    return Currency.USD if Market(market) == Market.US else Currency.BRL

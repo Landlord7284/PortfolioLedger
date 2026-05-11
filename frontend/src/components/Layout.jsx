@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useContext } from 'react';
 import { AppContext } from '../App';
-import { LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Briefcase, Wallet } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Briefcase, Wallet, Layers3 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -23,9 +23,11 @@ export default function Layout({ children }) {
   const location = useLocation();
   const isDashboard = location.pathname === '/';
   const isSettings = location.pathname === '/settings';
+  const isAssetManagement = location.pathname === '/asset-management';
 
   const pageTitle = () => {
     if (location.pathname === '/settings') return 'Configurações';
+    if (location.pathname === '/asset-management') return 'Gestão de Ativos';
     if (location.pathname.startsWith('/assets/')) return 'Detalhe do Ativo';
     return 'Dashboard';
   };
@@ -55,6 +57,15 @@ export default function Layout({ children }) {
             </SidebarMenuItem>
 
             <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={isAssetManagement}>
+                <NavLink to="/asset-management">
+                  <Layers3 className="w-4 h-4" />
+                  <span>Gestão de Ativos</span>
+                </NavLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
               <SidebarMenuButton asChild isActive={isSettings}>
                 <NavLink to="/settings">
                   <SettingsIcon className="w-4 h-4" />
@@ -67,7 +78,7 @@ export default function Layout({ children }) {
 
         <SidebarFooter className="border-t border-sidebar-border p-4">
           <p className="text-[10px] text-sidebar-foreground/40 uppercase tracking-wider font-medium">
-            Versão 1.0.3
+            Versão 1.1.4
           </p>
         </SidebarFooter>
       </Sidebar>

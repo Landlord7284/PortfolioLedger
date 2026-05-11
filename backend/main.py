@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Portfolio Ledger",
     description="Sistema local de controle patrimonial de carteira de investimentos",
-    version="0.1.0",
+    version="1.1.4",
     lifespan=lifespan,
 )
 

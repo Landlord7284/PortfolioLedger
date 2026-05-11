@@ -317,7 +317,7 @@ def import_to_ledger(
 
     Returns a summary dict with counts.
     """
-    from backend.services.asset_service import find_asset_by_ticker, create_asset
+    from backend.services.asset_service import match_asset, create_asset
     from backend.services.event_service import create_event
     from backend.database import next_sequence
 
@@ -327,20 +327,41 @@ def import_to_ledger(
     skipped = 0
     duplicates = 0
     duplicate_details: list[str] = []
+    review_count = 0
+    review_details: list[str] = []
     errors: list[str] = []
 
     for i, ev in enumerate(parsed, start=1):
         try:
-            # Resolve or create asset
-            asset_id = find_asset_by_ticker(conn, ev["ticker"])
-            if asset_id is None:
+            # Resolve or create asset through the central ticker + class + market matcher.
+            match = match_asset(
+                conn,
+                ticker=ev["ticker"],
+                asset_class=ev["asset_class"],
+                event_date=ev["event_date"],
+                source="import_xlsx",
+                create_review=True,
+            )
+            if match["status"] == "exact":
+                asset_id = match["asset"]["id"]
+            elif match["status"] == "none":
                 asset = create_asset(
                     conn,
                     asset_class=ev["asset_class"],
                     ticker=ev["ticker"],
-                    valid_from=ev["event_date"],
+                    market=match.get("market"),
+                    valid_from=None,
+                    event_date=ev["event_date"],
+                    source="import_xlsx",
                 )
                 asset_id = asset["id"]
+            else:
+                review_count += 1
+                skipped += 1
+                review_details.append(
+                    f"Linha {i + 1}: {ev['ticker']} ({ev['asset_class']}) em {ev['event_date']} enviado para revisão"
+                )
+                continue
 
             # Check for duplicates before insertion
             existing_id = _check_duplicate(
@@ -407,5 +428,7 @@ def import_to_ledger(
         "skipped": skipped,
         "duplicates": duplicates,
         "duplicate_details": duplicate_details,
+        "review_count": review_count,
+        "review_details": review_details,
         "errors": errors,
     }

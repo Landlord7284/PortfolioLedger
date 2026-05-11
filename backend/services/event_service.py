@@ -16,6 +16,7 @@ from backend.domain.engine import (
     EventRecord,
     PositionState,
     EngineValidationError,
+    process_event,
     replay_events,
     replay_events_with_results,
     to_decimal,
@@ -110,7 +111,12 @@ def recalculate_position(
     Rebuilds the materialised position from scratch.
     """
     events = _fetch_all_events(conn, asset_id, portfolio_id)
-    state = replay_events(events)
+    try:
+        state = replay_events(events)
+    except EngineValidationError:
+        state = PositionState()
+        for ev in events:
+            process_event(ev, state, skip_validation=True)
     _save_position(conn, portfolio_id, asset_id, state)
     return state
 
@@ -463,7 +469,10 @@ def list_events(
     # If filtering by a specific asset+portfolio, compute per-event results
     if asset_id is not None and portfolio_id is not None:
         records = _rows_to_event_records(rows)
-        per_event_results = replay_events_with_results(records)
+        try:
+            per_event_results = replay_events_with_results(records)
+        except EngineValidationError:
+            per_event_results = {}
 
         for ev_dict in events_list:
             result_val = per_event_results.get(ev_dict["id"])
@@ -496,13 +505,14 @@ def get_position(
 ) -> dict | None:
     row = conn.execute(
         """
-        SELECT p.*, a.asset_class, a.currency, a.duplicate_flag,
+        SELECT p.*, a.asset_class, a.market, a.currency, a.duplicate_flag,
                (SELECT ticker FROM asset_tickers
                 WHERE asset_id = p.asset_id AND valid_until IS NULL
                 ORDER BY valid_from DESC LIMIT 1) as current_ticker
         FROM positions p
         JOIN assets a ON a.id = p.asset_id
         WHERE p.portfolio_id = ? AND p.asset_id = ?
+          AND a.merged_into_asset_id IS NULL
         """,
         (portfolio_id, asset_id),
     ).fetchone()
@@ -517,13 +527,13 @@ def list_positions(
     if portfolio_id is not None:
         rows = conn.execute(
             """
-            SELECT p.*, a.asset_class, a.currency, a.duplicate_flag,
+            SELECT p.*, a.asset_class, a.market, a.currency, a.duplicate_flag,
                    (SELECT ticker FROM asset_tickers
                     WHERE asset_id = p.asset_id AND valid_until IS NULL
                     ORDER BY valid_from DESC LIMIT 1) as current_ticker
             FROM positions p
             JOIN assets a ON a.id = p.asset_id
-            WHERE p.portfolio_id = ?
+            WHERE p.portfolio_id = ? AND a.merged_into_asset_id IS NULL
             ORDER BY a.asset_class, current_ticker
             """,
             (portfolio_id,),
@@ -531,12 +541,13 @@ def list_positions(
     else:
         rows = conn.execute(
             """
-            SELECT p.*, a.asset_class, a.currency, a.duplicate_flag,
+            SELECT p.*, a.asset_class, a.market, a.currency, a.duplicate_flag,
                    (SELECT ticker FROM asset_tickers
                     WHERE asset_id = p.asset_id AND valid_until IS NULL
                     ORDER BY valid_from DESC LIMIT 1) as current_ticker
             FROM positions p
             JOIN assets a ON a.id = p.asset_id
+            WHERE a.merged_into_asset_id IS NULL
             ORDER BY a.asset_class, current_ticker
             """
         ).fetchall()

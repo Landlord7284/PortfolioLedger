@@ -39,9 +39,12 @@ export const portfolios = {
 // ── Assets ──────────────────────────────────────────────────
 
 export const assets = {
-  list: (assetClass) => {
-    const params = assetClass ? `?asset_class=${encodeURIComponent(assetClass)}` : '';
-    return request(`/assets${params}`);
+  list: (assetClass, includeMerged = false) => {
+    const params = new URLSearchParams();
+    if (assetClass) params.set('asset_class', assetClass);
+    if (includeMerged) params.set('include_merged', 'true');
+    const qs = params.toString();
+    return request(`/assets${qs ? '?' + qs : ''}`);
   },
   get: (id) => request(`/assets/${id}`),
   search: (q) => request(`/assets/search?q=${encodeURIComponent(q)}`),
@@ -50,6 +53,11 @@ export const assets = {
     request(`/assets/${id}/tickers`, { method: 'POST', body: JSON.stringify(data) }),
   updateMetadata: (id, data) =>
     request(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  tickers: (id) => request(`/assets/${id}/tickers`),
+  reviews: () => request('/assets/reviews'),
+  resolveReview: (id) => request(`/assets/reviews/${id}/resolve`, { method: 'POST' }),
+  createFromReview: (id) => request(`/assets/reviews/${id}/create-asset`, { method: 'POST' }),
+  merge: (data) => request('/assets/merge', { method: 'POST', body: JSON.stringify(data) }),
   delete: (id) =>
     request(`/assets/${id}`, { method: 'DELETE' }),
 };

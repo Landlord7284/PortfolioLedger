@@ -116,6 +116,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   const [isNewAsset, setIsNewAsset] = useState(false);
   const [newTicker, setNewTicker] = useState('');
   const [newClass, setNewClass] = useState('Ação');
+  const [newMarket, setNewMarket] = useState('BR');
   const [newMaturityDate, setNewMaturityDate] = useState('');
 
   const [bulkRows, setBulkRows] = useState([
@@ -216,8 +217,10 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
           const asset = await assetsApi.create({
             asset_class: newClass,
             ticker: newTicker,
-            currency: ['Stock', 'REIT'].includes(newClass) ? 'USD' : 'BRL',
+            market: newClass === 'ETF' ? newMarket : undefined,
             maturity_date: CLASSES_WITH_MATURITY.includes(newClass) ? (newMaturityDate || null) : null,
+            event_date: eventDate,
+            source: 'event_form',
           });
           targetAssetId = asset.id;
         }
@@ -378,7 +381,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
               </div>
 
               {isNewAsset ? (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 border border-border rounded-lg bg-muted/30">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 border border-border rounded-lg bg-muted/30">
                   <div className="space-y-1.5">
                     <Label className="text-xs font-medium text-muted-foreground uppercase">Ticker</Label>
                     <Input value={newTicker} onChange={(e) => setNewTicker(e.target.value.toUpperCase())} placeholder="Ex: WEGE3" required />
@@ -394,6 +397,20 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
                       </SelectContent>
                     </Select>
                   </div>
+                  {newClass === 'ETF' && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium text-muted-foreground uppercase">Mercado</Label>
+                      <Select value={newMarket} onValueChange={setNewMarket}>
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="BR">BR</SelectItem>
+                          <SelectItem value="US">US</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   {CLASSES_WITH_MATURITY.includes(newClass) && (
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium text-muted-foreground uppercase">Data de Vencimento</Label>

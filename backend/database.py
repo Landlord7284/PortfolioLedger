@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS portfolios (
 CREATE TABLE IF NOT EXISTS assets (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     asset_class     TEXT    NOT NULL,
+    market          TEXT    NOT NULL DEFAULT 'BR',
     currency        TEXT    NOT NULL DEFAULT 'BRL',
     maturity_date   TEXT,
     aux_id          TEXT,
@@ -42,6 +43,8 @@ CREATE TABLE IF NOT EXISTS assets (
     sector          TEXT,
     subsector       TEXT,
     segment         TEXT,
+    merged_into_asset_id INTEGER REFERENCES assets(id),
+    merged_at       TEXT,
     duplicate_flag  INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -54,13 +57,30 @@ CREATE TABLE IF NOT EXISTS asset_tickers (
     asset_id    INTEGER NOT NULL REFERENCES assets(id),
     ticker      TEXT    NOT NULL,
     name        TEXT,
-    valid_from  TEXT    NOT NULL,
+    valid_from  TEXT,
     valid_until TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_asset_tickers_lookup
-    ON asset_tickers(ticker, valid_from);
+    ON asset_tickers(ticker, valid_from, valid_until);
+
+-- ────────────────────────────────────────────────────────────
+-- Asset matching review queue
+-- ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS asset_match_reviews (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    source              TEXT    NOT NULL,
+    ticker              TEXT    NOT NULL,
+    asset_class         TEXT    NOT NULL,
+    market              TEXT,
+    event_date          TEXT,
+    candidate_asset_ids TEXT,
+    reason              TEXT,
+    status              TEXT    NOT NULL DEFAULT 'pending',
+    created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+    resolved_at         TEXT
+);
 
 -- ────────────────────────────────────────────────────────────
 -- Event ledger  (source of truth)
@@ -129,9 +149,73 @@ def init_db(db_path: Path | str | None = None) -> None:
     conn = _get_connection(db_path)
     try:
         conn.executescript(_SCHEMA)
+        _migrate_schema(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> dict[str, sqlite3.Row]:
+    return {row["name"]: row for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    if column not in _table_columns(conn, table):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """Apply lightweight migrations for local SQLite databases."""
+    _add_column_if_missing(conn, "assets", "market", "market TEXT NOT NULL DEFAULT 'BR'")
+    _add_column_if_missing(conn, "assets", "merged_into_asset_id", "merged_into_asset_id INTEGER REFERENCES assets(id)")
+    _add_column_if_missing(conn, "assets", "merged_at", "merged_at TEXT")
+
+    conn.execute(
+        """
+        UPDATE assets
+        SET asset_class = 'Ação'
+        WHERE asset_class IN ('A��o', 'Acao')
+        """
+    )
+
+    conn.execute(
+        """
+        UPDATE assets
+        SET market = CASE WHEN asset_class IN ('Stock', 'REIT') THEN 'US' ELSE COALESCE(market, 'BR') END,
+            currency = CASE WHEN asset_class IN ('Stock', 'REIT') THEN 'USD' ELSE COALESCE(currency, 'BRL') END
+        WHERE market IS NULL OR currency IS NULL OR asset_class IN ('Stock', 'REIT')
+        """
+    )
+
+    cols = _table_columns(conn, "asset_tickers")
+    if cols.get("valid_from") and cols["valid_from"]["notnull"]:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("ALTER TABLE asset_tickers RENAME TO asset_tickers_old")
+        conn.execute(
+            """
+            CREATE TABLE asset_tickers (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                asset_id    INTEGER NOT NULL REFERENCES assets(id),
+                ticker      TEXT    NOT NULL,
+                name        TEXT,
+                valid_from  TEXT,
+                valid_until TEXT,
+                created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO asset_tickers (id, asset_id, ticker, name, valid_from, valid_until, created_at)
+            SELECT id, asset_id, ticker, name, valid_from, valid_until, created_at
+            FROM asset_tickers_old
+            """
+        )
+        conn.execute("DROP TABLE asset_tickers_old")
+        conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_asset_tickers_lookup ON asset_tickers(ticker, valid_from, valid_until)"
+    )
 
 
 @contextmanager

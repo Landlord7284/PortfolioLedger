@@ -8,7 +8,7 @@ without floating-point surprises. The domain layer converts to Decimal.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -37,8 +37,11 @@ class PortfolioResponse(BaseModel):
 
 class AssetCreate(BaseModel):
     asset_class: str
-    currency: str = "BRL"
+    market: Optional[str] = None
+    currency: Optional[str] = None
     ticker: str = Field(..., min_length=1, max_length=30)
+    event_date: Optional[str] = None
+    source: Optional[str] = "manual"
     name: Optional[str] = None
     maturity_date: Optional[str] = None
     aux_id: Optional[str] = None
@@ -68,6 +71,8 @@ class AssetTickerUpdate(BaseModel):
 
 class AssetMetadataUpdate(BaseModel):
     """PATCH body for updating asset metadata fields."""
+    asset_class: Optional[str] = None
+    ticker: Optional[str] = None
     name: Optional[str] = None
     maturity_date: Optional[str] = None
     cnpj: Optional[str] = None
@@ -75,11 +80,18 @@ class AssetMetadataUpdate(BaseModel):
     sector: Optional[str] = None
     subsector: Optional[str] = None
     segment: Optional[str] = None
+    market: Optional[str] = None
+
+    @field_validator("ticker")
+    @classmethod
+    def metadata_ticker_upper(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip().upper() if v else v
 
 
 class AssetResponse(BaseModel):
     id: int
     asset_class: str
+    market: str
     currency: str
     maturity_date: Optional[str] = None
     aux_id: Optional[str] = None
@@ -93,7 +105,45 @@ class AssetResponse(BaseModel):
     subsector: Optional[str] = None
     segment: Optional[str] = None
     duplicate_flag: bool = False
+    merged_into_asset_id: Optional[int] = None
+    merged_at: Optional[str] = None
     created_at: str
+
+
+class AssetTickerResponse(BaseModel):
+    id: int
+    asset_id: int
+    ticker: str
+    name: Optional[str] = None
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    created_at: str
+
+
+class AssetMatchReviewResponse(BaseModel):
+    id: int
+    source: str
+    ticker: str
+    asset_class: str
+    market: Optional[str] = None
+    event_date: Optional[str] = None
+    candidate_asset_ids: Optional[str] = None
+    reason: Optional[str] = None
+    status: str
+    created_at: str
+    resolved_at: Optional[str] = None
+
+
+class AssetMergeRequest(BaseModel):
+    source_asset_id: int
+    target_asset_id: int
+
+
+class AssetMatchResponse(BaseModel):
+    status: str
+    asset: Optional[AssetResponse] = None
+    review: Optional[AssetMatchReviewResponse] = None
+    candidates: list[dict[str, Any]] = []
 
 
 # ── Events ───────────────────────────────────────────────────
@@ -160,6 +210,7 @@ class PositionResponse(BaseModel):
     portfolio_id: int
     asset_id: int
     asset_class: Optional[str] = None
+    market: Optional[str] = None
     currency: Optional[str] = None
     current_ticker: Optional[str] = None
     duplicate_flag: bool = False
@@ -179,4 +230,6 @@ class ImportResult(BaseModel):
     skipped: int
     duplicates: int = 0
     duplicate_details: list[str] = []
+    review_count: int = 0
+    review_details: list[str] = []
     errors: list[str]

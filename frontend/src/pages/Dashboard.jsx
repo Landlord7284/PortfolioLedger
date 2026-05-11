@@ -218,10 +218,11 @@ export default function Dashboard() {
         <Card className="overflow-hidden">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Ticker</TableHead>
-                <TableHead>Classe</TableHead>
-                <TableHead>Moeda</TableHead>
+                <TableRow>
+                  <TableHead>Ticker</TableHead>
+                  <TableHead>Classe</TableHead>
+                  <TableHead>Mercado</TableHead>
+                  <TableHead>Moeda</TableHead>
                 <TableHead className="text-right">Quantidade</TableHead>
                 <TableHead className="text-right">Custo Total</TableHead>
                 <TableHead className="text-right">Preço Médio</TableHead>
@@ -252,6 +253,7 @@ export default function Dashboard() {
                     <TableCell>
                       <Badge variant="secondary">{pos.asset_class}</Badge>
                     </TableCell>
+                    <TableCell className="text-muted-foreground">{pos.market || 'BR'}</TableCell>
                     <TableCell className="text-muted-foreground">{pos.currency}</TableCell>
                     <TableCell className={`text-right font-mono text-sm ${qty === 0 ? 'text-muted-foreground/50' : ''}`}>
                       {displayQuantity(pos.quantity, pos.asset_class)}
