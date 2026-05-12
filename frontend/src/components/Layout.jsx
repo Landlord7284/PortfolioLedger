@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useContext } from 'react';
 import { AppContext } from '../App';
-import { LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Briefcase, Wallet, Layers3, ReceiptText } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Briefcase, Wallet, Layers3, ReceiptText, Moon, Sun } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/sidebar";
 
 export default function Layout({ children }) {
-  const { portfolioList, activePortfolioId, setActivePortfolioId, hideValues, setHideValues } = useContext(AppContext);
+  const { portfolioList, activePortfolioId, setActivePortfolioId, hideValues, setHideValues, theme, setTheme } = useContext(AppContext);
   const location = useLocation();
   const isDashboard = location.pathname === '/';
   const isSettings = location.pathname === '/settings';
@@ -102,6 +102,15 @@ export default function Layout({ children }) {
           </div>
 
           <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              title={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}
+            >
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+
             {portfolioList.length > 0 && (
               <>
                 <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">

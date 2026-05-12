@@ -31,10 +31,19 @@ function App() {
   const [hideValues, setHideValues] = useState(() => {
     return localStorage.getItem('hideValues') === 'true';
   });
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('theme') || 'dark';
+  });
 
   useEffect(() => {
     localStorage.setItem('hideValues', hideValues);
   }, [hideValues]);
+
+  useEffect(() => {
+    const isDark = theme === 'dark';
+    document.documentElement.classList.toggle('dark', isDark);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   const refreshPortfolios = async () => {
     try {
@@ -75,6 +84,8 @@ function App() {
       refreshPortfolios,
       hideValues,
       setHideValues,
+      theme,
+      setTheme,
     }}>
       <BrowserRouter>
         <TooltipProvider>
