@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -57,7 +58,8 @@ function AssetCombobox({ options, value, onChange, disabled }) {
       <PopoverContent className="w-[300px] sm:w-[400px] p-0" align="start">
         <Command>
           <CommandInput placeholder="Buscar por ticker, nome, cnpj, isin..." />
-          <CommandList>
+          <ScrollArea className="h-[300px]">
+            <CommandList className="max-h-none overflow-visible">
             <CommandEmpty>Nenhum ativo encontrado.</CommandEmpty>
             <CommandGroup>
               {options.map((option) => (
@@ -82,7 +84,8 @@ function AssetCombobox({ options, value, onChange, disabled }) {
                 </CommandItem>
               ))}
             </CommandGroup>
-          </CommandList>
+            </CommandList>
+          </ScrollArea>
         </Command>
       </PopoverContent>
     </Popover>

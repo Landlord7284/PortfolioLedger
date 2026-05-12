@@ -109,6 +109,13 @@ export const importXlsx = (portfolioId, file) => {
   });
 };
 
+export const brokerageNotes = {
+  calculate: (data) =>
+    request('/brokerage-notes/calculate', { method: 'POST', body: JSON.stringify(data) }),
+  save: (data) =>
+    request('/brokerage-notes/save', { method: 'POST', body: JSON.stringify(data) }),
+};
+
 // ── Health ──────────────────────────────────────────────────
 
 export const health = () => request('/health');

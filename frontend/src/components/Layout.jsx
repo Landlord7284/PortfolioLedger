@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useContext } from 'react';
 import { AppContext } from '../App';
-import { LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Briefcase, Wallet, Layers3 } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Briefcase, Wallet, Layers3, ReceiptText } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -24,10 +24,12 @@ export default function Layout({ children }) {
   const isDashboard = location.pathname === '/';
   const isSettings = location.pathname === '/settings';
   const isAssetManagement = location.pathname === '/asset-management';
+  const isBrokerageNote = location.pathname === '/brokerage-note';
 
   const pageTitle = () => {
     if (location.pathname === '/settings') return 'Configurações';
     if (location.pathname === '/asset-management') return 'Gestão de Ativos';
+    if (location.pathname === '/brokerage-note') return 'Rateio de Nota';
     if (location.pathname.startsWith('/assets/')) return 'Detalhe do Ativo';
     return 'Dashboard';
   };
@@ -61,6 +63,15 @@ export default function Layout({ children }) {
                 <NavLink to="/asset-management">
                   <Layers3 className="w-4 h-4" />
                   <span>Gestão de Ativos</span>
+                </NavLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={isBrokerageNote}>
+                <NavLink to="/brokerage-note">
+                  <ReceiptText className="w-4 h-4" />
+                  <span>Rateio de Nota</span>
                 </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>

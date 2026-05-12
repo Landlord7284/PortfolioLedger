@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { DatePicker } from '@/components/ui/date-picker';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
@@ -65,7 +66,8 @@ function AssetCombobox({ options, value, onChange }) {
       <PopoverContent className="w-[320px] sm:w-[520px] p-0" align="start">
         <Command>
           <CommandInput placeholder="Buscar por ticker, nome, classe ou id..." />
-          <CommandList>
+          <ScrollArea className="h-[300px]">
+            <CommandList className="max-h-none overflow-visible">
             <CommandEmpty>Nenhum ativo encontrado.</CommandEmpty>
             <CommandGroup>
               {options.map((asset) => (
@@ -85,7 +87,8 @@ function AssetCombobox({ options, value, onChange }) {
                 </CommandItem>
               ))}
             </CommandGroup>
-          </CommandList>
+            </CommandList>
+          </ScrollArea>
         </Command>
       </PopoverContent>
     </Popover>

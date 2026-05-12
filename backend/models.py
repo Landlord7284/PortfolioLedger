@@ -239,3 +239,65 @@ class ImportResult(BaseModel):
     review_count: int = 0
     review_details: list[str] = []
     errors: list[str]
+
+
+# â”€â”€ Brokerage notes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+class BrokerageNoteOperation(BaseModel):
+    asset_class: str
+    ticker: str = Field(..., min_length=1, max_length=30)
+    operation_type: str
+    quantity: str
+    gross_value: str
+
+    @field_validator("ticker")
+    @classmethod
+    def brokerage_ticker_upper(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class BrokerageNoteCalculateRequest(BaseModel):
+    note_date: str
+    debit_credit: str
+    net_amount: str
+    operations: list[BrokerageNoteOperation]
+
+
+class BrokerageNoteSaveRequest(BrokerageNoteCalculateRequest):
+    portfolio_id: int
+
+
+class BrokerageNoteEventPreview(BaseModel):
+    asset_class: str
+    ticker: str
+    event_type: str
+    event_date: str
+    quantity: str
+    calculated_price: str
+    gross_value: str
+    allocated_fee: str
+    event_value: str
+
+
+class BrokerageNoteSummary(BaseModel):
+    purchase_total: str
+    sale_total: str
+    operation_total: str
+    operation_difference: str
+    total_costs: str
+    allocated_fee_total: str
+    calculated_signed_total: str
+    reconciliation_difference: str
+    reconciled: bool
+    messages: list[str] = []
+
+
+class BrokerageNoteCalculationResponse(BaseModel):
+    note: dict[str, Any]
+    summary: BrokerageNoteSummary
+    events: list[BrokerageNoteEventPreview]
+
+
+class BrokerageNoteSaveResponse(BaseModel):
+    calculation: BrokerageNoteCalculationResponse
+    import_result: ImportResult

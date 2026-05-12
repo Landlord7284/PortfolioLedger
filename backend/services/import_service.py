@@ -305,10 +305,13 @@ def _flag_duplicate(conn, event_id: int, asset_id: int) -> None:
 # Import pipeline
 # ─────────────────────────────────────────────────────────────
 
-def import_to_ledger(
+def import_events_to_ledger(
     conn,
-    source: Path | str | BinaryIO,
+    parsed: list[dict],
     portfolio_id: int,
+    source: str = "import_xlsx",
+    notes_prefix: str = "Importado de planilha",
+    source_row_offset: int = 1,
 ) -> dict:
     """
     Full import pipeline: parse XLSX → create assets → create events.
@@ -320,8 +323,6 @@ def import_to_ledger(
     from backend.services.asset_service import match_asset, create_asset, build_operation_payload
     from backend.services.event_service import create_event
     from backend.database import next_sequence
-
-    parsed = parse_xlsx(source)
 
     imported = 0
     skipped = 0
@@ -342,8 +343,8 @@ def import_to_ledger(
                 event_type=ev["event_type"],
                 quantity=ev["quantity"],
                 event_value=ev["event_value"],
-                notes=f"Importado de planilha (linha {i + 1})",
-                source_row=i + 1,
+                notes=f"{notes_prefix} (linha {i + source_row_offset})",
+                source_row=i + source_row_offset,
             )
             # Resolve or create asset through the central ticker + class + market matcher.
             match = match_asset(
@@ -351,7 +352,7 @@ def import_to_ledger(
                 ticker=ev["ticker"],
                 asset_class=ev["asset_class"],
                 event_date=ev["event_date"],
-                source="import_xlsx",
+                source=source,
                 create_review=True,
                 operation_payload=operation_payload,
             )
@@ -365,14 +366,14 @@ def import_to_ledger(
                     market=match.get("market"),
                     valid_from=None,
                     event_date=ev["event_date"],
-                    source="import_xlsx",
+                    source=source,
                 )
                 asset_id = asset["id"]
             else:
                 review_count += 1
                 skipped += 1
                 review_details.append(
-                    f"Linha {i + 1}: {ev['ticker']} ({ev['asset_class']}) em {ev['event_date']} enviado para revisão"
+                    f"Linha {i + source_row_offset}: {ev['ticker']} ({ev['asset_class']}) em {ev['event_date']} enviado para revisão"
                 )
                 continue
 
@@ -427,7 +428,7 @@ def import_to_ledger(
                     event_date=ev["event_date"],
                     quantity=ev["quantity"],
                     event_value=ev["event_value"],
-                    notes=f"Importado de planilha (linha {i + 1})",
+                    notes=f"{notes_prefix} (linha {i + source_row_offset})",
                 )
                 imported += 1
 
@@ -445,3 +446,15 @@ def import_to_ledger(
         "review_details": review_details,
         "errors": errors,
     }
+
+
+def import_to_ledger(
+    conn,
+    source: Path | str | BinaryIO,
+    portfolio_id: int,
+) -> dict:
+    """
+    Full import pipeline: parse XLSX -> create assets -> create events.
+    """
+    parsed = parse_xlsx(source)
+    return import_events_to_ledger(conn, parsed, portfolio_id)

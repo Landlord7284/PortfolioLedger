@@ -12,6 +12,7 @@ export const AppContext = createContext(null);
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
 const AssetManagement = lazy(() => import('./pages/AssetManagement'));
+const BrokerageNote = lazy(() => import('./pages/BrokerageNote'));
 const Settings = lazy(() => import('./pages/Settings'));
 
 function RouteLoading() {
@@ -82,6 +83,7 @@ function App() {
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/asset-management" element={<AssetManagement />} />
+                <Route path="/brokerage-note" element={<BrokerageNote />} />
                 <Route path="/assets/:assetId" element={<AssetDetail />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
