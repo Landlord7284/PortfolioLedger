@@ -15,6 +15,11 @@ const AssetManagement = lazy(() => import('./pages/AssetManagement'));
 const BrokerageNote = lazy(() => import('./pages/BrokerageNote'));
 const Settings = lazy(() => import('./pages/Settings'));
 
+const getStoredActivePortfolioId = () => {
+  const storedId = Number(localStorage.getItem('activePortfolioId'));
+  return Number.isInteger(storedId) && storedId > 0 ? storedId : null;
+};
+
 function RouteLoading() {
   return (
     <div className="flex min-h-[40vh] items-center justify-center gap-2 text-muted-foreground">
@@ -26,7 +31,7 @@ function RouteLoading() {
 
 function App() {
   const [portfolioList, setPortfolioList] = useState([]);
-  const [activePortfolioId, setActivePortfolioId] = useState(null);
+  const [activePortfolioId, setActivePortfolioId] = useState(getStoredActivePortfolioId);
   const [loading, setLoading] = useState(true);
   const [hideValues, setHideValues] = useState(() => {
     return localStorage.getItem('hideValues') === 'true';
@@ -45,13 +50,25 @@ function App() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    if (activePortfolioId) {
+      localStorage.setItem('activePortfolioId', activePortfolioId.toString());
+    } else {
+      localStorage.removeItem('activePortfolioId');
+    }
+  }, [activePortfolioId]);
+
   const refreshPortfolios = async () => {
     try {
       const list = await portfolioApi.list();
       setPortfolioList(list);
-      if (list.length > 0 && !activePortfolioId) {
-        setActivePortfolioId(list[0].id);
-      }
+      setActivePortfolioId((currentActiveId) => {
+        const candidateId = currentActiveId || getStoredActivePortfolioId();
+        if (candidateId && list.some((portfolio) => portfolio.id === candidateId)) {
+          return candidateId;
+        }
+        return list[0]?.id || null;
+      });
     } catch (err) {
       console.error('Failed to load portfolios:', err);
       toast.error(err.message || 'Falha ao carregar carteiras.');

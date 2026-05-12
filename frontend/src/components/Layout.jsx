@@ -1,10 +1,13 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useContext } from 'react';
 import { AppContext } from '../App';
-import { LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Briefcase, Wallet, Layers3, ReceiptText, Moon, Sun } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Check, ChevronsUpDown, LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Wallet, Layers3, ReceiptText, Moon, Sun } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -25,6 +28,7 @@ export default function Layout({ children }) {
   const isSettings = location.pathname === '/settings';
   const isAssetManagement = location.pathname === '/asset-management';
   const isBrokerageNote = location.pathname === '/brokerage-note';
+  const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
 
   const pageTitle = () => {
     if (location.pathname === '/settings') return 'Configurações';
@@ -37,14 +41,49 @@ export default function Layout({ children }) {
   return (
     <SidebarProvider>
       <Sidebar className="border-r border-sidebar-border">
-        <SidebarHeader className="border-b border-sidebar-border px-5 py-4">
-          <div className="flex items-center gap-2">
-            <Briefcase className="w-5 h-5 text-sidebar-primary" />
-            <div>
-              <h1 className="text-sm font-semibold leading-none">Portfolio Ledger</h1>
-              <p className="text-[11px] text-sidebar-foreground/50 mt-0.5">Controle Patrimonial</p>
-            </div>
-          </div>
+        <SidebarHeader className="px-3 py-3">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild disabled={portfolioList.length === 0}>
+                  <SidebarMenuButton
+                    size="lg"
+                    className="h-14 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                  >
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                      <Wallet className="size-4" />
+                    </div>
+                    <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+                      <span className="truncate font-semibold">
+                        {activePortfolio?.name || 'Nenhuma carteira'}
+                      </span>
+                      <span className="truncate text-xs text-sidebar-foreground/60">
+                        Carteira ativa
+                      </span>
+                    </div>
+                    <ChevronsUpDown className="ml-auto size-4 text-sidebar-foreground/60" />
+                  </SidebarMenuButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="right"
+                  align="start"
+                  className="min-w-56"
+                >
+                  {portfolioList.map((portfolio) => (
+                    <DropdownMenuItem
+                      key={portfolio.id}
+                      onSelect={() => setActivePortfolioId(Number(portfolio.id))}
+                      className="gap-2"
+                    >
+                      <Wallet className="size-4 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate">{portfolio.name}</span>
+                      {portfolio.id === activePortfolioId && <Check className="size-4" />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </SidebarHeader>
 
         <SidebarContent className="px-3 py-3">
@@ -87,7 +126,29 @@ export default function Layout({ children }) {
           </SidebarMenu>
         </SidebarContent>
 
-        <SidebarFooter className="border-t border-sidebar-border p-4">
+        <SidebarFooter className="border-t border-sidebar-border p-3">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                tooltip={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}
+              >
+                {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+                <span>{theme === 'dark' ? 'Tema claro' : 'Tema escuro'}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => setHideValues(!hideValues)}
+                tooltip={hideValues ? 'Mostrar valores' : 'Ocultar valores'}
+              >
+                {hideValues ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                <span>{hideValues ? 'Mostrar valores' : 'Ocultar valores'}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+
           <p className="text-[10px] text-sidebar-foreground/40 uppercase tracking-wider font-medium">
             Versão 1.1.4
           </p>
@@ -95,54 +156,10 @@ export default function Layout({ children }) {
       </Sidebar>
 
       <SidebarInset>
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 px-4 sm:px-6 border-b border-border bg-background/95 backdrop-blur-sm">
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-4 px-4 sm:px-6 bg-background/95 backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <SidebarTrigger />
             <h2 className="text-sm font-semibold">{pageTitle()}</h2>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              title={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}
-            >
-              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
-
-            {portfolioList.length > 0 && (
-              <>
-                <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
-                  <Wallet className="w-3.5 h-3.5" />
-                  <span>Carteira</span>
-                </div>
-                <Select
-                  value={activePortfolioId?.toString() || ''}
-                  onValueChange={(val) => setActivePortfolioId(Number(val))}
-                >
-                  <SelectTrigger className="w-[150px] sm:w-[180px]">
-                    <SelectValue placeholder="Selecione..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {portfolioList.map((p) => (
-                      <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Separator orientation="vertical" className="h-6 hidden sm:block" />
-
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setHideValues(!hideValues)}
-                  title={hideValues ? "Mostrar valores" : "Ocultar valores"}
-                >
-                  {hideValues ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </>
-            )}
           </div>
         </header>
 
