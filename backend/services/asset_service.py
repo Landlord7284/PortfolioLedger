@@ -75,10 +75,11 @@ def build_operation_payload(
     event_type: Optional[str] = None,
     quantity: Optional[str] = None,
     event_value: Optional[str] = None,
+    gross_value: Optional[str] = None,
     notes: Optional[str] = None,
     source_row: Optional[int] = None,
 ) -> dict | None:
-    if not any([portfolio_id, event_type, quantity, event_value, notes, source_row]):
+    if not any([portfolio_id, event_type, quantity, event_value, gross_value, notes, source_row]):
         return None
     payload = {
         "ticker": _normalize_ticker(ticker),
@@ -89,6 +90,7 @@ def build_operation_payload(
         "event_type": event_type,
         "quantity": quantity,
         "event_value": event_value,
+        "gross_value": gross_value,
         "notes": notes,
     }
     if source_row is not None:
@@ -240,6 +242,7 @@ def create_asset(
     event_type: Optional[str] = None,
     quantity: Optional[str] = None,
     event_value: Optional[str] = None,
+    gross_value: Optional[str] = None,
     notes: Optional[str] = None,
     source_row: Optional[int] = None,
     source: str = "manual",
@@ -260,6 +263,7 @@ def create_asset(
             event_type=event_type,
             quantity=quantity,
             event_value=event_value,
+            gross_value=gross_value,
             notes=notes,
             source_row=source_row,
         )
@@ -275,6 +279,7 @@ def create_asset(
         event_type=event_type,
         quantity=quantity,
         event_value=event_value,
+        gross_value=gross_value,
         notes=notes,
         source_row=source_row,
     )

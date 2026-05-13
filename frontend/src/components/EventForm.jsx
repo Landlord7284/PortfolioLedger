@@ -113,6 +113,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   const [eventDate, setEventDate] = useState(today);
   const [quantity, setQuantity] = useState('');
   const [eventValue, setEventValue] = useState('');
+  const [grossValue, setGrossValue] = useState('');
   const [notes, setNotes] = useState('');
 
   const [isNewAsset, setIsNewAsset] = useState(false);
@@ -188,6 +189,11 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
     return currencyToBackend(val);
   };
 
+  const grossValuePayload = (val, evType) => {
+    if (evType !== 'Venda') return {};
+    return { gross_value: currencyToBackend(val) };
+  };
+
   const normalizeQuantity = (val) => {
     return val.replace(',', '.');
   };
@@ -228,6 +234,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             event_type: eventType,
             quantity: normalizeQuantity(quantity),
             event_value: normalizeValue(eventValue, eventType),
+            ...grossValuePayload(grossValue, eventType),
             notes: notes || null,
             source: 'event_form',
           });
@@ -247,6 +254,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
           event_date: eventDate,
           quantity: normalizeQuantity(quantity),
           event_value: normalizeValue(eventValue, eventType),
+          ...grossValuePayload(grossValue, eventType),
           notes: notes || null,
         });
         toast.success('Evento lançado com sucesso.');
@@ -440,7 +448,10 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Tipo de Evento</Label>
-              <Select value={eventType} onValueChange={setEventType}>
+              <Select value={eventType} onValueChange={(val) => {
+                setEventType(val);
+                if (val !== 'Venda') setGrossValue('');
+              }}>
                 <SelectTrigger className="h-9">
                   <SelectValue />
                 </SelectTrigger>
@@ -466,14 +477,27 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
               />
             </div>
             {!VALUE_IGNORED.includes(eventType) && (
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Total do Evento</Label>
-                <Input 
-                  value={eventValue} 
-                  onChange={(e) => setEventValue(applyCurrencyMask(e.target.value))} 
-                  placeholder="0,00" 
-                  required 
-                />
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Líquido</Label>
+                  <Input 
+                    value={eventValue} 
+                    onChange={(e) => setEventValue(applyCurrencyMask(e.target.value))} 
+                    placeholder="0,00" 
+                    required 
+                  />
+                </div>
+                {eventType === 'Venda' && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Bruto</Label>
+                    <Input 
+                      value={grossValue} 
+                      onChange={(e) => setGrossValue(applyCurrencyMask(e.target.value))} 
+                      placeholder="0,00" 
+                      required 
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

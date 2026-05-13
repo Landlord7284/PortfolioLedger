@@ -55,6 +55,7 @@ class AssetCreate(BaseModel):
     event_type: Optional[str] = None
     quantity: Optional[str] = None
     event_value: Optional[str] = None
+    gross_value: Optional[str] = None
     notes: Optional[str] = None
 
     @field_validator("ticker")
@@ -161,6 +162,7 @@ class EventCreate(BaseModel):
     event_date: str            # ISO date  YYYY-MM-DD
     quantity: str              # Decimal as string
     event_value: str           # Decimal as string
+    gross_value: Optional[str] = None  # Decimal as string, only for Venda
     notes: Optional[str] = None
 
 
@@ -183,6 +185,7 @@ class EventCorrection(BaseModel):
     event_date: str
     quantity: str
     event_value: str
+    gross_value: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -194,6 +197,7 @@ class EventResponse(BaseModel):
     event_date: str
     quantity: str
     event_value: str
+    gross_value: Optional[str] = None
     sequence_num: int
     storno_of: Optional[int] = None
     correction_of: Optional[int] = None

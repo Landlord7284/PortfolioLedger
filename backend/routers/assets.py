@@ -46,6 +46,7 @@ def create(body: AssetCreate):
                 event_type=body.event_type,
                 quantity=body.quantity,
                 event_value=body.event_value,
+                gross_value=body.gross_value,
                 notes=body.notes,
                 source=body.source or "manual",
             )

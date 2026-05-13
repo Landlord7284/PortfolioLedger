@@ -40,6 +40,7 @@ def create_event(body: EventCreate):
                 event_date=body.event_date,
                 quantity=body.quantity,
                 event_value=body.event_value,
+                gross_value=body.gross_value,
                 notes=body.notes,
             )
         except EngineValidationError as e:
@@ -62,6 +63,7 @@ def create_events_bulk(body: EventBulkCreate):
                     "event_date": ev.event_date,
                     "quantity": ev.quantity,
                     "event_value": ev.event_value,
+                    "gross_value": ev.gross_value,
                     "notes": ev.notes,
                 }
                 for ev in body.events
@@ -115,6 +117,7 @@ def correct(event_id: int, body: EventCorrection):
                 event_date=body.event_date,
                 quantity=body.quantity,
                 event_value=body.event_value,
+                gross_value=body.gross_value,
                 notes=body.notes,
             )
         except ValueError as e:

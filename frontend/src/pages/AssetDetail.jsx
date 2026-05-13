@@ -583,8 +583,8 @@ export default function AssetDetail() {
                   <TableHead>Data</TableHead>
                   <TableHead>Evento</TableHead>
                   <TableHead className="text-right">Quantidade</TableHead>
-                  <TableHead className="text-right">Valor Operação</TableHead>
                   <TableHead className="text-right">Valor Op. Líq</TableHead>
+                  <TableHead className="text-right">Valor Op. Bruto</TableHead>
                   <TableHead className="text-right">Preço Un.</TableHead>
                   <TableHead className="text-right">Resultado</TableHead>
                   <TableHead className="text-right">Qtd. Total</TableHead>

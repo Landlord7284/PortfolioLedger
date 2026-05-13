@@ -133,6 +133,7 @@ def create_event(
     event_date: str,
     quantity: str,
     event_value: str,
+    gross_value: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> dict:
     """
@@ -145,10 +146,12 @@ def create_event(
 
     qty = to_decimal(quantity)
     val = to_decimal(event_value)
+    gross = to_decimal(gross_value) if gross_value and et == EventType.VENDA else None
 
     # For value-ignored events, force value to zero
     if et in EventType.value_ignored():
         val = Decimal("0")
+        gross = None
 
     # Build a temporary EventRecord for validation
     seq = next_sequence(conn)
@@ -181,11 +184,11 @@ def create_event(
     cur = conn.execute(
         """
         INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
-                            quantity, event_value, sequence_num, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            quantity, event_value, gross_value, sequence_num, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (portfolio_id, asset_id, et.value, event_date,
-         str(qty), str(val), seq, notes),
+         str(qty), str(val), str(gross) if gross is not None else None, seq, notes),
     )
     event_id = cur.lastrowid
 
@@ -219,6 +222,7 @@ def create_events_bulk(
             event_date=ev_data["event_date"],
             quantity=ev_data["quantity"],
             event_value=ev_data["event_value"],
+            gross_value=ev_data.get("gross_value"),
             notes=ev_data.get("notes"),
         )
         created.append(ev)
@@ -262,9 +266,9 @@ def storno_event(
     cur = conn.execute(
         """
         INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
-                            quantity, event_value, sequence_num,
+                            quantity, event_value, gross_value, sequence_num,
                             storno_of, is_storno, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         """,
         (
             original["portfolio_id"],
@@ -273,6 +277,7 @@ def storno_event(
             original["event_date"],
             original["quantity"],
             original["event_value"],
+            original["gross_value"],
             seq,
             event_id,
             notes or f"Estorno do evento #{event_id}",
@@ -298,6 +303,7 @@ def correct_event(
     event_date: str,
     quantity: str,
     event_value: str,
+    gross_value: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> dict:
     """
@@ -315,9 +321,11 @@ def correct_event(
     et = EventType(event_type)
     qty = to_decimal(quantity)
     val = to_decimal(event_value)
+    gross = to_decimal(gross_value) if gross_value and et == EventType.VENDA else None
 
     if et in EventType.value_ignored():
         val = Decimal("0")
+        gross = None
 
     seq = next_sequence(conn)
 
@@ -325,9 +333,9 @@ def correct_event(
     cur = conn.execute(
         """
         INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
-                            quantity, event_value, sequence_num,
+                            quantity, event_value, gross_value, sequence_num,
                             correction_of, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             original["portfolio_id"],
@@ -336,6 +344,7 @@ def correct_event(
             event_date,
             str(qty),
             str(val),
+            str(gross) if gross is not None else None,
             seq,
             event_id,
             notes or f"Correção do evento #{event_id}",
