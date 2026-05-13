@@ -169,10 +169,12 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   };
 
   useEffect(() => {
-    if (bulkSameDate && bulkRows.length > 1) {
-      const firstDate = bulkRows[0].date;
-      setBulkRows(prev => prev.map(r => ({ ...r, date: firstDate })));
-    }
+    if (!bulkSameDate) return;
+    setBulkRows(prev => {
+      if (prev.length <= 1) return prev;
+      const firstDate = prev[0].date;
+      return prev.map(r => ({ ...r, date: firstDate }));
+    });
   }, [bulkSameDate]);
 
   const removeBulkRow = (id) => {

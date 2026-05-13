@@ -201,6 +201,10 @@ class EventResponse(BaseModel):
     is_cancelled: bool
     duplicate_flag: bool = False
     realized_event_result: Optional[str] = None
+    unit_price: Optional[str] = None
+    running_quantity: Optional[str] = None
+    running_total_cost: Optional[str] = None
+    net_operation_value: Optional[str] = None
     notes: Optional[str] = None
     created_at: str
 

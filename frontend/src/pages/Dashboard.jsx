@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext, useMemo } from 'react';
+import { useState, useEffect, useContext, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { positions as posApi } from '../api/client';
@@ -63,7 +63,7 @@ export default function Dashboard() {
     localStorage.setItem('showRedeemed', showRedeemed);
   }, [showRedeemed]);
 
-  const loadPositions = async () => {
+  const loadPositions = useCallback(async () => {
     if (!activePortfolioId) {
       setPositionList([]);
       setLoading(false);
@@ -79,11 +79,11 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activePortfolioId]);
 
   useEffect(() => {
     loadPositions();
-  }, [activePortfolioId]);
+  }, [loadPositions]);
 
   const positionsWithShare = useMemo(() => {
     const allocationBase = positionList.filter((p) => showRedeemed || toNumber(p.quantity) !== 0);

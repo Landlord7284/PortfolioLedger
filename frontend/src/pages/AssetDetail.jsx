@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { assets as assetsApi, events as eventsApi, positions as posApi } from '../api/client';
@@ -17,7 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from 'sonner';
-import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput, formatMoney, formatQuantity, getQuantityDecimals } from '@/lib/formatters';
+import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput, formatMoney, formatQuantity } from '@/lib/formatters';
 
 // Editable Metadata Component
 function AssetMetadataCard({ asset, onSave }) {
@@ -294,7 +294,7 @@ export default function AssetDetail() {
   // Alert Dialog State
   const [alertTarget, setAlertTarget] = useState(null); // { type, payload, title, desc, actionLabel, actionFn, variant }
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [a, evts] = await Promise.all([
@@ -316,11 +316,11 @@ export default function AssetDetail() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activePortfolioId, assetId]);
 
   useEffect(() => {
     if (activePortfolioId) load();
-  }, [assetId, activePortfolioId]);
+  }, [activePortfolioId, load]);
 
   const displayError = (msg) => {
     setError(msg);
@@ -583,8 +583,12 @@ export default function AssetDetail() {
                   <TableHead>Data</TableHead>
                   <TableHead>Evento</TableHead>
                   <TableHead className="text-right">Quantidade</TableHead>
-                  <TableHead className="text-right">Valor</TableHead>
+                  <TableHead className="text-right">Valor Operação</TableHead>
+                  <TableHead className="text-right">Valor Op. Líq</TableHead>
+                  <TableHead className="text-right">Preço Un.</TableHead>
                   <TableHead className="text-right">Resultado</TableHead>
+                  <TableHead className="text-right">Qtd. Total</TableHead>
+                  <TableHead className="text-right">Custo Acum.</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
@@ -622,8 +626,20 @@ export default function AssetDetail() {
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">{displayQuantity(ev.quantity)}</TableCell>
                       <TableCell className="text-right font-mono text-sm">R$ {displayMoney(ev.event_value)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {ev.net_operation_value ? `R$ ${displayMoney(ev.net_operation_value)}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {ev.unit_price ? `R$ ${displayMoney(ev.unit_price)}` : '—'}
+                      </TableCell>
                       <TableCell className={`text-right font-mono text-sm ${!hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) > 0 ? 'text-emerald-500' : !hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) < 0 ? 'text-red-500' : ''}`}>
                         {ev.realized_event_result ? `R$ ${displayMoney(ev.realized_event_result)}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {ev.running_quantity ? displayQuantity(ev.running_quantity) : '—'}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {ev.running_total_cost ? `R$ ${displayMoney(ev.running_total_cost)}` : '—'}
                       </TableCell>
                       <TableCell>
                         {isCancelled && <span className="text-destructive text-xs font-medium">Cancelado</span>}

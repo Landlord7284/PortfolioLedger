@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { assets as assetsApi } from '../api/client';
 import { AlertTriangle, Check, ChevronsUpDown, ExternalLink, GitMerge, Loader2, Search } from 'lucide-react';
@@ -108,7 +108,7 @@ export default function AssetManagement() {
   const [mergeTargetId, setMergeTargetId] = useState('');
   const navigate = useNavigate();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [assets, pending] = await Promise.all([
@@ -122,11 +122,11 @@ export default function AssetManagement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [includeMerged]);
 
   useEffect(() => {
     load();
-  }, [includeMerged]);
+  }, [load]);
 
   const openAsset = async (asset) => {
     setSelectedAsset(asset);

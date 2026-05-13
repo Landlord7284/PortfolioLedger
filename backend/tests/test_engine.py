@@ -17,6 +17,7 @@ from backend.domain.engine import (
     EngineValidationError,
     process_event,
     replay_events,
+    replay_events_with_snapshots,
     to_decimal,
 )
 from backend.domain.enums import EventType
@@ -369,6 +370,36 @@ class TestComplexScenarios:
         assert pos.quantity == D("0.00500000")
         assert pos.total_cost == D("350")
         assert pos.average_price == D("350") / D("0.005")
+
+
+class TestReplaySnapshots:
+    def test_running_values_and_unit_price_follow_chronological_replay(self):
+        events = [
+            _ev(1, EventType.COMPRA, "10", "1000", date="2024-01-01"),
+            _ev(2, EventType.VENDA, "4", "600", date="2024-01-02"),
+            _ev(3, EventType.AMORTIZACAO, "0", "100", date="2024-01-03"),
+            _ev(4, EventType.COMPRA, "10", "9999", date="2024-01-04", is_cancelled=True),
+        ]
+
+        snapshots = replay_events_with_snapshots(events)
+
+        assert snapshots[1]["unit_price"] == D("100")
+        assert snapshots[1]["running_quantity"] == D("10")
+        assert snapshots[1]["running_total_cost"] == D("1000")
+        assert snapshots[1]["realized_event_result"] is None
+
+        assert snapshots[2]["unit_price"] == D("150")
+        assert snapshots[2]["running_quantity"] == D("6")
+        assert snapshots[2]["running_total_cost"] == D("600")
+        assert snapshots[2]["realized_event_result"] == D("200")
+
+        assert snapshots[3]["unit_price"] is None
+        assert snapshots[3]["running_quantity"] == D("6")
+        assert snapshots[3]["running_total_cost"] == D("500")
+
+        assert snapshots[4]["unit_price"] == D("999.9")
+        assert snapshots[4]["running_quantity"] == D("6")
+        assert snapshots[4]["running_total_cost"] == D("500")
 
 
 # ═════════════════════════════════════════════════════════════

@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from typing import Any
+from typing import Any, TypedDict
 
 from .enums import EventType
 
@@ -92,6 +92,13 @@ class EventRecord:
     sequence_num: int
     is_cancelled: bool = False
     is_storno: bool = False
+
+
+class EventReplaySnapshot(TypedDict):
+    realized_event_result: Decimal | None
+    running_quantity: Decimal
+    running_total_cost: Decimal
+    unit_price: Decimal | None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -305,6 +312,30 @@ def replay_events_with_results(events: list[EventRecord]) -> dict[int, Decimal]:
         if realized != _ZERO and not ev.is_cancelled and not ev.is_storno:
             results[ev.id] = realized
     return results
+
+
+def replay_events_with_snapshots(events: list[EventRecord]) -> dict[int, EventReplaySnapshot]:
+    """
+    Replay events and return per-event derived values for ledger display.
+
+    The running values represent the state after each event is processed in
+    chronological order. Cancelled and storno events are represented, but do
+    not mutate the running state.
+    """
+    state = PositionState()
+    snapshots: dict[int, EventReplaySnapshot] = {}
+    for ev in events:
+        unit_price = ev.event_value / ev.quantity if ev.quantity > _ZERO else None
+        realized = process_event(ev, state, skip_validation=False)
+        snapshots[ev.id] = {
+            "realized_event_result": realized
+            if realized != _ZERO and not ev.is_cancelled and not ev.is_storno
+            else None,
+            "running_quantity": state.quantity,
+            "running_total_cost": state.total_cost,
+            "unit_price": unit_price,
+        }
+    return snapshots
 
 
 def validate_event_standalone(event: EventRecord, prior_events: list[EventRecord]) -> None:

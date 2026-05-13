@@ -18,7 +18,7 @@ from backend.domain.engine import (
     EngineValidationError,
     process_event,
     replay_events,
-    replay_events_with_results,
+    replay_events_with_snapshots,
     to_decimal,
 )
 from backend.domain.enums import EventType
@@ -448,7 +448,7 @@ def list_events(
     """List events with optional filters, ordered chronologically.
 
     When filtering by both asset_id and portfolio_id, the response
-    includes a computed ``realized_event_result`` for each exit event.
+    includes computed per-event ledger display fields.
     """
     conditions = []
     params = []
@@ -470,19 +470,39 @@ def list_events(
     if asset_id is not None and portfolio_id is not None:
         records = _rows_to_event_records(rows)
         try:
-            per_event_results = replay_events_with_results(records)
+            per_event_snapshots = replay_events_with_snapshots(records)
         except EngineValidationError:
-            per_event_results = {}
+            per_event_snapshots = {}
 
         for ev_dict in events_list:
-            result_val = per_event_results.get(ev_dict["id"])
-            if result_val is not None:
-                ev_dict["realized_event_result"] = str(result_val)
+            snapshot = per_event_snapshots.get(ev_dict["id"])
+            if snapshot is not None:
+                ev_dict["realized_event_result"] = (
+                    str(snapshot["realized_event_result"])
+                    if snapshot["realized_event_result"] is not None
+                    else None
+                )
+                ev_dict["unit_price"] = (
+                    str(snapshot["unit_price"])
+                    if snapshot["unit_price"] is not None
+                    else None
+                )
+                ev_dict["running_quantity"] = str(snapshot["running_quantity"])
+                ev_dict["running_total_cost"] = str(snapshot["running_total_cost"])
+                ev_dict["net_operation_value"] = None
             else:
                 ev_dict["realized_event_result"] = None
+                ev_dict["unit_price"] = None
+                ev_dict["running_quantity"] = None
+                ev_dict["running_total_cost"] = None
+                ev_dict["net_operation_value"] = None
     else:
         for ev_dict in events_list:
             ev_dict["realized_event_result"] = None
+            ev_dict["unit_price"] = None
+            ev_dict["running_quantity"] = None
+            ev_dict["running_total_cost"] = None
+            ev_dict["net_operation_value"] = None
 
     return events_list
 
@@ -495,6 +515,10 @@ def get_event(conn: sqlite3.Connection, event_id: int) -> dict | None:
         return None
     d = dict(row)
     d["realized_event_result"] = None
+    d["unit_price"] = None
+    d["running_quantity"] = None
+    d["running_total_cost"] = None
+    d["net_operation_value"] = None
     return d
 
 
