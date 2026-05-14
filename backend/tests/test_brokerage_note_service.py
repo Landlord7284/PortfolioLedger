@@ -52,8 +52,8 @@ def test_base_spreadsheet_case():
     assert result["events"][0]["event_type"] == "Compra"
     assert result["events"][0]["quantity"] == "1600"
     assert result["events"][0]["calculated_price"] == "3.67"
-    assert result["events"][0]["allocated_fee"] == "1.75"
-    assert result["events"][0]["event_value"] == "5873.75"
+    assert result["events"][0]["allocated_fee"] == "1.76"
+    assert result["events"][0]["event_value"] == "5873.76"
 
     assert result["events"][1]["ticker"] == "LJQQ33"
     assert result["events"][1]["event_type"] == "Venda"
@@ -61,6 +61,48 @@ def test_base_spreadsheet_case():
     assert result["events"][1]["calculated_price"] == "1.96"
     assert result["events"][1]["allocated_fee"] == "5.87"
     assert result["events"][1]["event_value"] == "19594.13"
+
+
+def test_reconciles_manual_mixed_note_with_largest_remainder_residue():
+    result = calculate_brokerage_note({
+        "note_date": "2025-11-11",
+        "debit_credit": "C",
+        "net_amount": "1158.35",
+        "operations": [
+            _operation("BBAS3", "Venda", "500", "11695.00"),
+            _operation("KLBN4", "Compra", "2000", "7160.00"),
+            _operation("SLCE3", "Compra", "200", "3370.00"),
+        ],
+    })
+
+    assert result["summary"]["purchase_total"] == "10530.00"
+    assert result["summary"]["sale_total"] == "11695.00"
+    assert result["summary"]["operation_difference"] == "-1165.00"
+    assert result["summary"]["total_costs"] == "6.65"
+    assert result["summary"]["allocated_fee_total"] == "6.65"
+    assert result["summary"]["calculated_signed_total"] == "-1158.35"
+    assert result["summary"]["reconciliation_difference"] == "0.00"
+    assert result["summary"]["reconciled"] is True
+
+    assert [ev["allocated_fee"] for ev in result["events"]] == ["3.50", "2.14", "1.01"]
+    assert [ev["event_value"] for ev in result["events"]] == ["11691.50", "7162.14", "3371.01"]
+
+
+def test_largest_remainder_uses_original_order_as_tie_breaker():
+    result = calculate_brokerage_note(_payload(
+        debit_credit="D",
+        net_amount="300.02",
+        operations=[
+            _operation("AAAA3", "Compra", "1", "100.00"),
+            _operation("BBBB3", "Compra", "1", "100.00"),
+            _operation("CCCC3", "Compra", "1", "100.00"),
+        ],
+    ))
+
+    assert result["summary"]["total_costs"] == "0.02"
+    assert result["summary"]["allocated_fee_total"] == "0.02"
+    assert result["summary"]["reconciliation_difference"] == "0.00"
+    assert [ev["allocated_fee"] for ev in result["events"]] == ["0.01", "0.01", "0.00"]
 
 
 def test_accepts_mojibake_asset_class_alias():

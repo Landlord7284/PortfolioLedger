@@ -72,10 +72,26 @@ def _allocate_costs(operations: list[dict], total_costs: Decimal) -> list[Decima
     weight_total = sum(op["gross_value"] for op in operations)
     if weight_total == 0:
         raise BrokerageNoteValidationError("O total bruto das operações deve ser maior que zero.")
-    return [
-        _display_money(total_costs * op["gross_value"] / weight_total)
-        for op in operations
-    ]
+    allocations = []
+    for idx, op in enumerate(operations):
+        exact_allocation = total_costs * op["gross_value"] / weight_total
+        truncated_allocation = _display_money(exact_allocation)
+        allocations.append({
+            "idx": idx,
+            "value": truncated_allocation,
+            "remainder": exact_allocation - truncated_allocation,
+        })
+
+    allocated_total = sum((item["value"] for item in allocations), Decimal("0.00"))
+    residual = (total_costs - allocated_total).quantize(CENTS, rounding=ROUND_HALF_UP)
+    residual_cents = int(residual / CENTS)
+
+    if residual_cents:
+        ranked = sorted(allocations, key=lambda item: (-item["remainder"], item["idx"]))
+        for item in ranked[:residual_cents]:
+            item["value"] += CENTS
+
+    return [item["value"] for item in sorted(allocations, key=lambda item: item["idx"])]
 
 
 def calculate_brokerage_note(payload: dict) -> dict:

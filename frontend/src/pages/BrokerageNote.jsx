@@ -113,7 +113,7 @@ export default function BrokerageNote() {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
           <ReceiptText className="h-6 w-6" />
-          Rateio de Nota
+          Rateio de Custos. Nota de Corretagem
         </h1>
         <p className="text-sm text-muted-foreground">
           Lance as operações, calcule o rateio no backend e salve os eventos no ledger.
@@ -164,7 +164,7 @@ export default function BrokerageNote() {
                   <TableHead className="min-w-[120px]">Ticker</TableHead>
                   <TableHead className="min-w-[140px]">Operação</TableHead>
                   <TableHead className="min-w-[110px]">Quantidade</TableHead>
-                  <TableHead className="min-w-[130px]">Valor bruto</TableHead>
+                  <TableHead className="min-w-[130px]">Valor Bruto</TableHead>
                   <TableHead className="w-14 text-center">Ação</TableHead>
                 </TableRow>
               </TableHeader>
