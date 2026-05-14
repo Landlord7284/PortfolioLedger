@@ -99,8 +99,8 @@ def test_import_review_stores_operation_payload(tmp_path):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Registro"
-    sheet.append(["Classe", "Ativo", "Evento", "Data", "Quantidade", "Valor Evento"])
-    sheet.append(["FII", "XPTO3", "Compra", "2026-05-11", 10, 1000])
+    sheet.append(["Classe", "Ativo", "Evento", "Data", "Quantidade", "Valor Evento", "Valor Bruto"])
+    sheet.append(["FII", "XPTO3", "Venda", "2026-05-11", 10, 990, 1000])
     stream = BytesIO()
     workbook.save(stream)
     stream.seek(0)
@@ -121,8 +121,64 @@ def test_import_review_stores_operation_payload(tmp_path):
         assert payload["ticker"] == "XPTO3"
         assert payload["asset_class"] == "FII"
         assert payload["portfolio_id"] == portfolio["id"]
-        assert payload["event_type"] == "Compra"
+        assert payload["event_type"] == "Venda"
         assert payload["event_date"] == "2026-05-11"
         assert payload["quantity"] == "10"
-        assert payload["event_value"] == "1000"
+        assert payload["event_value"] == "990"
+        assert payload["gross_value"] == "1000"
         assert payload["source_row"] == 2
+
+
+def test_import_xlsx_persists_gross_value_only_for_sales(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Registro"
+    sheet.append(["Classe", "Ativo", "Evento", "Data", "Quantidade", "Valor Evento", "Valor Bruto"])
+    sheet.append(["Ação", "XPTO3", "Compra", "2026-05-10", 10, 1000, 1005])
+    sheet.append(["Ação", "XPTO3", "Venda", "2026-05-11", 4, 390, 400])
+    stream = BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+
+    with get_db(db_path) as conn:
+        portfolio = create_portfolio(conn, "Principal")
+        result = import_to_ledger(conn, stream, portfolio["id"])
+        rows = conn.execute("SELECT * FROM events ORDER BY id").fetchall()
+
+    assert result["imported"] == 2
+    assert rows[0]["event_type"] == "Compra"
+    assert rows[0]["gross_value"] is None
+    assert rows[1]["event_type"] == "Venda"
+    assert rows[1]["event_value"] == "390"
+    assert rows[1]["gross_value"] == "400"
+
+
+def test_import_xlsx_duplicate_preserves_sale_gross_value(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Registro"
+    sheet.append(["Classe", "Ativo", "Evento", "Data", "Quantidade", "Valor Evento", "Valor Bruto"])
+    sheet.append(["Ação", "XPTO3", "Compra", "2026-05-10", 10, 1000, None])
+    sheet.append(["Ação", "XPTO3", "Venda", "2026-05-11", 4, 390, 400])
+    stream = BytesIO()
+    workbook.save(stream)
+
+    with get_db(db_path) as conn:
+        portfolio = create_portfolio(conn, "Principal")
+        stream.seek(0)
+        first = import_to_ledger(conn, stream, portfolio["id"])
+        stream.seek(0)
+        second = import_to_ledger(conn, stream, portfolio["id"])
+        rows = conn.execute("SELECT * FROM events ORDER BY id").fetchall()
+
+    assert first["duplicates"] == 0
+    assert second["duplicates"] == 2
+    assert rows[3]["event_type"] == "Venda"
+    assert rows[3]["duplicate_flag"] == 1
+    assert rows[3]["gross_value"] == "400"

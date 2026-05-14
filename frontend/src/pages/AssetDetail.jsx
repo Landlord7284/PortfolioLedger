@@ -627,7 +627,7 @@ export default function AssetDetail() {
                       <TableCell className="text-right font-mono text-sm">{displayQuantity(ev.quantity)}</TableCell>
                       <TableCell className="text-right font-mono text-sm">R$ {displayMoney(ev.event_value)}</TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        {ev.net_operation_value ? `R$ ${displayMoney(ev.net_operation_value)}` : '—'}
+                        {ev.gross_value ? `R$ ${displayMoney(ev.gross_value)}` : '—'}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">
                         {ev.unit_price ? `R$ ${displayMoney(ev.unit_price)}` : '—'}

@@ -170,7 +170,7 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
     file-like object (e.g., BytesIO from an upload).
 
     Each dict contains:
-        asset_class, ticker, event_type, event_date, quantity, event_value
+        asset_class, ticker, event_type, event_date, quantity, event_value, gross_value
 
     Raises on unresolvable formulas or unknown labels.
     """
@@ -185,13 +185,14 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
     errors: list[str] = []
 
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=False), start=2):
-        # Columns: A=Classe, B=Ativo, C=Evento, D=Data, E=Quantidade, F=Valor Evento
+        # Columns: A=Classe, B=Ativo, C=Evento, D=Data, E=Quantidade, F=Valor Evento, G=Valor Bruto
         raw_class = row[0].value
         raw_ticker = row[1].value
         raw_event = row[2].value
         raw_date = row[3].value
         raw_qty = row[4].value
         raw_value = row[5].value
+        raw_gross_value = row[6].value if len(row) > 6 else None
 
         # Skip empty rows
         if not raw_class or not raw_ticker or not raw_event:
@@ -234,9 +235,18 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
             errors.append(f"Linha {row_idx}: erro no valor: {e}")
             continue
 
+        gross_value = None
+        if event_type == EventType.VENDA and raw_gross_value not in (None, ""):
+            try:
+                gross_value = _resolve_cell_value(raw_gross_value, f"G{row_idx}")
+            except (ValueError, InvalidOperation) as e:
+                errors.append(f"Linha {row_idx}: erro no valor bruto: {e}")
+                continue
+
         # For value-ignored events, force to zero
         if event_type in EventType.value_ignored():
             event_value = Decimal("0")
+            gross_value = None
 
         events.append({
             "asset_class": asset_class.value,
@@ -245,6 +255,7 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
             "event_date": event_date,
             "quantity": str(quantity),
             "event_value": str(event_value),
+            "gross_value": str(gross_value) if gross_value is not None else None,
         })
 
     if errors:
@@ -334,6 +345,7 @@ def import_events_to_ledger(
 
     for i, ev in enumerate(parsed, start=1):
         try:
+            gross_value = ev.get("gross_value") if ev["event_type"] == EventType.VENDA.value else None
             operation_payload = build_operation_payload(
                 ticker=ev["ticker"],
                 asset_class=ev["asset_class"],
@@ -343,6 +355,7 @@ def import_events_to_ledger(
                 event_type=ev["event_type"],
                 quantity=ev["quantity"],
                 event_value=ev["event_value"],
+                gross_value=gross_value,
                 notes=f"{notes_prefix} (linha {i + source_row_offset})",
                 source_row=i + source_row_offset,
             )
@@ -394,8 +407,8 @@ def import_events_to_ledger(
                 conn.execute(
                     """
                     INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
-                                        quantity, event_value, sequence_num, duplicate_flag, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                                        quantity, event_value, gross_value, sequence_num, duplicate_flag, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                     """,
                     (
                         portfolio_id,
@@ -404,6 +417,7 @@ def import_events_to_ledger(
                         ev["event_date"],
                         ev["quantity"],
                         ev["event_value"],
+                        gross_value,
                         seq,
                         "Possível duplicidade (Importação)",
                     ),
@@ -428,6 +442,7 @@ def import_events_to_ledger(
                     event_date=ev["event_date"],
                     quantity=ev["quantity"],
                     event_value=ev["event_value"],
+                    gross_value=gross_value,
                     notes=f"{notes_prefix} (linha {i + source_row_offset})",
                 )
                 imported += 1

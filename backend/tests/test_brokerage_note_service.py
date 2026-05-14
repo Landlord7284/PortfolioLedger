@@ -1,8 +1,8 @@
 import pytest
 
 from backend.database import get_db, init_db
-from backend.domain.enums import AssetClass
-from backend.services import asset_service
+from backend.domain.enums import AssetClass, EventType
+from backend.services import asset_service, event_service
 from backend.services.brokerage_note_service import (
     BrokerageNoteValidationError,
     calculate_brokerage_note,
@@ -142,6 +142,40 @@ def test_save_creates_ledger_events_through_import_pipeline(tmp_path):
         assert len(rows) == 1
         assert rows[0]["event_type"] == "Compra"
         assert rows[0]["event_value"] == "1001.00"
+
+
+def test_save_persists_sale_gross_value(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "AAAA3", market="BR")
+        event_service.create_event(
+            conn,
+            portfolio["id"],
+            asset["id"],
+            EventType.COMPRA.value,
+            "2026-05-10",
+            "10",
+            "1000",
+        )
+
+        result = save_brokerage_note(
+            conn,
+            _payload(
+                debit_credit="C",
+                net_amount="399.00",
+                operations=[_operation(operation_type="Venda", quantity="4", gross_value="400.00")],
+            ),
+            portfolio["id"],
+        )
+
+        rows = conn.execute("SELECT * FROM events ORDER BY id").fetchall()
+        assert result["import_result"]["imported"] == 1
+        assert rows[1]["event_type"] == "Venda"
+        assert rows[1]["event_value"] == "399.00"
+        assert rows[1]["gross_value"] == "400.00"
 
 
 def test_save_sends_ambiguous_asset_to_review(tmp_path):

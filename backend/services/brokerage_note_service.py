@@ -185,6 +185,7 @@ def save_brokerage_note(conn, payload: dict, portfolio_id: int) -> dict:
             "event_type": ev["event_type"],
             "event_date": ev["event_date"],
             "quantity": ev["quantity"],
+            "gross_value": ev["gross_value"],
             "event_value": ev["event_value"],
         }
         for ev in calculated["events"]
