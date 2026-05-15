@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { assets as assetsApi } from '../api/client';
-import { AlertTriangle, Check, ChevronsUpDown, ExternalLink, GitMerge, Loader2, Search } from 'lucide-react';
+import AssetMetadataCard, { getMissingAssetMetadata } from '../components/AssetMetadataCard';
+import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, Check, ChevronsUpDown, ExternalLink, GitMerge, Loader2, Search } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import { DatePicker } from '@/components/ui/date-picker';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
@@ -22,6 +24,13 @@ const ASSET_CLASSES = [
   'Ação', 'BDR', 'Criptomoeda', 'Debênture', 'CRI', 'CRA',
   'ETF', 'FII', 'FI-INFRA', 'Tesouro Direto', 'Stock', 'REIT',
 ];
+
+const STATUS_PRIORITY = {
+  active: 1,
+  incomplete: 2,
+  duplicate: 3,
+  merged: 4,
+};
 
 function formatDate(value) {
   if (!value) return 'Desde sempre';
@@ -45,6 +54,65 @@ function parseOperationPayload(value) {
   } catch {
     return null;
   }
+}
+
+function getAssetStatusKey(asset) {
+  if (asset.merged_into_asset_id) return 'merged';
+  if (asset.duplicate_flag) return 'duplicate';
+  if (getMissingAssetMetadata(asset).length > 0) return 'incomplete';
+  return 'active';
+}
+
+function compareText(a, b) {
+  return String(a || '').localeCompare(String(b || ''), 'pt-BR', { sensitivity: 'base' });
+}
+
+function compareAssets(a, b, key) {
+  if (key === 'id') return a.id - b.id;
+  if (key === 'ticker') return compareText(a.current_ticker, b.current_ticker);
+  if (key === 'asset_class') return compareText(a.asset_class, b.asset_class);
+  if (key === 'name') return compareText(a.name, b.name);
+  if (key === 'status') {
+    const priorityDiff = STATUS_PRIORITY[getAssetStatusKey(a)] - STATUS_PRIORITY[getAssetStatusKey(b)];
+    return priorityDiff || compareText(a.current_ticker, b.current_ticker) || a.id - b.id;
+  }
+  return 0;
+}
+
+function SortableHead({ sortKey, sort, onSort, children }) {
+  const active = sort.key === sortKey;
+  const Icon = sort.direction === 'asc' ? ArrowUp : ArrowDown;
+
+  return (
+    <TableHead>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="-ml-3 h-8 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+        onClick={() => onSort(sortKey)}
+      >
+        {children}
+        {active && <Icon className="ml-1 h-3.5 w-3.5" />}
+      </Button>
+    </TableHead>
+  );
+}
+
+function MetadataGapIcon({ missingFields }) {
+  return (
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+      {missingFields.length > 0 && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+          </TooltipTrigger>
+          <TooltipContent>
+            Cadastro incompleto: {missingFields.map((field) => field.label).join(', ')}
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </span>
+  );
 }
 
 function AssetCombobox({ options, value, onChange }) {
@@ -106,6 +174,7 @@ export default function AssetManagement() {
   const [tickers, setTickers] = useState([]);
   const [tickerForm, setTickerForm] = useState({ ticker: '', valid_from: '' });
   const [mergeTargetId, setMergeTargetId] = useState('');
+  const [sort, setSort] = useState({ key: 'id', direction: 'asc' });
   const navigate = useNavigate();
 
   const load = useCallback(async () => {
@@ -156,6 +225,12 @@ export default function AssetManagement() {
     }
   };
 
+  const saveAssetMetadata = async (data) => {
+    const updated = await assetsApi.updateMetadata(selectedAsset.id, data);
+    setSelectedAsset(updated);
+    await load();
+  };
+
   const mergeAsset = async () => {
     if (!mergeTargetId) {
       toast.error('Selecione o ativo destino.');
@@ -192,6 +267,14 @@ export default function AssetManagement() {
     }
   };
 
+  const handleSort = (key) => {
+    setSort((current) => (
+      current.key === key
+        ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: 'asc' }
+    ));
+  };
+
   const filtered = assetList.filter((asset) => {
     if (filterClass && asset.asset_class !== filterClass) return false;
     if (!search) return true;
@@ -200,6 +283,17 @@ export default function AssetManagement() {
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(q));
   });
+
+  const sortedAssets = useMemo(() => {
+    return [...filtered]
+      .map((asset, index) => ({ asset, index }))
+      .sort((left, right) => {
+        const direction = sort.direction === 'asc' ? 1 : -1;
+        const result = compareAssets(left.asset, right.asset, sort.key);
+        return result === 0 ? left.index - right.index : result * direction;
+      })
+      .map(({ asset }) => asset);
+  }, [filtered, sort]);
 
   const mergeOptions = assetList.filter((asset) => (
     selectedAsset &&
@@ -322,33 +416,41 @@ export default function AssetManagement() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Ticker</TableHead>
-                  <TableHead>Classe</TableHead>
+                  <SortableHead sortKey="id" sort={sort} onSort={handleSort}>ID</SortableHead>
+                  <SortableHead sortKey="ticker" sort={sort} onSort={handleSort}>Ticker</SortableHead>
+                  <SortableHead sortKey="asset_class" sort={sort} onSort={handleSort}>Classe</SortableHead>
                   <TableHead>Mercado</TableHead>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Status</TableHead>
+                  <SortableHead sortKey="name" sort={sort} onSort={handleSort}>Nome</SortableHead>
+                  <SortableHead sortKey="status" sort={sort} onSort={handleSort}>Status</SortableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((asset) => (
-                  <TableRow key={asset.id} className="cursor-pointer" onClick={() => openAsset(asset)}>
-                    <TableCell className="font-mono text-xs">#{asset.id}</TableCell>
-                    <TableCell className="font-medium">{asset.current_ticker || '-'}</TableCell>
-                    <TableCell><Badge variant="secondary">{asset.asset_class}</Badge></TableCell>
-                    <TableCell className="text-muted-foreground">{asset.market}</TableCell>
-                    <TableCell className="text-muted-foreground">{asset.name || '-'}</TableCell>
-                    <TableCell>
-                      {asset.merged_into_asset_id ? (
-                        <Badge variant="outline">Mesclado em #{asset.merged_into_asset_id}</Badge>
-                      ) : asset.duplicate_flag ? (
-                        <Badge variant="outline" className="text-amber-600">Duplicidade</Badge>
-                      ) : (
-                        <span className="text-xs text-emerald-600">Ativo</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {sortedAssets.map((asset) => {
+                  const missingFields = getMissingAssetMetadata(asset);
+                  return (
+                    <TableRow key={asset.id} className="cursor-pointer" onClick={() => openAsset(asset)}>
+                      <TableCell className="font-mono text-xs">#{asset.id}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <MetadataGapIcon missingFields={missingFields} />
+                          <span>{asset.current_ticker || '-'}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell><Badge variant="secondary">{asset.asset_class}</Badge></TableCell>
+                      <TableCell className="text-muted-foreground">{asset.market}</TableCell>
+                      <TableCell className="text-muted-foreground">{asset.name || '-'}</TableCell>
+                      <TableCell>
+                        {asset.merged_into_asset_id ? (
+                          <Badge variant="outline">Mesclado em #{asset.merged_into_asset_id}</Badge>
+                        ) : asset.duplicate_flag ? (
+                          <Badge variant="outline" className="text-amber-600">Duplicidade</Badge>
+                        ) : (
+                          <span className="text-xs text-emerald-600">Ativo</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -356,7 +458,7 @@ export default function AssetManagement() {
       </Card>
 
       <Dialog open={!!selectedAsset} onOpenChange={(open) => !open && setSelectedAsset(null)}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
           {selectedAsset && (
             <>
               <DialogHeader>
@@ -365,6 +467,8 @@ export default function AssetManagement() {
               </DialogHeader>
 
               <div className="space-y-5">
+                <AssetMetadataCard asset={selectedAsset} onSave={saveAssetMetadata} />
+
                 <div className="rounded-lg border">
                   <div className="border-b px-3 py-2 text-sm font-medium">Histórico de Tickers</div>
                   <div className="divide-y">
