@@ -7,6 +7,7 @@ import { formatMoney, formatQuantity } from '@/lib/formatters';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
@@ -36,10 +37,16 @@ function saveMarkedAssets(portfolioId, year, markedAssets) {
   localStorage.setItem(markedStorageKey(portfolioId, year), JSON.stringify([...markedAssets]));
 }
 
+function toNumber(value) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export default function AssetsAndRightsReport() {
   const { activePortfolioId, portfolioList, hideValues } = useContext(AppContext);
   const [year, setYear] = useState(String(currentYear));
   const [report, setReport] = useState(null);
+  const [filterClass, setFilterClass] = useState('');
   const [markedState, setMarkedState] = useState(() => ({
     key: markedStorageKey(activePortfolioId, currentYear),
     assets: loadMarkedAssets(activePortfolioId, currentYear),
@@ -118,6 +125,26 @@ export default function AssetsAndRightsReport() {
   };
 
   const rows = report?.rows || [];
+  const classes = useMemo(() => [...new Set(rows.map((row) => row.asset_class).filter(Boolean))].sort(), [rows]);
+  const visibleRows = useMemo(() => {
+    if (!filterClass) return rows;
+    return rows.filter((row) => row.asset_class === filterClass);
+  }, [rows, filterClass]);
+  const visibleTotals = useMemo(() => {
+    return visibleRows.reduce(
+      (totals, row) => ({
+        previousYearCost: totals.previousYearCost + toNumber(row.previous_year_cost),
+        currentYearCost: totals.currentYearCost + toNumber(row.current_year_cost),
+      }),
+      { previousYearCost: 0, currentYearCost: 0 }
+    );
+  }, [visibleRows]);
+
+  useEffect(() => {
+    if (filterClass && !classes.includes(filterClass)) {
+      setFilterClass('');
+    }
+  }, [classes, filterClass]);
 
   return (
     <div className="space-y-6">
@@ -146,6 +173,29 @@ export default function AssetsAndRightsReport() {
           </Button>
         </div>
       </div>
+
+      {classes.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground mr-1">Filtrar:</span>
+          <Button
+            variant={!filterClass ? 'default' : 'outline'}
+            size="xs"
+            onClick={() => setFilterClass('')}
+          >
+            Todos
+          </Button>
+          {classes.map((assetClass) => (
+            <Button
+              key={assetClass}
+              variant={filterClass === assetClass ? 'default' : 'outline'}
+              size="xs"
+              onClick={() => setFilterClass(assetClass)}
+            >
+              {assetClass}
+            </Button>
+          ))}
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         <CardHeader className="border-b">
@@ -179,7 +229,7 @@ export default function AssetsAndRightsReport() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row) => {
+                  {visibleRows.map((row) => {
                     const marked = markedAssets.has(row.asset_id);
                     return (
                       <TableRow key={row.asset_id} className={marked ? 'opacity-45' : ''}>
@@ -206,6 +256,25 @@ export default function AssetsAndRightsReport() {
                       </TableRow>
                     );
                   })}
+                  <TableRow className="border-b-0 hover:bg-transparent">
+                    <TableCell colSpan={8} className="h-auto p-0">
+                      <Separator />
+                    </TableCell>
+                  </TableRow>
+                  <TableRow className="border-b-0 hover:bg-transparent">
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                    <TableCell className="font-semibold">TOTAL</TableCell>
+                    <TableCell className="text-right font-mono text-sm font-semibold">
+                      R$ {formatMoney(visibleTotals.previousYearCost, hideValues)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm font-semibold">
+                      R$ {formatMoney(visibleTotals.currentYearCost, hideValues)}
+                    </TableCell>
+                  </TableRow>
                 </TableBody>
               </Table>
             </div>

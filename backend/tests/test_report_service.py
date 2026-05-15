@@ -38,7 +38,7 @@ def test_assets_and_rights_replays_year_end_positions(tmp_path):
     assert row["current_year_cost"] == "1400.00"
 
 
-def test_assets_and_rights_filters_non_report_classes(tmp_path):
+def test_assets_and_rights_includes_fixed_income_classes(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)
 
@@ -50,7 +50,10 @@ def test_assets_and_rights_filters_non_report_classes(tmp_path):
 
         report = report_service.list_assets_and_rights(conn, portfolio["id"], 2025)
 
-    assert report["rows"] == []
+    assert len(report["rows"]) == 1
+    assert report["rows"][0]["asset_class"] == AssetClass.TESOURO_DIRETO.value
+    assert report["rows"][0]["ticker"] == "TD2029"
+    assert report["rows"][0]["current_year_cost"] == "1000.00"
 
 
 def test_assets_and_rights_xlsx_uses_report_rows(tmp_path):

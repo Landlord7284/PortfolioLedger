@@ -28,10 +28,14 @@ from backend.domain.enums import AssetClass, EventType
 REPORT_ASSET_CLASSES = {
     AssetClass.ACAO.value,
     AssetClass.BDR.value,
+    AssetClass.CRA.value,
+    AssetClass.CRI.value,
     AssetClass.CRIPTOMOEDA.value,
+    AssetClass.DEBENTURE.value,
     AssetClass.ETF.value,
     AssetClass.FII.value,
     AssetClass.FI_INFRA.value,
+    AssetClass.TESOURO_DIRETO.value,
     AssetClass.STOCK.value,
     AssetClass.REIT.value,
 }
