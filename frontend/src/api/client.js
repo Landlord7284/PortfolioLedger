@@ -26,6 +26,23 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+async function requestBlob(path, options = {}) {
+  const url = `${BASE_URL}${path}`;
+  const res = await fetch(url, options);
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(body.detail || `HTTP ${res.status}`);
+  }
+
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+  return {
+    blob: await res.blob(),
+    filename: filenameMatch?.[1] || 'relatorio.xlsx',
+  };
+}
+
 // ── Portfolios ──────────────────────────────────────────────
 
 export const portfolios = {
@@ -96,6 +113,17 @@ export const positions = {
     return request(`/positions${params}`);
   },
   get: (portfolioId, assetId) => request(`/positions/${portfolioId}/${assetId}`),
+};
+
+export const reports = {
+  assetsAndRights: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, year });
+    return request(`/reports/assets-and-rights?${params.toString()}`);
+  },
+  assetsAndRightsXlsx: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, year });
+    return requestBlob(`/reports/assets-and-rights.xlsx?${params.toString()}`);
+  },
 };
 
 // ── Import ──────────────────────────────────────────────────

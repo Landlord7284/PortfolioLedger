@@ -13,6 +13,8 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
 const AssetManagement = lazy(() => import('./pages/AssetManagement'));
 const BrokerageNote = lazy(() => import('./pages/BrokerageNote'));
+const AssetsAndRightsReport = lazy(() => import('./pages/AssetsAndRightsReport'));
+const ReportPlaceholder = lazy(() => import('./pages/ReportPlaceholder'));
 const Settings = lazy(() => import('./pages/Settings'));
 
 const getStoredActivePortfolioId = () => {
@@ -112,6 +114,9 @@ function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/asset-management" element={<AssetManagement />} />
                 <Route path="/brokerage-note" element={<BrokerageNote />} />
+                <Route path="/reports/assets-and-rights" element={<AssetsAndRightsReport />} />
+                <Route path="/reports/income" element={<ReportPlaceholder title="Rendimentos" />} />
+                <Route path="/reports/capital-gains" element={<ReportPlaceholder title="Ganho de Capital" />} />
                 <Route path="/assets/:assetId" element={<AssetDetail />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

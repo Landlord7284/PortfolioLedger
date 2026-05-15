@@ -236,6 +236,27 @@ class PositionResponse(BaseModel):
     updated_at: str
 
 
+# ── Reports ─────────────────────────────────────────────────
+
+class AssetsAndRightsRow(BaseModel):
+    asset_id: int
+    asset_class: str
+    ticker: Optional[str] = None
+    quantity: str
+    name: Optional[str] = None
+    cnpj: Optional[str] = None
+    previous_year_cost: str
+    current_year_cost: str
+
+
+class AssetsAndRightsReportResponse(BaseModel):
+    portfolio_id: int
+    year: int
+    previous_cutoff: str
+    current_cutoff: str
+    rows: list[AssetsAndRightsRow]
+
+
 # ── Import ───────────────────────────────────────────────────
 
 class ImportResult(BaseModel):

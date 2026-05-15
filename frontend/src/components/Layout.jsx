@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useContext } from 'react';
 import { AppContext } from '../App';
-import { Check, ChevronsUpDown, LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Wallet, Layers3, ReceiptText, Moon, Sun } from 'lucide-react';
+import { Check, ChevronsUpDown, LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Wallet, Layers3, ReceiptText, Moon, Sun, FileText } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +17,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
@@ -28,12 +31,16 @@ export default function Layout({ children }) {
   const isSettings = location.pathname === '/settings';
   const isAssetManagement = location.pathname === '/asset-management';
   const isBrokerageNote = location.pathname === '/brokerage-note';
+  const isReports = location.pathname.startsWith('/reports/');
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
 
   const pageTitle = () => {
     if (location.pathname === '/settings') return 'Configurações';
     if (location.pathname === '/asset-management') return 'Gestão de Ativos';
     if (location.pathname === '/brokerage-note') return 'Rateio de Nota';
+    if (location.pathname === '/reports/assets-and-rights') return 'Bens e Direitos';
+    if (location.pathname === '/reports/income') return 'Rendimentos';
+    if (location.pathname === '/reports/capital-gains') return 'Ganho de Capital';
     if (location.pathname.startsWith('/assets/')) return 'Detalhe do Ativo';
     return 'Dashboard';
   };
@@ -113,6 +120,36 @@ export default function Layout({ children }) {
                   <span>Rateio de Nota</span>
                 </NavLink>
               </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton isActive={isReports}>
+                <FileText className="w-4 h-4" />
+                <span>Relatórios</span>
+              </SidebarMenuButton>
+              <SidebarMenuSub>
+                <SidebarMenuSubItem>
+                  <SidebarMenuSubButton asChild isActive={location.pathname === '/reports/assets-and-rights'}>
+                    <NavLink to="/reports/assets-and-rights">
+                      <span>Bens e Direitos</span>
+                    </NavLink>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+                <SidebarMenuSubItem>
+                  <SidebarMenuSubButton asChild isActive={location.pathname === '/reports/income'}>
+                    <NavLink to="/reports/income">
+                      <span>Rendimentos</span>
+                    </NavLink>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+                <SidebarMenuSubItem>
+                  <SidebarMenuSubButton asChild isActive={location.pathname === '/reports/capital-gains'}>
+                    <NavLink to="/reports/capital-gains">
+                      <span>Ganho de Capital</span>
+                    </NavLink>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              </SidebarMenuSub>
             </SidebarMenuItem>
 
             <SidebarMenuItem>
