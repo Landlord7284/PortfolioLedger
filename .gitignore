@@ -9,6 +9,7 @@ dist/
 build/
 .env
 .venv/
+.agents
 backend/ledger.db
 *.xlsx
 *.xls
