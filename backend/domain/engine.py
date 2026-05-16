@@ -104,6 +104,7 @@ class EventReplaySnapshot(TypedDict):
     realized_event_result: Decimal | None
     running_quantity: Decimal
     running_total_cost: Decimal
+    running_total_cost_original: Decimal
     unit_price: Decimal | None
     unit_price_brl: Decimal | None
 
@@ -330,17 +331,31 @@ def replay_events_with_snapshots(events: list[EventRecord]) -> dict[int, EventRe
     not mutate the running state.
     """
     state = PositionState()
+    original_state = PositionState()
     snapshots: dict[int, EventReplaySnapshot] = {}
     for ev in events:
         unit_price = ev.event_value / ev.quantity if ev.quantity > _ZERO else None
         unit_price_brl = ev.replay_value / ev.quantity if ev.quantity > _ZERO else None
         realized = process_event(ev, state, skip_validation=False)
+        original_ev = EventRecord(
+            id=ev.id,
+            event_type=ev.event_type,
+            event_date=ev.event_date,
+            quantity=ev.quantity,
+            event_value=ev.event_value,
+            sequence_num=ev.sequence_num,
+            event_value_brl=None,
+            is_cancelled=ev.is_cancelled,
+            is_storno=ev.is_storno,
+        )
+        process_event(original_ev, original_state, skip_validation=True)
         snapshots[ev.id] = {
             "realized_event_result": realized
             if realized != _ZERO and not ev.is_cancelled and not ev.is_storno
             else None,
             "running_quantity": state.quantity,
             "running_total_cost": state.total_cost,
+            "running_total_cost_original": original_state.total_cost,
             "unit_price": unit_price,
             "unit_price_brl": unit_price_brl,
         }

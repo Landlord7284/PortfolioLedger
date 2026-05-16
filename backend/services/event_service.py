@@ -675,6 +675,7 @@ def list_events(
                 )
                 ev_dict["running_quantity"] = str(snapshot["running_quantity"])
                 ev_dict["running_total_cost"] = str(snapshot["running_total_cost"])
+                ev_dict["running_total_cost_original"] = str(snapshot["running_total_cost_original"])
                 ev_dict["net_operation_value"] = None
             else:
                 ev_dict["realized_event_result"] = None
@@ -682,6 +683,7 @@ def list_events(
                 ev_dict["unit_price_brl"] = None
                 ev_dict["running_quantity"] = None
                 ev_dict["running_total_cost"] = None
+                ev_dict["running_total_cost_original"] = None
                 ev_dict["net_operation_value"] = None
     else:
         for ev_dict in events_list:
@@ -690,6 +692,7 @@ def list_events(
             ev_dict["unit_price_brl"] = None
             ev_dict["running_quantity"] = None
             ev_dict["running_total_cost"] = None
+            ev_dict["running_total_cost_original"] = None
             ev_dict["net_operation_value"] = None
 
     return events_list
@@ -707,6 +710,7 @@ def get_event(conn: sqlite3.Connection, event_id: int) -> dict | None:
     d["unit_price_brl"] = None
     d["running_quantity"] = None
     d["running_total_cost"] = None
+    d["running_total_cost_original"] = None
     d["net_operation_value"] = None
     return d
 

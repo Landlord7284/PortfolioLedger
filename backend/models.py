@@ -216,6 +216,7 @@ class EventResponse(BaseModel):
     unit_price_brl: Optional[str] = None
     running_quantity: Optional[str] = None
     running_total_cost: Optional[str] = None
+    running_total_cost_original: Optional[str] = None
     net_operation_value: Optional[str] = None
     notes: Optional[str] = None
     created_at: str

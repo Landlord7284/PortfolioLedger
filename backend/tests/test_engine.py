@@ -34,6 +34,7 @@ def _ev(
     seq: int | None = None,
     is_cancelled: bool = False,
     is_storno: bool = False,
+    event_value_brl: str | None = None,
 ) -> EventRecord:
     return EventRecord(
         id=id,
@@ -41,6 +42,7 @@ def _ev(
         event_date=date,
         quantity=D(qty),
         event_value=D(val),
+        event_value_brl=D(event_value_brl) if event_value_brl is not None else None,
         sequence_num=seq if seq is not None else id,
         is_cancelled=is_cancelled,
         is_storno=is_storno,
@@ -400,6 +402,19 @@ class TestReplaySnapshots:
         assert snapshots[4]["unit_price"] == D("999.9")
         assert snapshots[4]["running_quantity"] == D("6")
         assert snapshots[4]["running_total_cost"] == D("500")
+
+    def test_running_total_cost_original_uses_event_currency(self):
+        events = [
+            _ev(1, EventType.COMPRA, "10", "1000", date="2024-01-01", event_value_brl="5000"),
+            _ev(2, EventType.VENDA, "4", "600", date="2024-01-02", event_value_brl="3000"),
+        ]
+
+        snapshots = replay_events_with_snapshots(events)
+
+        assert snapshots[1]["running_total_cost"] == D("5000")
+        assert snapshots[1]["running_total_cost_original"] == D("1000")
+        assert snapshots[2]["running_total_cost"] == D("3000")
+        assert snapshots[2]["running_total_cost_original"] == D("600")
 
 
 # ═════════════════════════════════════════════════════════════
