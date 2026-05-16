@@ -326,6 +326,33 @@ class ImportResult(BaseModel):
     errors: list[str]
 
 
+class B3MonthlyFileResult(BaseModel):
+    filename: str
+    reference_month: str
+    reference_date: str
+    total_rows: int
+    imported_prices: int
+    imported_incomes: int
+    auto_events_created: int
+    duplicates: int = 0
+    review_count: int = 0
+    review_details: list[str] = []
+    errors: list[str] = []
+
+
+class B3MonthlyImportResponse(BaseModel):
+    portfolio_id: int
+    files_processed: int
+    total_rows: int
+    imported_prices: int
+    imported_incomes: int
+    auto_events_created: int
+    duplicates: int = 0
+    review_count: int = 0
+    errors: list[str] = []
+    files: list[B3MonthlyFileResult]
+
+
 # â”€â”€ Brokerage notes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class BrokerageNoteOperation(BaseModel):

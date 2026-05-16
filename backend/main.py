@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.database import init_db
-from backend.routers import portfolios, assets, events, brokerage_notes, reports, tax
+from backend.routers import portfolios, assets, events, brokerage_notes, reports, tax, b3_imports
 from backend.database import get_db
 from backend.services.event_service import backfill_event_brl_conversions
 
@@ -48,6 +48,7 @@ app.include_router(events.router)
 app.include_router(brokerage_notes.router)
 app.include_router(reports.router)
 app.include_router(tax.router)
+app.include_router(b3_imports.router)
 
 
 @app.get("/api/health")

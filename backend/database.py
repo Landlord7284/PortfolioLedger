@@ -240,6 +240,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "events", "gross_value_brl", "gross_value_brl TEXT")
     _add_column_if_missing(conn, "events", "ptax_compra", "ptax_compra TEXT")
     _add_column_if_missing(conn, "events", "ptax_venda", "ptax_venda TEXT")
+    _ensure_b3_schema(conn)
 
     conn.execute(
         """
@@ -286,6 +287,83 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys = ON")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_asset_tickers_lookup ON asset_tickers(ticker, valid_from, valid_until)"
+    )
+
+
+def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
+    """Create B3 import tables for fresh and existing local databases."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS b3_monthly_imports (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id          INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            filename              TEXT    NOT NULL,
+            reference_month       TEXT    NOT NULL,
+            reference_date        TEXT    NOT NULL,
+            status                TEXT    NOT NULL DEFAULT 'processed',
+            total_rows            INTEGER NOT NULL DEFAULT 0,
+            imported_prices       INTEGER NOT NULL DEFAULT 0,
+            imported_incomes      INTEGER NOT NULL DEFAULT 0,
+            auto_events_created   INTEGER NOT NULL DEFAULT 0,
+            duplicates            INTEGER NOT NULL DEFAULT 0,
+            review_count          INTEGER NOT NULL DEFAULT 0,
+            errors                TEXT,
+            created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at            TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(portfolio_id, filename)
+        );
+
+        CREATE TABLE IF NOT EXISTS b3_market_prices (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            import_id        INTEGER NOT NULL REFERENCES b3_monthly_imports(id) ON DELETE CASCADE,
+            asset_id         INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+            reference_month  TEXT    NOT NULL,
+            reference_date   TEXT    NOT NULL,
+            source_sheet     TEXT    NOT NULL,
+            source_row       INTEGER NOT NULL,
+            ticker           TEXT,
+            product          TEXT,
+            cnpj             TEXT,
+            maturity_date    TEXT,
+            value            TEXT,
+            is_unit_price    INTEGER NOT NULL DEFAULT 1,
+            status           TEXT    NOT NULL DEFAULT 'imported',
+            review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
+            raw_payload      TEXT,
+            created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(import_id, source_sheet, source_row),
+            UNIQUE(asset_id, reference_month, source_sheet)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_b3_market_prices_asset_month
+            ON b3_market_prices(asset_id, reference_month);
+
+        CREATE TABLE IF NOT EXISTS b3_income_events (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            import_id        INTEGER NOT NULL REFERENCES b3_monthly_imports(id) ON DELETE CASCADE,
+            portfolio_id     INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            asset_id         INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+            payment_date     TEXT    NOT NULL,
+            event_type       TEXT    NOT NULL,
+            product          TEXT,
+            ticker           TEXT,
+            quantity         TEXT,
+            unit_price       TEXT,
+            net_value        TEXT,
+            status           TEXT    NOT NULL DEFAULT 'imported',
+            ledger_event_id  INTEGER REFERENCES events(id) ON DELETE SET NULL,
+            review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
+            raw_payload      TEXT,
+            created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(import_id, payment_date, event_type, product),
+            UNIQUE(portfolio_id, asset_id, payment_date, event_type)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_b3_income_events_asset_date
+            ON b3_income_events(portfolio_id, asset_id, payment_date);
+        """
     )
 
 
