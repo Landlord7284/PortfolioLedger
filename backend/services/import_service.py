@@ -358,7 +358,7 @@ def import_events_to_ledger(
     Returns a summary dict with counts.
     """
     from backend.services.asset_service import match_asset, create_asset, build_operation_payload
-    from backend.services.event_service import create_event
+    from backend.services.event_service import create_event, build_brl_conversion
     from backend.database import next_sequence
 
     imported = 0
@@ -433,11 +433,20 @@ def import_events_to_ledger(
             if existing_id:
                 # Insert the duplicate but with duplicate_flag = 1
                 seq = next_sequence(conn)
+                conversion = build_brl_conversion(
+                    conn,
+                    asset_id,
+                    ev["event_date"],
+                    to_decimal(ev["event_value"]),
+                    to_decimal(gross_value) if gross_value is not None else None,
+                )
                 cur = conn.execute(
                     """
                     INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
-                                        quantity, event_value, gross_value, sequence_num, duplicate_flag, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                                        quantity, event_value, event_value_brl, gross_value,
+                                        gross_value_brl, ptax_compra, ptax_venda,
+                                        sequence_num, duplicate_flag, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                     """,
                     (
                         portfolio_id,
@@ -446,7 +455,11 @@ def import_events_to_ledger(
                         ev["event_date"],
                         ev["quantity"],
                         ev["event_value"],
+                        conversion["event_value_brl"],
                         gross_value,
+                        conversion["gross_value_brl"],
+                        conversion["ptax_compra"],
+                        conversion["ptax_venda"],
                         seq,
                         "Possível duplicidade (Importação)",
                     ),

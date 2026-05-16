@@ -424,6 +424,8 @@ export default function AssetDetail() {
 
   const displayMoney = (val) => formatMoney(val, hideValues);
   const displayQuantity = (val) => formatQuantity(val, asset?.asset_class, hideValues);
+  const isUsAsset = asset?.market === 'US' || asset?.currency === 'USD';
+  const operationMoneyPrefix = isUsAsset ? 'US$' : 'R$';
 
   const formatDisplayDate = (isoStr) => {
     if (!isoStr) return '';
@@ -506,18 +508,24 @@ export default function AssetDetail() {
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Custo Total</CardTitle>
+              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Custo Total (BRL)</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold font-mono">R$ {displayMoney(position.total_cost)}</div>
+              {isUsAsset && position.total_cost_original && (
+                <div className="mt-1 text-xs font-mono text-muted-foreground">US$ {displayMoney(position.total_cost_original)}</div>
+              )}
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Preço Médio</CardTitle>
+              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Preço Médio (BRL)</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold font-mono">R$ {displayMoney(position.average_price)}</div>
+              {isUsAsset && position.average_price_original && (
+                <div className="mt-1 text-xs font-mono text-muted-foreground">US$ {displayMoney(position.average_price_original)}</div>
+              )}
             </CardContent>
           </Card>
           <Card>
@@ -584,8 +592,10 @@ export default function AssetDetail() {
                   <TableHead>Evento</TableHead>
                   <TableHead className="text-right">Quantidade</TableHead>
                   <TableHead className="text-right">Valor Op. Líq</TableHead>
+                  <TableHead className="text-right">Valor Op. BRL</TableHead>
                   <TableHead className="text-right">Valor Op. Bruto</TableHead>
                   <TableHead className="text-right">Preço Un.</TableHead>
+                  <TableHead className="text-right">Preço Un. BRL</TableHead>
                   <TableHead className="text-right">Resultado</TableHead>
                   <TableHead className="text-right">Qtd. Total</TableHead>
                   <TableHead className="text-right">Custo Acum.</TableHead>
@@ -625,12 +635,18 @@ export default function AssetDetail() {
                         )}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">{displayQuantity(ev.quantity)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">R$ {displayMoney(ev.event_value)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{operationMoneyPrefix} {displayMoney(ev.event_value)}</TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        {ev.gross_value ? `R$ ${displayMoney(ev.gross_value)}` : '—'}
+                        {ev.event_value_brl ? `R$ ${displayMoney(ev.event_value_brl)}` : '—'}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        {ev.unit_price ? `R$ ${displayMoney(ev.unit_price)}` : '—'}
+                        {ev.gross_value ? `${operationMoneyPrefix} ${displayMoney(ev.gross_value)}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {ev.unit_price ? `${operationMoneyPrefix} ${displayMoney(ev.unit_price)}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {ev.unit_price_brl ? `R$ ${displayMoney(ev.unit_price_brl)}` : '—'}
                       </TableCell>
                       <TableCell className={`text-right font-mono text-sm ${!hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) > 0 ? 'text-emerald-500' : !hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) < 0 ? 'text-red-500' : ''}`}>
                         {ev.realized_event_result ? `R$ ${displayMoney(ev.realized_event_result)}` : '—'}

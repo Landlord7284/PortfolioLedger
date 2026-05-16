@@ -8,7 +8,7 @@ rebuilt from the ledger whenever events change.
 from __future__ import annotations
 
 import sqlite3
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from backend.database import next_sequence
@@ -22,6 +22,9 @@ from backend.domain.engine import (
     to_decimal,
 )
 from backend.domain.enums import EventType
+
+
+CENTS = Decimal("0.01")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -39,10 +42,67 @@ def _rows_to_event_records(rows: list) -> list[EventRecord]:
             quantity=Decimal(r["quantity"]),
             event_value=Decimal(r["event_value"]),
             sequence_num=r["sequence_num"],
+            event_value_brl=Decimal(r["event_value_brl"]) if r["event_value_brl"] is not None else None,
             is_cancelled=bool(r["is_cancelled"]),
             is_storno=bool(r["is_storno"]),
         ))
     return result
+
+
+def _rows_to_original_event_records(rows: list) -> list[EventRecord]:
+    result = []
+    for r in rows:
+        result.append(EventRecord(
+            id=r["id"],
+            event_type=EventType(r["event_type"]),
+            event_date=r["event_date"],
+            quantity=Decimal(r["quantity"]),
+            event_value=Decimal(r["event_value"]),
+            sequence_num=r["sequence_num"],
+            is_cancelled=bool(r["is_cancelled"]),
+            is_storno=bool(r["is_storno"]),
+        ))
+    return result
+
+
+def _money_brl(value: Decimal) -> str:
+    return str(value.quantize(CENTS, rounding=ROUND_HALF_UP))
+
+
+def _is_us_asset(conn: sqlite3.Connection, asset_id: int) -> bool:
+    asset = conn.execute(
+        "SELECT market, currency FROM assets WHERE id = ?",
+        (asset_id,),
+    ).fetchone()
+    return bool(asset and (asset["market"] == "US" or asset["currency"] == "USD"))
+
+
+def build_brl_conversion(
+    conn: sqlite3.Connection,
+    asset_id: int,
+    event_date: str,
+    event_value: Decimal,
+    gross_value: Decimal | None,
+) -> dict[str, str | None]:
+    if not _is_us_asset(conn, asset_id):
+        return {
+            "event_value_brl": str(event_value),
+            "gross_value_brl": str(gross_value) if gross_value is not None else None,
+            "ptax_compra": None,
+            "ptax_venda": None,
+        }
+
+    from backend.services.ptax_service import get_ptax
+
+    ptax = get_ptax(event_date, conn=conn)
+    venda = Decimal(str(ptax["venda"]))
+    compra = Decimal(str(ptax["compra"]))
+    return {
+        "event_value_brl": _money_brl(event_value * venda),
+        "gross_value_brl": _money_brl(gross_value * venda) if gross_value is not None else None,
+        "ptax_compra": str(compra),
+        "ptax_venda": str(venda),
+    }
 
 
 def _fetch_all_events(
@@ -60,6 +120,22 @@ def _fetch_all_events(
         (asset_id, portfolio_id),
     ).fetchall()
     return _rows_to_event_records(rows)
+
+
+def _fetch_all_events_original(
+    conn: sqlite3.Connection,
+    asset_id: int,
+    portfolio_id: int,
+) -> list[EventRecord]:
+    rows = conn.execute(
+        """
+        SELECT * FROM events
+        WHERE asset_id = ? AND portfolio_id = ?
+        ORDER BY event_date ASC, sequence_num ASC
+        """,
+        (asset_id, portfolio_id),
+    ).fetchall()
+    return _rows_to_original_event_records(rows)
 
 
 def _save_position(
@@ -121,6 +197,74 @@ def recalculate_position(
     return state
 
 
+def backfill_event_brl_conversions(conn: sqlite3.Connection) -> dict:
+    """
+    Populate BRL replay values for existing events.
+
+    Events that cannot be converted because PTAX is unavailable are left
+    unchanged; their positions are not recalculated in this pass.
+    """
+    rows = conn.execute(
+        """
+        SELECT e.*, a.market, a.currency
+        FROM events e
+        JOIN assets a ON a.id = e.asset_id
+        WHERE e.event_value_brl IS NULL
+        ORDER BY e.event_date, e.sequence_num
+        """
+    ).fetchall()
+    converted = 0
+    errors: list[str] = []
+    touched: set[tuple[int, int]] = set()
+
+    for row in rows:
+        try:
+            gross = to_decimal(row["gross_value"]) if row["gross_value"] is not None else None
+            conversion = build_brl_conversion(
+                conn,
+                row["asset_id"],
+                row["event_date"],
+                to_decimal(row["event_value"]),
+                gross,
+            )
+            conn.execute(
+                """
+                UPDATE events
+                SET event_value_brl = ?,
+                    gross_value_brl = ?,
+                    ptax_compra = ?,
+                    ptax_venda = ?
+                WHERE id = ?
+                """,
+                (
+                    conversion["event_value_brl"],
+                    conversion["gross_value_brl"],
+                    conversion["ptax_compra"],
+                    conversion["ptax_venda"],
+                    row["id"],
+                ),
+            )
+            touched.add((row["asset_id"], row["portfolio_id"]))
+            converted += 1
+        except Exception as exc:
+            errors.append(f"Evento {row['id']}: {exc}")
+
+    for asset_id, portfolio_id in touched:
+        missing = conn.execute(
+            """
+            SELECT 1
+            FROM events
+            WHERE asset_id = ? AND portfolio_id = ? AND event_value_brl IS NULL
+            LIMIT 1
+            """,
+            (asset_id, portfolio_id),
+        ).fetchone()
+        if not missing:
+            recalculate_position(conn, asset_id, portfolio_id)
+
+    return {"converted": converted, "errors": errors}
+
+
 # ─────────────────────────────────────────────────────────────
 # Create event
 # ─────────────────────────────────────────────────────────────
@@ -156,6 +300,7 @@ def create_event(
 
     # Build a temporary EventRecord for validation
     seq = next_sequence(conn)
+    conversion = build_brl_conversion(conn, asset_id, event_date, val, gross)
     temp_event = EventRecord(
         id=0,
         event_type=et,
@@ -163,6 +308,7 @@ def create_event(
         quantity=qty,
         event_value=val,
         sequence_num=seq,
+        event_value_brl=Decimal(conversion["event_value_brl"]) if conversion["event_value_brl"] is not None else None,
     )
 
     # Replay existing events to get state at insertion point
@@ -185,11 +331,15 @@ def create_event(
     cur = conn.execute(
         """
         INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
-                            quantity, event_value, gross_value, sequence_num, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            quantity, event_value, event_value_brl, gross_value,
+                            gross_value_brl, ptax_compra, ptax_venda,
+                            sequence_num, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (portfolio_id, asset_id, et.value, event_date,
-         str(qty), str(val), str(gross) if gross is not None else None, seq, notes),
+         str(qty), str(val), conversion["event_value_brl"],
+         str(gross) if gross is not None else None, conversion["gross_value_brl"],
+         conversion["ptax_compra"], conversion["ptax_venda"], seq, notes),
     )
     event_id = cur.lastrowid
 
@@ -272,9 +422,10 @@ def storno_event(
     cur = conn.execute(
         """
         INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
-                            quantity, event_value, gross_value, sequence_num,
+                            quantity, event_value, event_value_brl, gross_value,
+                            gross_value_brl, ptax_compra, ptax_venda, sequence_num,
                             storno_of, is_storno, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         """,
         (
             original["portfolio_id"],
@@ -283,7 +434,11 @@ def storno_event(
             original["event_date"],
             original["quantity"],
             original["event_value"],
+            original["event_value_brl"],
             original["gross_value"],
+            original["gross_value_brl"],
+            original["ptax_compra"],
+            original["ptax_venda"],
             seq,
             event_id,
             notes or f"Estorno do evento #{event_id}",
@@ -335,14 +490,16 @@ def correct_event(
         gross = None
 
     seq = next_sequence(conn)
+    conversion = build_brl_conversion(conn, original["asset_id"], event_date, val, gross)
 
     # Create correction event
     cur = conn.execute(
         """
         INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
-                            quantity, event_value, gross_value, sequence_num,
+                            quantity, event_value, event_value_brl, gross_value,
+                            gross_value_brl, ptax_compra, ptax_venda, sequence_num,
                             correction_of, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             original["portfolio_id"],
@@ -351,7 +508,11 @@ def correct_event(
             event_date,
             str(qty),
             str(val),
+            conversion["event_value_brl"],
             str(gross) if gross is not None else None,
+            conversion["gross_value_brl"],
+            conversion["ptax_compra"],
+            conversion["ptax_venda"],
             seq,
             event_id,
             notes or f"Correção do evento #{event_id}",
@@ -507,12 +668,18 @@ def list_events(
                     if snapshot["unit_price"] is not None
                     else None
                 )
+                ev_dict["unit_price_brl"] = (
+                    str(snapshot["unit_price_brl"])
+                    if snapshot["unit_price_brl"] is not None
+                    else None
+                )
                 ev_dict["running_quantity"] = str(snapshot["running_quantity"])
                 ev_dict["running_total_cost"] = str(snapshot["running_total_cost"])
                 ev_dict["net_operation_value"] = None
             else:
                 ev_dict["realized_event_result"] = None
                 ev_dict["unit_price"] = None
+                ev_dict["unit_price_brl"] = None
                 ev_dict["running_quantity"] = None
                 ev_dict["running_total_cost"] = None
                 ev_dict["net_operation_value"] = None
@@ -520,6 +687,7 @@ def list_events(
         for ev_dict in events_list:
             ev_dict["realized_event_result"] = None
             ev_dict["unit_price"] = None
+            ev_dict["unit_price_brl"] = None
             ev_dict["running_quantity"] = None
             ev_dict["running_total_cost"] = None
             ev_dict["net_operation_value"] = None
@@ -536,6 +704,7 @@ def get_event(conn: sqlite3.Connection, event_id: int) -> dict | None:
     d = dict(row)
     d["realized_event_result"] = None
     d["unit_price"] = None
+    d["unit_price_brl"] = None
     d["running_quantity"] = None
     d["running_total_cost"] = None
     d["net_operation_value"] = None
@@ -560,7 +729,27 @@ def get_position(
         """,
         (portfolio_id, asset_id),
     ).fetchone()
-    return dict(row) if row else None
+    return _attach_original_position(conn, dict(row)) if row else None
+
+
+def _attach_original_position(conn: sqlite3.Connection, position: dict) -> dict:
+    if position.get("market") != "US" and position.get("currency") != "USD":
+        position["total_cost_original"] = None
+        position["average_price_original"] = None
+        position["realized_result_original"] = None
+        return position
+
+    events = _fetch_all_events_original(conn, position["asset_id"], position["portfolio_id"])
+    try:
+        state = replay_events(events)
+    except EngineValidationError:
+        state = PositionState()
+        for ev in events:
+            process_event(ev, state, skip_validation=True)
+    position["total_cost_original"] = str(state.total_cost)
+    position["average_price_original"] = str(state.average_price)
+    position["realized_result_original"] = str(state.realized_result)
+    return position
 
 
 def list_positions(
@@ -595,4 +784,4 @@ def list_positions(
             ORDER BY a.asset_class, current_ticker
             """
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [_attach_original_position(conn, dict(r)) for r in rows]

@@ -200,7 +200,11 @@ class EventResponse(BaseModel):
     event_date: str
     quantity: str
     event_value: str
+    event_value_brl: Optional[str] = None
     gross_value: Optional[str] = None
+    gross_value_brl: Optional[str] = None
+    ptax_compra: Optional[str] = None
+    ptax_venda: Optional[str] = None
     sequence_num: int
     storno_of: Optional[int] = None
     correction_of: Optional[int] = None
@@ -209,6 +213,7 @@ class EventResponse(BaseModel):
     duplicate_flag: bool = False
     realized_event_result: Optional[str] = None
     unit_price: Optional[str] = None
+    unit_price_brl: Optional[str] = None
     running_quantity: Optional[str] = None
     running_total_cost: Optional[str] = None
     net_operation_value: Optional[str] = None
@@ -235,6 +240,9 @@ class PositionResponse(BaseModel):
     total_cost: str
     average_price: str
     realized_result: str
+    total_cost_original: Optional[str] = None
+    average_price_original: Optional[str] = None
+    realized_result_original: Optional[str] = None
     last_event_date: Optional[str] = None
     updated_at: str
 

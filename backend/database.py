@@ -94,7 +94,11 @@ CREATE TABLE IF NOT EXISTS events (
     event_date      TEXT    NOT NULL,
     quantity        TEXT    NOT NULL,
     event_value     TEXT    NOT NULL,
+    event_value_brl TEXT,
     gross_value     TEXT,
+    gross_value_brl TEXT,
+    ptax_compra     TEXT,
+    ptax_venda      TEXT,
     sequence_num    INTEGER NOT NULL,
     storno_of       INTEGER REFERENCES events(id),
     correction_of   INTEGER REFERENCES events(id),
@@ -232,6 +236,10 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "assets", "merged_at", "merged_at TEXT")
     _add_column_if_missing(conn, "asset_match_reviews", "operation_payload", "operation_payload TEXT")
     _add_column_if_missing(conn, "events", "gross_value", "gross_value TEXT")
+    _add_column_if_missing(conn, "events", "event_value_brl", "event_value_brl TEXT")
+    _add_column_if_missing(conn, "events", "gross_value_brl", "gross_value_brl TEXT")
+    _add_column_if_missing(conn, "events", "ptax_compra", "ptax_compra TEXT")
+    _add_column_if_missing(conn, "events", "ptax_venda", "ptax_venda TEXT")
 
     conn.execute(
         """

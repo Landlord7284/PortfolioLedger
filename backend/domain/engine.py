@@ -82,7 +82,8 @@ class PositionState:
 class EventRecord:
     """Thin wrapper over a ledger row used by the engine.
 
-    ``quantity`` and ``event_value`` are already Decimal.
+    ``quantity`` and values are already Decimal. ``event_value`` is the
+    operation currency; ``event_value_brl`` is used for patrimonial replay.
     """
     id: int
     event_type: EventType
@@ -90,8 +91,13 @@ class EventRecord:
     quantity: Decimal
     event_value: Decimal
     sequence_num: int
+    event_value_brl: Decimal | None = None
     is_cancelled: bool = False
     is_storno: bool = False
+
+    @property
+    def replay_value(self) -> Decimal:
+        return self.event_value_brl if self.event_value_brl is not None else self.event_value
 
 
 class EventReplaySnapshot(TypedDict):
@@ -99,6 +105,7 @@ class EventReplaySnapshot(TypedDict):
     running_quantity: Decimal
     running_total_cost: Decimal
     unit_price: Decimal | None
+    unit_price_brl: Decimal | None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -117,7 +124,7 @@ def validate_event(event: EventRecord, state: PositionState) -> None:
     """
     et = event.event_type
     qty = event.quantity
-    val = event.event_value
+    val = event.replay_value
 
     # ── date is mandatory ────────────────────────────────────
     if not event.event_date:
@@ -268,7 +275,7 @@ def process_event(event: EventRecord, state: PositionState, *, skip_validation: 
         validate_event(event, state)
 
     processor = _PROCESSORS[event.event_type]
-    realized = processor(state, event.quantity, event.event_value)
+    realized = processor(state, event.quantity, event.replay_value)
 
     state.realized_result += realized
     state.last_event_date = event.event_date
@@ -326,6 +333,7 @@ def replay_events_with_snapshots(events: list[EventRecord]) -> dict[int, EventRe
     snapshots: dict[int, EventReplaySnapshot] = {}
     for ev in events:
         unit_price = ev.event_value / ev.quantity if ev.quantity > _ZERO else None
+        unit_price_brl = ev.replay_value / ev.quantity if ev.quantity > _ZERO else None
         realized = process_event(ev, state, skip_validation=False)
         snapshots[ev.id] = {
             "realized_event_result": realized
@@ -334,6 +342,7 @@ def replay_events_with_snapshots(events: list[EventRecord]) -> dict[int, EventRe
             "running_quantity": state.quantity,
             "running_total_cost": state.total_cost,
             "unit_price": unit_price,
+            "unit_price_brl": unit_price_brl,
         }
     return snapshots
 

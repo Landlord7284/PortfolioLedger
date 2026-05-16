@@ -12,12 +12,16 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.database import init_db
 from backend.routers import portfolios, assets, events, brokerage_notes, reports, tax
+from backend.database import get_db
+from backend.services.event_service import backfill_event_brl_conversions
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run database initialisation on startup."""
     init_db()
+    with get_db() as conn:
+        backfill_event_brl_conversions(conn)
     yield
 
 

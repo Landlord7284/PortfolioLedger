@@ -233,6 +233,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   const isUsdPurchaseAsset = isNewAsset
     ? newClass === 'Stock' || newClass === 'REIT' || (newClass === 'ETF' && newMarket === 'US')
     : selectedAsset?.currency === 'USD' || selectedAsset?.market === 'US';
+  const operationCurrencyLabel = isUsdPurchaseAsset ? 'US$' : 'R$';
   const showOriginUsd = isPre2024Purchase && isUsdPurchaseAsset;
 
   const grossValuePayload = (val, evType) => {
@@ -360,7 +361,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
                   <TableHead className="min-w-[140px]">Evento</TableHead>
                   <TableHead className="min-w-[130px]">Data</TableHead>
                   <TableHead className="min-w-[100px]">Qtd</TableHead>
-                  <TableHead className="min-w-[120px]">Valor (R$)</TableHead>
+                  <TableHead className="min-w-[120px]">Valor (R$/US$)</TableHead>
                   <TableHead className="w-14 text-center">Ação</TableHead>
                 </TableRow>
               </TableHeader>
@@ -542,7 +543,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             {!VALUE_IGNORED.includes(eventType) && (
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Líquido</Label>
+                  <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Líquido ({operationCurrencyLabel})</Label>
                   <Input 
                     value={eventValue} 
                     onChange={(e) => setEventValue(applyCurrencyMask(e.target.value))} 
@@ -552,7 +553,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
                 </div>
                 {eventType === 'Venda' && (
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Bruto</Label>
+                    <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor Bruto ({operationCurrencyLabel})</Label>
                     <Input 
                       value={grossValue} 
                       onChange={(e) => setGrossValue(applyCurrencyMask(e.target.value))} 
