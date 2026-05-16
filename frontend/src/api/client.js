@@ -126,6 +126,13 @@ export const reports = {
   },
 };
 
+export const tax = {
+  ptax: ({ date }) => {
+    const params = new URLSearchParams({ date });
+    return request(`/tax/ptax?${params.toString()}`);
+  },
+};
+
 // ── Import ──────────────────────────────────────────────────
 
 export const importXlsx = (portfolioId, file) => {

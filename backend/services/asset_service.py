@@ -76,10 +76,11 @@ def build_operation_payload(
     quantity: Optional[str] = None,
     event_value: Optional[str] = None,
     gross_value: Optional[str] = None,
+    origin_usd: Optional[str] = None,
     notes: Optional[str] = None,
     source_row: Optional[int] = None,
 ) -> dict | None:
-    if not any([portfolio_id, event_type, quantity, event_value, gross_value, notes, source_row]):
+    if not any([portfolio_id, event_type, quantity, event_value, gross_value, origin_usd, notes, source_row]):
         return None
     payload = {
         "ticker": _normalize_ticker(ticker),
@@ -91,6 +92,7 @@ def build_operation_payload(
         "quantity": quantity,
         "event_value": event_value,
         "gross_value": gross_value,
+        "origin_usd": origin_usd,
         "notes": notes,
     }
     if source_row is not None:
@@ -243,6 +245,7 @@ def create_asset(
     quantity: Optional[str] = None,
     event_value: Optional[str] = None,
     gross_value: Optional[str] = None,
+    origin_usd: Optional[str] = None,
     notes: Optional[str] = None,
     source_row: Optional[int] = None,
     source: str = "manual",
@@ -264,6 +267,7 @@ def create_asset(
             quantity=quantity,
             event_value=event_value,
             gross_value=gross_value,
+            origin_usd=origin_usd,
             notes=notes,
             source_row=source_row,
         )
@@ -280,6 +284,7 @@ def create_asset(
         quantity=quantity,
         event_value=event_value,
         gross_value=gross_value,
+        origin_usd=origin_usd,
         notes=notes,
         source_row=source_row,
     )
@@ -518,6 +523,7 @@ def merge_assets(conn: sqlite3.Connection, source_asset_id: int, target_asset_id
         (source_asset_id, target_asset_id),
     ).fetchall()
     conn.execute("UPDATE events SET asset_id = ? WHERE asset_id = ?", (target_asset_id, source_asset_id))
+    conn.execute("UPDATE fiscal_lots SET asset_id = ? WHERE asset_id = ?", (target_asset_id, source_asset_id))
     for t in conn.execute("SELECT * FROM asset_tickers WHERE asset_id = ?", (source_asset_id,)).fetchall():
         exists = conn.execute(
             """

@@ -139,6 +139,7 @@ export default function AssetsAndRightsReport() {
       { previousYearCost: 0, currentYearCost: 0 }
     );
   }, [visibleRows]);
+  const fiscalDelta = visibleTotals.currentYearCost - visibleTotals.previousYearCost;
 
   useEffect(() => {
     if (filterClass && !classes.includes(filterClass)) {
@@ -196,6 +197,45 @@ export default function AssetsAndRightsReport() {
           ))}
         </div>
       )}
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Posição fiscal em {formatCutoff(report?.previous_cutoff)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-mono text-2xl font-semibold tabular-nums">
+              R$ {formatMoney(visibleTotals.previousYearCost, hideValues)}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Posição fiscal em {formatCutoff(report?.current_cutoff)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-mono text-2xl font-semibold tabular-nums">
+              R$ {formatMoney(visibleTotals.currentYearCost, hideValues)}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Variação fiscal em BRL
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className={`font-mono text-2xl font-semibold tabular-nums ${!hideValues && fiscalDelta > 0 ? 'text-emerald-500' : !hideValues && fiscalDelta < 0 ? 'text-red-500' : ''}`}>
+              R$ {formatMoney(fiscalDelta, hideValues)}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card className="overflow-hidden">
         <CardHeader className="border-b">

@@ -134,6 +134,7 @@ def create_event(
     quantity: str,
     event_value: str,
     gross_value: Optional[str] = None,
+    origin_usd: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> dict:
     """
@@ -192,11 +193,15 @@ def create_event(
     )
     event_id = cur.lastrowid
 
+    row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+    if et == EventType.COMPRA:
+        from backend.services.fiscal_lot_service import create_lot_for_purchase
+        create_lot_for_purchase(conn, row, origin_usd)
+
     # Recalculate position (full replay)
     recalculate_position(conn, asset_id, portfolio_id)
 
     # Return the created event
-    row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
     return dict(row)
 
 
@@ -223,6 +228,7 @@ def create_events_bulk(
             quantity=ev_data["quantity"],
             event_value=ev_data["event_value"],
             gross_value=ev_data.get("gross_value"),
+            origin_usd=ev_data.get("origin_usd"),
             notes=ev_data.get("notes"),
         )
         created.append(ev)
@@ -304,6 +310,7 @@ def correct_event(
     quantity: str,
     event_value: str,
     gross_value: Optional[str] = None,
+    origin_usd: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> dict:
     """
@@ -352,10 +359,14 @@ def correct_event(
     )
     correction_id = cur.lastrowid
 
+    row = conn.execute("SELECT * FROM events WHERE id = ?", (correction_id,)).fetchone()
+    if et == EventType.COMPRA:
+        from backend.services.fiscal_lot_service import create_lot_for_purchase
+        create_lot_for_purchase(conn, row, origin_usd)
+
     # Recalculate
     recalculate_position(conn, original["asset_id"], original["portfolio_id"])
 
-    row = conn.execute("SELECT * FROM events WHERE id = ?", (correction_id,)).fetchone()
     return dict(row)
 
 

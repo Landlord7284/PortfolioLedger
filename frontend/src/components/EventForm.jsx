@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext } from 'react';
 import { AppContext } from '../App';
-import { events as eventsApi, assets as assetsApi } from '../api/client';
+import { events as eventsApi, assets as assetsApi, tax as taxApi } from '../api/client';
 import { Plus, Trash2, ArrowLeft, Loader2, AlertTriangle, Check, ChevronsUpDown } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,15 @@ const ASSET_CLASSES = [
 const CLASSES_WITH_MATURITY = ['Debênture', 'CRI', 'CRA', 'Tesouro Direto'];
 
 const VALUE_IGNORED = ['Desdobramento', 'Grupamento'];
+
+function formatPtax(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return value || '-';
+  return parsed.toLocaleString('pt-BR', {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  });
+}
 
 function AssetCombobox({ options, value, onChange, disabled }) {
   const [open, setOpen] = useState(false);
@@ -114,7 +123,10 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   const [quantity, setQuantity] = useState('');
   const [eventValue, setEventValue] = useState('');
   const [grossValue, setGrossValue] = useState('');
+  const [originUsd, setOriginUsd] = useState('');
   const [notes, setNotes] = useState('');
+  const [ptax, setPtax] = useState(null);
+  const [ptaxLoading, setPtaxLoading] = useState(false);
 
   const [isNewAsset, setIsNewAsset] = useState(false);
   const [newTicker, setNewTicker] = useState('');
@@ -133,11 +145,38 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
     });
   }, []);
 
+  useEffect(() => {
+    if (isBulkMode || !['Compra', 'Venda'].includes(eventType) || !eventDate) {
+      setPtax(null);
+      setPtaxLoading(false);
+      return;
+    }
+
+    let active = true;
+    setPtaxLoading(true);
+    taxApi.ptax({ date: eventDate })
+      .then((data) => {
+        if (active) setPtax(data);
+      })
+      .catch(() => {
+        if (active) setPtax(null);
+      })
+      .finally(() => {
+        if (active) setPtaxLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [eventDate, eventType, isBulkMode]);
+
   const assetOptions = assetList.map((a) => ({
     value: a.id,
     ticker: a.current_ticker || `#${a.id}`,
     name: a.name,
     asset_class: a.asset_class,
+    market: a.market,
+    currency: a.currency,
     cnpj: a.cnpj,
     isin: a.isin
   }));
@@ -189,6 +228,13 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
     return currencyToBackend(val);
   };
 
+  const isPre2024Purchase = eventType === 'Compra' && eventDate && eventDate < '2024-01-01';
+  const selectedAsset = assetList.find((a) => a.id === Number(selectedAssetId));
+  const isUsdPurchaseAsset = isNewAsset
+    ? newClass === 'Stock' || newClass === 'REIT' || (newClass === 'ETF' && newMarket === 'US')
+    : selectedAsset?.currency === 'USD' || selectedAsset?.market === 'US';
+  const showOriginUsd = isPre2024Purchase && isUsdPurchaseAsset;
+
   const grossValuePayload = (val, evType) => {
     if (evType !== 'Venda') return {};
     return { gross_value: currencyToBackend(val) };
@@ -234,6 +280,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             event_type: eventType,
             quantity: normalizeQuantity(quantity),
             event_value: normalizeValue(eventValue, eventType),
+            origin_usd: showOriginUsd ? currencyToBackend(originUsd) : null,
             ...grossValuePayload(grossValue, eventType),
             notes: notes || null,
             source: 'event_form',
@@ -254,6 +301,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
           event_date: eventDate,
           quantity: normalizeQuantity(quantity),
           event_value: normalizeValue(eventValue, eventType),
+          origin_usd: showOriginUsd ? currencyToBackend(originUsd) : null,
           ...grossValuePayload(grossValue, eventType),
           notes: notes || null,
         });
@@ -451,6 +499,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
               <Select value={eventType} onValueChange={(val) => {
                 setEventType(val);
                 if (val !== 'Venda') setGrossValue('');
+                if (val !== 'Compra') setOriginUsd('');
               }}>
                 <SelectTrigger className="h-9">
                   <SelectValue />
@@ -463,6 +512,20 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Data</Label>
               <DatePicker value={eventDate} onChange={setEventDate} />
+              {['Compra', 'Venda'].includes(eventType) && eventDate && (
+                <div className="flex min-h-5 items-center gap-1.5 text-xs text-muted-foreground">
+                  {ptaxLoading ? (
+                    <>
+                      <Loader2 className="size-3 animate-spin" />
+                      <span>Buscando PTAX...</span>
+                    </>
+                  ) : ptax ? (
+                    <span>
+                      Compra: R$ {formatPtax(ptax.compra)} · Venda: R$ {formatPtax(ptax.venda)}
+                    </span>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
 
@@ -495,6 +558,16 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
                       onChange={(e) => setGrossValue(applyCurrencyMask(e.target.value))} 
                       placeholder="0,00" 
                       required 
+                    />
+                  </div>
+                )}
+                {showOriginUsd && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Origem US</Label>
+                    <Input
+                      value={originUsd}
+                      onChange={(e) => setOriginUsd(applyCurrencyMask(e.target.value))}
+                      placeholder="0,00"
                     />
                   </div>
                 )}

@@ -161,6 +161,20 @@ _EVENT_LABEL_MAP = {
 # XLSX parser
 # ─────────────────────────────────────────────────────────────
 
+def _select_import_worksheet(wb) -> tuple:
+    if "Registro" in wb.sheetnames:
+        return wb["Registro"], "legacy"
+    ws = wb.active
+    headers = [
+        str(cell.value).strip() if cell.value is not None else ""
+        for cell in next(ws.iter_rows(min_row=1, max_row=1, values_only=False))
+    ]
+    normalized = [h.lower() for h in headers]
+    if "origem us" in normalized:
+        return ws, "international"
+    return ws, "legacy"
+
+
 def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
     """
     Parse an XLSX file and return a list of normalised event dicts
@@ -170,7 +184,8 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
     file-like object (e.g., BytesIO from an upload).
 
     Each dict contains:
-        asset_class, ticker, event_type, event_date, quantity, event_value, gross_value
+        asset_class, ticker, event_type, event_date, quantity, event_value,
+        gross_value, origin_usd
 
     Raises on unresolvable formulas or unknown labels.
     """
@@ -179,20 +194,21 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
     else:
         wb = openpyxl.load_workbook(source, data_only=False)
 
-    ws = wb["Registro"]
+    ws, layout = _select_import_worksheet(wb)
 
     events: list[dict] = []
     errors: list[str] = []
 
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=False), start=2):
-        # Columns: A=Classe, B=Ativo, C=Evento, D=Data, E=Quantidade, F=Valor Evento, G=Valor Bruto
+        # Legacy: A=Classe, B=Ativo, C=Evento, D=Data, E=Quantidade, F=Valor Evento, G=Valor Bruto
+        # International: A=Classe, B=Ativo, C=Evento, D=Data, E=Quantidade, F=Valor Evento, G=Origem US
         raw_class = row[0].value
         raw_ticker = row[1].value
         raw_event = row[2].value
         raw_date = row[3].value
         raw_qty = row[4].value
         raw_value = row[5].value
-        raw_gross_value = row[6].value if len(row) > 6 else None
+        raw_extra_value = row[6].value if len(row) > 6 else None
 
         # Skip empty rows
         if not raw_class or not raw_ticker or not raw_event:
@@ -236,26 +252,36 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
             continue
 
         gross_value = None
-        if event_type == EventType.VENDA and raw_gross_value not in (None, ""):
+        origin_usd = None
+        if layout == "legacy" and event_type == EventType.VENDA and raw_extra_value not in (None, ""):
             try:
-                gross_value = _resolve_cell_value(raw_gross_value, f"G{row_idx}")
+                gross_value = _resolve_cell_value(raw_extra_value, f"G{row_idx}")
             except (ValueError, InvalidOperation) as e:
                 errors.append(f"Linha {row_idx}: erro no valor bruto: {e}")
+                continue
+        elif layout == "international" and event_type == EventType.COMPRA and raw_extra_value not in (None, ""):
+            try:
+                origin_usd = _resolve_cell_value(raw_extra_value, f"G{row_idx}")
+            except (ValueError, InvalidOperation) as e:
+                errors.append(f"Linha {row_idx}: erro na origem US: {e}")
                 continue
 
         # For value-ignored events, force to zero
         if event_type in EventType.value_ignored():
             event_value = Decimal("0")
             gross_value = None
+            origin_usd = None
 
         events.append({
             "asset_class": asset_class.value,
+            "market": "US" if layout == "international" else None,
             "ticker": str(raw_ticker).strip().upper(),
             "event_type": event_type.value,
             "event_date": event_date,
             "quantity": str(quantity),
             "event_value": str(event_value),
             "gross_value": str(gross_value) if gross_value is not None else None,
+            "origin_usd": str(origin_usd) if origin_usd is not None else None,
         })
 
     if errors:
@@ -346,16 +372,18 @@ def import_events_to_ledger(
     for i, ev in enumerate(parsed, start=1):
         try:
             gross_value = ev.get("gross_value") if ev["event_type"] == EventType.VENDA.value else None
+            origin_usd = ev.get("origin_usd") if ev["event_type"] == EventType.COMPRA.value else None
             operation_payload = build_operation_payload(
                 ticker=ev["ticker"],
                 asset_class=ev["asset_class"],
-                market=None,
+                market=ev.get("market"),
                 event_date=ev["event_date"],
                 portfolio_id=portfolio_id,
                 event_type=ev["event_type"],
                 quantity=ev["quantity"],
                 event_value=ev["event_value"],
                 gross_value=gross_value,
+                origin_usd=origin_usd,
                 notes=f"{notes_prefix} (linha {i + source_row_offset})",
                 source_row=i + source_row_offset,
             )
@@ -365,6 +393,7 @@ def import_events_to_ledger(
                 ticker=ev["ticker"],
                 asset_class=ev["asset_class"],
                 event_date=ev["event_date"],
+                market=ev.get("market"),
                 source=source,
                 create_review=True,
                 operation_payload=operation_payload,
@@ -376,7 +405,7 @@ def import_events_to_ledger(
                     conn,
                     asset_class=ev["asset_class"],
                     ticker=ev["ticker"],
-                    market=match.get("market"),
+                    market=ev.get("market") or match.get("market"),
                     valid_from=None,
                     event_date=ev["event_date"],
                     source=source,
@@ -404,7 +433,7 @@ def import_events_to_ledger(
             if existing_id:
                 # Insert the duplicate but with duplicate_flag = 1
                 seq = next_sequence(conn)
-                conn.execute(
+                cur = conn.execute(
                     """
                     INSERT INTO events (portfolio_id, asset_id, event_type, event_date,
                                         quantity, event_value, gross_value, sequence_num, duplicate_flag, notes)
@@ -422,6 +451,10 @@ def import_events_to_ledger(
                         "Possível duplicidade (Importação)",
                     ),
                 )
+                row = conn.execute("SELECT * FROM events WHERE id = ?", (cur.lastrowid,)).fetchone()
+                if ev["event_type"] == EventType.COMPRA.value:
+                    from backend.services.fiscal_lot_service import create_lot_for_purchase
+                    create_lot_for_purchase(conn, row, origin_usd)
                 from backend.services.event_service import recalculate_position
                 recalculate_position(conn, asset_id, portfolio_id)
                 
@@ -443,6 +476,7 @@ def import_events_to_ledger(
                     quantity=ev["quantity"],
                     event_value=ev["event_value"],
                     gross_value=gross_value,
+                    origin_usd=origin_usd,
                     notes=f"{notes_prefix} (linha {i + source_row_offset})",
                 )
                 imported += 1

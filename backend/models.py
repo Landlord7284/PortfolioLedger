@@ -56,6 +56,7 @@ class AssetCreate(BaseModel):
     quantity: Optional[str] = None
     event_value: Optional[str] = None
     gross_value: Optional[str] = None
+    origin_usd: Optional[str] = None
     notes: Optional[str] = None
 
     @field_validator("ticker")
@@ -163,6 +164,7 @@ class EventCreate(BaseModel):
     quantity: str              # Decimal as string
     event_value: str           # Decimal as string
     gross_value: Optional[str] = None  # Decimal as string, only for Venda
+    origin_usd: Optional[str] = None  # Decimal as string, only for PRE_2024 USD Compra
     notes: Optional[str] = None
 
 
@@ -186,6 +188,7 @@ class EventCorrection(BaseModel):
     quantity: str
     event_value: str
     gross_value: Optional[str] = None
+    origin_usd: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -255,6 +258,50 @@ class AssetsAndRightsReportResponse(BaseModel):
     previous_cutoff: str
     current_cutoff: str
     rows: list[AssetsAndRightsRow]
+
+
+# ── Tax ──────────────────────────────────────────────────────
+
+class TaxEventResponse(BaseModel):
+    id: int
+    tax_event_type: str
+    portfolio_id: Optional[int] = None
+    asset_id: Optional[int] = None
+    sale_event_id: Optional[int] = None
+    lot_id: Optional[int] = None
+    qty_sold: Optional[str] = None
+    ganho_brl: Optional[str] = None
+    regime: str
+    ptax_used: str
+    income_type: Optional[str] = None
+    credit_date: Optional[str] = None
+    amount_usd: Optional[str] = None
+    amount_brl: Optional[str] = None
+    calculated_at: str
+
+
+class TaxSaleApuracaoResponse(BaseModel):
+    sale_event_id: int
+    total_ganho_brl: str
+    events: list[TaxEventResponse]
+
+
+class TaxIncomeCreate(BaseModel):
+    portfolio_id: int
+    asset_id: int
+    amount_usd: str
+    credit_date: str
+    income_type: Optional[str] = None
+
+
+class TaxAnnualSummaryRow(BaseModel):
+    year: Optional[int] = None
+    tax_event_type: str
+    regime: str
+    income_type: Optional[str] = None
+    total_ganho_brl: str
+    total_amount_brl: str
+    event_count: int
 
 
 # ── Import ───────────────────────────────────────────────────

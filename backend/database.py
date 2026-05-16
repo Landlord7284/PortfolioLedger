@@ -108,6 +108,65 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_asset_portfolio
     ON events(asset_id, portfolio_id, event_date, sequence_num);
 
+-- PTAX cache
+CREATE TABLE IF NOT EXISTS ptax_cache (
+    date    TEXT PRIMARY KEY,
+    compra  REAL NOT NULL,
+    venda   REAL NOT NULL
+);
+
+-- Fiscal lots for USD assets
+CREATE TABLE IF NOT EXISTS fiscal_lots (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id          INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+    asset_id              INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    event_id              INTEGER NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
+    date                  TEXT    NOT NULL,
+    quantity              TEXT    NOT NULL,
+    price_usd             TEXT    NOT NULL,
+    total_usd             TEXT    NOT NULL,
+    origin_usd            TEXT    NOT NULL,
+    origin_brl_usd        TEXT    NOT NULL,
+    ptax_venda_acq        TEXT    NOT NULL,
+    ptax_compra_acq       TEXT    NOT NULL,
+    cost_brl_portion_brl  TEXT    NOT NULL,
+    cost_usd_portion_usd  TEXT    NOT NULL,
+    regime                TEXT    NOT NULL,
+    quantity_remaining    TEXT    NOT NULL,
+    created_at            TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiscal_lots_asset_portfolio
+    ON fiscal_lots(asset_id, portfolio_id, date, event_id);
+
+-- Fiscal calculation events
+CREATE TABLE IF NOT EXISTS tax_event (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    tax_event_type  TEXT    NOT NULL DEFAULT 'SALE',
+    portfolio_id    INTEGER REFERENCES portfolios(id) ON DELETE CASCADE,
+    asset_id        INTEGER REFERENCES assets(id) ON DELETE CASCADE,
+    sale_event_id   INTEGER REFERENCES events(id) ON DELETE CASCADE,
+    lot_id          INTEGER REFERENCES fiscal_lots(id) ON DELETE CASCADE,
+    qty_sold        TEXT,
+    ganho_brl       TEXT,
+    regime          TEXT    NOT NULL,
+    ptax_used       TEXT    NOT NULL,
+    income_type     TEXT,
+    credit_date     TEXT,
+    amount_usd      TEXT,
+    amount_brl      TEXT,
+    calculated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tax_event_sale_event
+    ON tax_event(sale_event_id);
+
+CREATE INDEX IF NOT EXISTS idx_tax_event_credit_date
+    ON tax_event(credit_date);
+
+CREATE INDEX IF NOT EXISTS idx_tax_event_portfolio_asset
+    ON tax_event(portfolio_id, asset_id, tax_event_type);
+
 -- ────────────────────────────────────────────────────────────
 -- Materialised position cache  (derived from ledger)
 -- ────────────────────────────────────────────────────────────

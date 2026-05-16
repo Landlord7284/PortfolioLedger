@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.database import init_db
-from backend.routers import portfolios, assets, events, brokerage_notes, reports
+from backend.routers import portfolios, assets, events, brokerage_notes, reports, tax
 
 
 @asynccontextmanager
@@ -43,6 +43,7 @@ app.include_router(assets.router)
 app.include_router(events.router)
 app.include_router(brokerage_notes.router)
 app.include_router(reports.router)
+app.include_router(tax.router)
 
 
 @app.get("/api/health")
