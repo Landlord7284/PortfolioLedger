@@ -35,6 +35,8 @@ const CHART_COLORS = [
   'var(--primary)',
   'var(--muted-foreground)',
 ];
+const TOP_SEGMENT_LIMIT = 5;
+const OTHERS_SEGMENT_KEY = 'Outros';
 
 function toNumber(value) {
   const parsed = Number(value || 0);
@@ -93,7 +95,7 @@ function SortableHead({ sortKey, sort, onSort, className = '', children }) {
       <Button
         variant="ghost"
         size="sm"
-        className="-ml-3 h-8 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+        className="-ml-3 h-8 whitespace-nowrap px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
         onClick={() => onSort(sortKey)}
       >
         {children}
@@ -116,8 +118,15 @@ function IncomeTooltip({ active, payload, hideValues }) {
           <div className="text-muted-foreground">Nenhum provento no mês.</div>
         ) : (
           month.segmentDetails.map((segment) => (
-            <div key={segment.key} className="grid grid-cols-[1fr_auto] items-center gap-4">
-              <span className="min-w-0 truncate font-medium">{segment.key}</span>
+            <div key={segment.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                  style={{ backgroundColor: segment.color }}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 truncate font-medium">{segment.key}</span>
+              </span>
               <span className="font-mono font-semibold tabular-nums">
                 R$ {formatMoney(segment.value, hideValues)} ({hideValues ? '•••' : `${formatPercent(segment.share)}%`})
               </span>
@@ -191,13 +200,56 @@ export default function Proventos() {
     setPeriod(value);
   };
 
-  const chartSegments = useMemo(() => (
-    (report?.chart.segment_keys || []).map((key, index) => ({
+  const monthlyChartSegments = useMemo(() => (
+    (report?.chart.months || []).map((month) => {
+      const sortedSegments = (month.segments || [])
+        .map((segment) => ({
+          key: segment.key,
+          value: toNumber(segment.value),
+        }))
+        .filter((segment) => segment.value > 0)
+        .sort((a, b) => (b.value - a.value) || compareText(a.key, b.key));
+      const topSegments = sortedSegments.slice(0, TOP_SEGMENT_LIMIT);
+      const topKeys = new Set(topSegments.map((segment) => segment.key));
+      const othersValue = sortedSegments.reduce((sum, segment) => (
+        topKeys.has(segment.key) ? sum : sum + segment.value
+      ), 0);
+
+      return {
+        month: month.month,
+        totalNetValue: month.total_net_value,
+        topSegments,
+        othersValue,
+      };
+    })
+  ), [report]);
+
+  const chartSegments = useMemo(() => {
+    const keys = [];
+    monthlyChartSegments.forEach((month) => {
+      month.topSegments.forEach((segment) => {
+        if (!keys.includes(segment.key)) keys.push(segment.key);
+      });
+    });
+
+    const segments = keys.map((key, index) => ({
       key,
       dataKey: `segment_${index}`,
-      color: CHART_COLORS[index % CHART_COLORS.length],
-    }))
-  ), [report]);
+      color: CHART_COLORS[index % TOP_SEGMENT_LIMIT],
+      isOthers: false,
+    }));
+
+    if (monthlyChartSegments.some((month) => month.othersValue > 0)) {
+      segments.push({
+        key: OTHERS_SEGMENT_KEY,
+        dataKey: 'segment_others',
+        color: CHART_COLORS[TOP_SEGMENT_LIMIT],
+        isOthers: true,
+      });
+    }
+
+    return segments;
+  }, [monthlyChartSegments]);
 
   const chartConfig = useMemo(() => (
     chartSegments.reduce((config, segment) => {
@@ -206,32 +258,38 @@ export default function Proventos() {
     }, {})
   ), [chartSegments]);
 
-  const chartData = useMemo(() => (
-    (report?.chart.months || []).map((month) => {
+  const chartData = useMemo(() => {
+    const segmentByKey = new Map(chartSegments.map((segment) => [segment.key, segment]));
+
+    return monthlyChartSegments.map((month) => {
+      const total = toNumber(month.totalNetValue);
+      const othersSegment = segmentByKey.get(OTHERS_SEGMENT_KEY);
       const row = {
         month: month.month,
         monthLabel: formatMonth(month.month),
-        totalNetValue: month.total_net_value,
-        segmentDetails: month.segments
-          .map((segment) => {
-            const value = toNumber(segment.value);
-            const total = toNumber(month.total_net_value);
-            return {
-              key: segment.key,
-              value: segment.value,
-              share: total ? (value / total) * 100 : 0,
-            };
-          })
-          .filter((segment) => toNumber(segment.value) > 0)
-          .sort((a, b) => toNumber(b.value) - toNumber(a.value)),
+        totalNetValue: month.totalNetValue,
+        segmentDetails: [
+          ...month.topSegments.map((segment) => ({
+            key: segment.key,
+            value: segment.value,
+            share: total ? (segment.value / total) * 100 : 0,
+            color: segmentByKey.get(segment.key)?.color,
+          })),
+          ...(month.othersValue > 0 ? [{
+            key: OTHERS_SEGMENT_KEY,
+            value: month.othersValue,
+            share: total ? (month.othersValue / total) * 100 : 0,
+            color: othersSegment?.color,
+          }] : []),
+        ],
       };
+      const monthlyValues = new Map(month.topSegments.map((segment) => [segment.key, segment.value]));
       chartSegments.forEach((segment) => {
-        const item = month.segments.find((entry) => entry.key === segment.key);
-        row[segment.dataKey] = toNumber(item?.value);
+        row[segment.dataKey] = segment.isOthers ? month.othersValue : (monthlyValues.get(segment.key) || 0);
       });
       return row;
-    })
-  ), [report, chartSegments]);
+    });
+  }, [monthlyChartSegments, chartSegments]);
 
   const yearOptions = report?.filters.years || [];
   const effectiveTableYear = tableYear || (report?.table.year ? String(report.table.year) : '');
@@ -273,18 +331,20 @@ export default function Proventos() {
           <p className="mt-1 text-sm text-muted-foreground">{activePortfolio?.name || 'Carteira ativa'}</p>
         </div>
 
-        <Select value={period} onValueChange={handlePeriodChange}>
-          <SelectTrigger className="w-full sm:w-[180px]" aria-label="Período">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {PERIOD_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap gap-2" aria-label="Periodo">
+          {PERIOD_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              type="button"
+              variant={period === option.value ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 rounded-full px-3"
+              onClick={() => handlePeriodChange(option.value)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {loading && !report ? (
@@ -432,31 +492,39 @@ export default function Proventos() {
               Nenhum provento encontrado para o mês selecionado.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
+            <div className="w-full overflow-x-auto">
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <SortableHead sortKey="ticker" sort={sort} onSort={handleSort}>Ticker</SortableHead>
-                    <SortableHead sortKey="asset_class" sort={sort} onSort={handleSort}>Classe</SortableHead>
-                    <SortableHead sortKey="name" sort={sort} onSort={handleSort}>Nome</SortableHead>
-                    <SortableHead sortKey="payment_date" sort={sort} onSort={handleSort}>Pagamento</SortableHead>
-                    <SortableHead sortKey="event_type" sort={sort} onSort={handleSort}>Tipo</SortableHead>
-                    <SortableHead sortKey="quantity" sort={sort} onSort={handleSort} className="text-right">Quantidade</SortableHead>
-                    <SortableHead sortKey="net_value" sort={sort} onSort={handleSort} className="text-right">Valor líquido</SortableHead>
+                    <SortableHead sortKey="ticker" sort={sort} onSort={handleSort} className="w-[86px]">Ticker</SortableHead>
+                    <SortableHead sortKey="asset_class" sort={sort} onSort={handleSort} className="w-[112px]">Classe</SortableHead>
+                    <SortableHead sortKey="name" sort={sort} onSort={handleSort} className="w-[190px]">Nome</SortableHead>
+                    <SortableHead sortKey="payment_date" sort={sort} onSort={handleSort} className="w-[118px]">Pagamento</SortableHead>
+                    <SortableHead sortKey="event_type" sort={sort} onSort={handleSort} className="w-[210px]">Tipo</SortableHead>
+                    <SortableHead sortKey="quantity" sort={sort} onSort={handleSort} className="w-[128px] text-right">Quantidade</SortableHead>
+                    <SortableHead sortKey="net_value" sort={sort} onSort={handleSort} className="w-[132px] text-right">Valor líquido</SortableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sortedRows.map((row) => (
                     <TableRow key={row.id}>
-                      <TableCell className="font-medium">{row.ticker || '-'}</TableCell>
-                      <TableCell className="text-muted-foreground">{row.asset_class || '-'}</TableCell>
-                      <TableCell className="min-w-[220px] text-muted-foreground">{displayIncomeName(row) || '-'}</TableCell>
-                      <TableCell>{formatDate(row.payment_date)}</TableCell>
-                      <TableCell>{row.event_type}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">
+                      <TableCell className="truncate whitespace-nowrap font-medium" title={row.ticker || '-'}>
+                        {row.ticker || '-'}
+                      </TableCell>
+                      <TableCell className="truncate whitespace-nowrap text-muted-foreground" title={row.asset_class || '-'}>
+                        {row.asset_class || '-'}
+                      </TableCell>
+                      <TableCell className="truncate text-muted-foreground" title={displayIncomeName(row) || '-'}>
+                        {displayIncomeName(row) || '-'}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{formatDate(row.payment_date)}</TableCell>
+                      <TableCell className="truncate whitespace-nowrap" title={row.event_type || '-'}>
+                        {row.event_type || '-'}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-mono text-sm">
                         {formatQuantity(row.quantity, row.asset_class, hideValues)}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
+                      <TableCell className="whitespace-nowrap text-right font-mono text-sm">
                         R$ {formatMoney(row.net_value, hideValues)}
                       </TableCell>
                     </TableRow>
