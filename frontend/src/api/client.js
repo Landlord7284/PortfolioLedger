@@ -127,6 +127,16 @@ export const reports = {
 };
 
 export const b3 = {
+  monthlyImport: ({ portfolioId, files }) => {
+    const formData = new FormData();
+    Array.from(files || []).forEach((file) => {
+      formData.append('files', file);
+    });
+    return request(`/b3/monthly-import?portfolio_id=${portfolioId}`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
   incomes: ({ portfolioId, period, assetId, assetClass, eventType, tableYear, tableMonth }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, period });
     if (assetId) params.set('asset_id', assetId);

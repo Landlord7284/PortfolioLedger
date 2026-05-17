@@ -31,6 +31,7 @@ def _workbook_bytes(rows_by_sheet=None):
             "Produto", "Instituição", "Emissor", "Código", "Indexador", "Tipo de regime",
             "Data de Emissão", "Vencimento", "Quantidade", "Quantidade Disponível",
             "Quantidade Indisponível", "Motivo", "Contraparte", "Preço Atualizado MTM",
+            "Valor Atualizado MTM",
         ],
         "Posição - Tesouro Direto": [
             "Produto", "Instituição", "Código ISIN", "Indexador", "Vencimento", "Quantidade",
@@ -61,7 +62,7 @@ def test_b3_import_persists_market_prices_income_and_auto_amortization(tmp_path)
         {
             "Posição - Ações": [["XPTO3 - XPTO S.A.", "ITAU", "1", "XPTO3", "12345678000190", None, "ON", None, 10, 10, "-", "-", 12.34, 123.4]],
             "Posição - Fundos": [["ABCD11 - ABCD FII", "ITAU", "1", "ABCD11", "11111111000111", None, "Cotas", None, 10, 10, "-", "-", 95.5, 955]],
-            "Posição - Renda Fixa": [["DEB - CIA TESTE", "ITAU", "CIA", "DEB123", "IPCA", "DEPOSITADO", "01/01/2024", "01/01/2030", 1, 1, "-", "-", "-", 1020.5]],
+            "Posição - Renda Fixa": [["DEB - CIA TESTE", "ITAU", "CIA", "DEB123", "IPCA", "DEPOSITADO", "01/01/2024", "01/01/2030", 1, 1, "-", "-", "-", 102.05, 1020.5]],
             "Posição - Tesouro Direto": [["Tesouro IPCA+ 2029", "ITAU", "BRSTN", "IPCA", "15/05/2029", 1, 1, 0, "-", 100, 110, 109, 111.22]],
             "Proventos Recebidos": [["KNOX11 - KNOX DEBT FDO", "28/11/2025", "Amortização", "BTG", "10", 2.5, 25]],
         }
@@ -153,6 +154,101 @@ def test_b3_import_is_idempotent_for_same_file(tmp_path):
     assert prices == 1
     assert incomes == 1
     assert amortizations == 1
+
+
+def test_b3_market_price_preserves_multiple_b3_rows_for_same_asset_month_sheet(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Posição - Ações": [
+                ["XPTO3 - XPTO S.A.", "ITAU", "1", "XPTO3", "12345678000190", None, "ON", None, 10, 10, "-", "-", 12.34, 123.4],
+                ["XPTO3 - XPTO S.A.", "BTG", "2", "XPTO3", "12345678000190", None, "ON", None, 5, 5, "-", "-", 12.35, 61.75],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR", cnpj="12345678000190")
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        rows = conn.execute("SELECT * FROM b3_market_prices").fetchall()
+
+    assert result["imported_prices"] == 2
+    assert result["duplicates"] == 0
+    assert len(rows) == 2
+    assert [row["value"] for row in rows] == ["12.34", "12.35"]
+
+
+def test_b3_income_preserves_same_asset_date_type_with_different_values(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Proventos Recebidos": [
+                ["EQTL3 - EQUATORIAL ENERGIA S.A.", "28/11/2025", "Juros Sobre Capital Próprio", "ITAU", "10", 0.4, 4],
+                ["EQTL3 - EQUATORIAL ENERGIA S.A.", "28/11/2025", "Juros Sobre Capital Próprio", "ITAU", "10", 0.5, 5],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset_service.create_asset(conn, AssetClass.ACAO.value, "EQTL3", market="BR")
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        rows = conn.execute("SELECT * FROM b3_income_events ORDER BY source_row").fetchall()
+
+    assert result["imported_incomes"] == 2
+    assert result["duplicates"] == 0
+    assert len(rows) == 2
+    assert [row["net_value"] for row in rows] == ["4", "5"]
+
+
+def test_b3_market_price_consolidates_fixed_income_and_treasury_positions(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Posição - Renda Fixa": [
+                ["DEB - CIA TESTE", "ITAU", "CIA", "DEB123", "IPCA", "DEPOSITADO", "01/01/2024", "01/01/2030", 1, 1, "-", "-", "-", 100, 1000],
+                ["DEB - CIA TESTE", "BTG", "CIA", "DEB123", "IPCA", "DEPOSITADO", "01/01/2024", "01/01/2030", 2, 2, "-", "-", "-", 100, 2000],
+            ],
+            "Posição - Tesouro Direto": [
+                ["Tesouro IPCA+ com Juros Semestrais 2045", "ITAU", "BRSTN", "IPCA", "15/05/2045", 1, 1, 0, "-", 100, 110, 109, 111],
+                ["Tesouro IPCA+ com Juros Semestrais 2045", "BTG", "BRSTN", "IPCA", "15/05/2045", 2, 2, 0, "-", 200, 220, 218, 222],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        deb = asset_service.create_asset(conn, AssetClass.DEBENTURE.value, "DEB123", market="BR")
+        tesouro = asset_service.create_asset(
+            conn,
+            AssetClass.TESOURO_DIRETO.value,
+            "TD2045",
+            market="BR",
+            name="Tesouro IPCA+ com Juros Semestrais 2045",
+            maturity_date="2045-05-15",
+        )
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        second = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        deb_price = conn.execute("SELECT * FROM b3_market_prices WHERE asset_id = ?", (deb["id"],)).fetchone()
+        tesouro_price = conn.execute("SELECT * FROM b3_market_prices WHERE asset_id = ?", (tesouro["id"],)).fetchone()
+        rows = conn.execute("SELECT COUNT(*) AS count FROM b3_market_prices").fetchone()["count"]
+
+    assert result["imported_prices"] == 4
+    assert result["duplicates"] == 0
+    assert second["imported_prices"] == 0
+    assert second["duplicates"] == 4
+    assert rows == 2
+    assert deb_price["value"] == "3000"
+    assert deb_price["is_unit_price"] == 0
+    assert tesouro_price["value"] == "333"
+    assert tesouro_price["is_unit_price"] == 0
 
 
 def test_b3_import_creates_review_for_unmatched_asset(tmp_path):

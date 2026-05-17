@@ -332,8 +332,7 @@ def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
             raw_payload      TEXT,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
             updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(import_id, source_sheet, source_row),
-            UNIQUE(asset_id, reference_month, source_sheet)
+            UNIQUE(import_id, source_sheet, source_row)
         );
 
         CREATE INDEX IF NOT EXISTS idx_b3_market_prices_asset_month
@@ -344,6 +343,7 @@ def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
             import_id        INTEGER NOT NULL REFERENCES b3_monthly_imports(id) ON DELETE CASCADE,
             portfolio_id     INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
             asset_id         INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+            source_row       INTEGER NOT NULL DEFAULT 0,
             payment_date     TEXT    NOT NULL,
             event_type       TEXT    NOT NULL,
             product          TEXT,
@@ -356,15 +356,115 @@ def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
             review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
             raw_payload      TEXT,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
-            updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(import_id, payment_date, event_type, product),
-            UNIQUE(portfolio_id, asset_id, payment_date, event_type)
+            updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
         );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_b3_income_events_import_row
+            ON b3_income_events(import_id, source_row)
+            WHERE source_row > 0;
 
         CREATE INDEX IF NOT EXISTS idx_b3_income_events_asset_date
             ON b3_income_events(portfolio_id, asset_id, payment_date);
         """
     )
+    _migrate_b3_unique_constraints(conn)
+
+
+def _migrate_b3_unique_constraints(conn: sqlite3.Connection) -> None:
+    """Rebuild early B3 tables that used over-broad uniqueness rules."""
+    _add_column_if_missing(conn, "b3_income_events", "source_row", "source_row INTEGER NOT NULL DEFAULT 0")
+    price_indexes = conn.execute("PRAGMA index_list(b3_market_prices)").fetchall()
+    if sum(1 for row in price_indexes if row["unique"] and row["origin"] == "u") > 1:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("ALTER TABLE b3_market_prices RENAME TO b3_market_prices_old")
+        conn.execute(
+            """
+            CREATE TABLE b3_market_prices (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                import_id        INTEGER NOT NULL REFERENCES b3_monthly_imports(id) ON DELETE CASCADE,
+                asset_id         INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+                reference_month  TEXT    NOT NULL,
+                reference_date   TEXT    NOT NULL,
+                source_sheet     TEXT    NOT NULL,
+                source_row       INTEGER NOT NULL,
+                ticker           TEXT,
+                product          TEXT,
+                cnpj             TEXT,
+                maturity_date    TEXT,
+                value            TEXT,
+                is_unit_price    INTEGER NOT NULL DEFAULT 1,
+                status           TEXT    NOT NULL DEFAULT 'imported',
+                review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
+                raw_payload      TEXT,
+                created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+                updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(import_id, source_sheet, source_row)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO b3_market_prices (
+                id, import_id, asset_id, reference_month, reference_date,
+                source_sheet, source_row, ticker, product, cnpj, maturity_date,
+                value, is_unit_price, status, review_id, raw_payload, created_at, updated_at
+            )
+            SELECT id, import_id, asset_id, reference_month, reference_date,
+                   source_sheet, source_row, ticker, product, cnpj, maturity_date,
+                   value, is_unit_price, status, review_id, raw_payload, created_at, updated_at
+            FROM b3_market_prices_old
+            """
+        )
+        conn.execute("DROP TABLE b3_market_prices_old")
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_market_prices_asset_month ON b3_market_prices(asset_id, reference_month)")
+
+    income_indexes = conn.execute("PRAGMA index_list(b3_income_events)").fetchall()
+    if sum(1 for row in income_indexes if row["unique"] and row["origin"] == "u") > 0:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("ALTER TABLE b3_income_events RENAME TO b3_income_events_old")
+        conn.execute(
+            """
+            CREATE TABLE b3_income_events (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                import_id        INTEGER NOT NULL REFERENCES b3_monthly_imports(id) ON DELETE CASCADE,
+                portfolio_id     INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+                asset_id         INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+                source_row       INTEGER NOT NULL DEFAULT 0,
+                payment_date     TEXT    NOT NULL,
+                event_type       TEXT    NOT NULL,
+                product          TEXT,
+                ticker           TEXT,
+                quantity         TEXT,
+                unit_price       TEXT,
+                net_value        TEXT,
+                status           TEXT    NOT NULL DEFAULT 'imported',
+                ledger_event_id  INTEGER REFERENCES events(id) ON DELETE SET NULL,
+                review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
+                raw_payload      TEXT,
+                created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+                updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO b3_income_events (
+                id, import_id, portfolio_id, asset_id, source_row, payment_date,
+                event_type, product, ticker, quantity, unit_price, net_value,
+                status, ledger_event_id, review_id, raw_payload, created_at, updated_at
+            )
+            SELECT id, import_id, portfolio_id, asset_id,
+                   COALESCE(NULLIF(source_row, 0), id), payment_date,
+                   event_type, product, ticker, quantity, unit_price, net_value,
+                   status, ledger_event_id, review_id, raw_payload, created_at, updated_at
+            FROM b3_income_events_old
+            """
+        )
+        conn.execute("DROP TABLE b3_income_events_old")
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_b3_income_events_import_row ON b3_income_events(import_id, source_row) WHERE source_row > 0")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_income_events_asset_date ON b3_income_events(portfolio_id, asset_id, payment_date)")
 
 
 @contextmanager

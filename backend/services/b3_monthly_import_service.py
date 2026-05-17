@@ -14,6 +14,7 @@ import sqlite3
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
@@ -318,14 +319,114 @@ def _upsert_import(conn: sqlite3.Connection, portfolio_id: int, filename: str, r
     return row["id"]
 
 
-def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> bool:
+def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
     existing = conn.execute(
         """
-        SELECT id FROM b3_market_prices
+        SELECT * FROM b3_market_prices
         WHERE import_id = ? AND source_sheet = ? AND source_row = ?
         """,
         (values["import_id"], values["source_sheet"], values["source_row"]),
     ).fetchone()
+    if existing:
+        if not values["is_unit_price"]:
+            try:
+                existing_payload = json.loads(existing["raw_payload"] or "{}")
+            except json.JSONDecodeError:
+                existing_payload = {}
+            if len(existing_payload.get("consolidated_source_rows") or []) > 1:
+                return "updated"
+        conn.execute(
+            """
+            UPDATE b3_market_prices
+            SET asset_id = ?,
+                reference_month = ?,
+                reference_date = ?,
+                ticker = ?,
+                product = ?,
+                cnpj = ?,
+                maturity_date = ?,
+                value = ?,
+                is_unit_price = ?,
+                status = ?,
+                review_id = ?,
+                raw_payload = ?,
+                updated_at = datetime('now')
+            WHERE id = ?
+            """,
+            (
+                values["asset_id"],
+                values["reference_month"],
+                values["reference_date"],
+                values.get("ticker"),
+                values.get("product"),
+                values.get("cnpj"),
+                values.get("maturity_date"),
+                values.get("value"),
+                1 if values["is_unit_price"] else 0,
+                values["status"],
+                values.get("review_id"),
+                _json_dumps(values["raw_payload"]),
+                existing["id"],
+            ),
+        )
+        return "updated"
+
+    if not values["is_unit_price"] and values.get("asset_id") is not None:
+        asset_existing = conn.execute(
+            """
+            SELECT * FROM b3_market_prices
+            WHERE asset_id = ?
+              AND reference_month = ?
+              AND source_sheet = ?
+            ORDER BY id
+            LIMIT 1
+            """,
+            (values["asset_id"], values["reference_month"], values["source_sheet"]),
+        ).fetchone()
+        if asset_existing:
+            try:
+                existing_payload = json.loads(asset_existing["raw_payload"] or "{}")
+            except json.JSONDecodeError:
+                existing_payload = {}
+            source_rows = existing_payload.get("consolidated_source_rows") or [asset_existing["source_row"]]
+            if values["source_row"] in source_rows:
+                return "updated"
+            current_value = to_decimal(asset_existing["value"]) if asset_existing["value"] is not None else Decimal("0")
+            added_value = to_decimal(values["value"]) if values.get("value") is not None else Decimal("0")
+            source_rows.append(values["source_row"])
+            conn.execute(
+                """
+                UPDATE b3_market_prices
+                SET value = ?,
+                    ticker = ?,
+                    product = ?,
+                    cnpj = ?,
+                    maturity_date = ?,
+                    status = ?,
+                    review_id = ?,
+                    raw_payload = ?,
+                    updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (
+                    str(current_value + added_value),
+                    values.get("ticker"),
+                    values.get("product"),
+                    values.get("cnpj"),
+                    values.get("maturity_date"),
+                    values["status"],
+                    values.get("review_id"),
+                    _json_dumps(
+                        {
+                            "consolidated_source_rows": source_rows,
+                            "latest_row": values["raw_payload"],
+                        }
+                    ),
+                    asset_existing["id"],
+                ),
+            )
+            return "consolidated"
+
     conn.execute(
         """
         INSERT INTO b3_market_prices (
@@ -334,20 +435,6 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> bool:
             is_unit_price, status, review_id, raw_payload
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(import_id, source_sheet, source_row) DO UPDATE SET
-            asset_id = excluded.asset_id,
-            reference_month = excluded.reference_month,
-            reference_date = excluded.reference_date,
-            ticker = excluded.ticker,
-            product = excluded.product,
-            cnpj = excluded.cnpj,
-            maturity_date = excluded.maturity_date,
-            value = excluded.value,
-            is_unit_price = excluded.is_unit_price,
-            status = excluded.status,
-            review_id = excluded.review_id,
-            raw_payload = excluded.raw_payload,
-            updated_at = datetime('now')
         """,
         (
             values["import_id"],
@@ -367,41 +454,67 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> bool:
             _json_dumps(values["raw_payload"]),
         ),
     )
-    return existing is None
+    return "inserted"
 
 
 def _upsert_income(conn: sqlite3.Connection, values: dict) -> bool:
     existing = conn.execute(
         """
         SELECT id FROM b3_income_events
-        WHERE import_id = ? AND payment_date = ? AND event_type = ? AND product = ?
+        WHERE import_id = ? AND source_row = ?
         """,
-        (values["import_id"], values["payment_date"], values["event_type"], values["product"]),
+        (values["import_id"], values["source_row"]),
     ).fetchone()
+    if existing:
+        conn.execute(
+            """
+            UPDATE b3_income_events
+            SET asset_id = ?,
+                payment_date = ?,
+                event_type = ?,
+                product = ?,
+                ticker = ?,
+                quantity = ?,
+                unit_price = ?,
+                net_value = ?,
+                status = ?,
+                ledger_event_id = COALESCE(ledger_event_id, ?),
+                review_id = ?,
+                raw_payload = ?,
+                updated_at = datetime('now')
+            WHERE id = ?
+            """,
+            (
+                values["asset_id"],
+                values["payment_date"],
+                values["event_type"],
+                values["product"],
+                values.get("ticker"),
+                values.get("quantity"),
+                values.get("unit_price"),
+                values.get("net_value"),
+                values["status"],
+                values.get("ledger_event_id"),
+                values.get("review_id"),
+                _json_dumps(values["raw_payload"]),
+                existing["id"],
+            ),
+        )
+        return False
     conn.execute(
         """
         INSERT INTO b3_income_events (
-            import_id, portfolio_id, asset_id, payment_date, event_type,
+            import_id, portfolio_id, asset_id, source_row, payment_date, event_type,
             product, ticker, quantity, unit_price, net_value, status,
             ledger_event_id, review_id, raw_payload
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(import_id, payment_date, event_type, product) DO UPDATE SET
-            asset_id = excluded.asset_id,
-            ticker = excluded.ticker,
-            quantity = excluded.quantity,
-            unit_price = excluded.unit_price,
-            net_value = excluded.net_value,
-            status = excluded.status,
-            ledger_event_id = COALESCE(b3_income_events.ledger_event_id, excluded.ledger_event_id),
-            review_id = excluded.review_id,
-            raw_payload = excluded.raw_payload,
-            updated_at = datetime('now')
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             values["import_id"],
             values["portfolio_id"],
             values["asset_id"],
+            values["source_row"],
             values["payment_date"],
             values["event_type"],
             values["product"],
@@ -415,7 +528,7 @@ def _upsert_income(conn: sqlite3.Connection, values: dict) -> bool:
             _json_dumps(values["raw_payload"]),
         ),
     )
-    return existing is None
+    return True
 
 
 def _ledger_amortization_exists(conn: sqlite3.Connection, portfolio_id: int, asset_id: int, payment_date: str) -> bool:
@@ -519,7 +632,7 @@ def _process_market_sheet(
             result["review_count"] += 1
             result["review_details"].append(f"{sheet_name} linha {row_idx}: {ticker or product} enviado para revisao")
             status = "review"
-        inserted = _upsert_market_price(
+        upsert_status = _upsert_market_price(
             conn,
             {
                 "import_id": import_id,
@@ -539,7 +652,7 @@ def _process_market_sheet(
                 "raw_payload": row,
             },
         )
-        if inserted:
+        if upsert_status in {"inserted", "consolidated"}:
             result["imported_prices"] += 1
         else:
             result["duplicates"] += 1
@@ -627,6 +740,7 @@ def _process_income_sheet(
                 "import_id": import_id,
                 "portfolio_id": portfolio_id,
                 "asset_id": asset_id,
+                "source_row": row_idx,
                 "payment_date": payment_date,
                 "event_type": event_type,
                 "product": product,
@@ -677,7 +791,7 @@ def import_b3_monthly_file(conn: sqlite3.Connection, portfolio_id: int, source: 
     sheet_specs = [
         ("Posição - Ações", AssetClass.ACAO, "PRECO DE FECHAMENTO", True, "CODIGO DE NEGOCIACAO", "CNPJ DA EMPRESA", None, False),
         ("Posição - Fundos", AssetClass.FII, "PRECO DE FECHAMENTO", True, "CODIGO DE NEGOCIACAO", "CNPJ DO FUNDO", None, False),
-        ("Posição - Renda Fixa", AssetClass.DEBENTURE, "PRECO ATUALIZADO MTM", True, "CODIGO", None, "VENCIMENTO", True),
+        ("Posição - Renda Fixa", AssetClass.DEBENTURE, "VALOR ATUALIZADO MTM", False, "CODIGO", None, "VENCIMENTO", True),
         ("Posição - Tesouro Direto", AssetClass.TESOURO_DIRETO, "VALOR ATUALIZADO", False, None, None, "VENCIMENTO", False),
     ]
     for sheet_name, asset_class, value_header, is_unit, ticker_header, cnpj_header, maturity_header, fixed_only in sheet_specs:

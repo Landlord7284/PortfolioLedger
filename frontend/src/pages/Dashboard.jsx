@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { positions as posApi } from '../api/client';
 import EventForm from '../components/EventForm';
+import B3MonthlyImportModal from '../components/B3MonthlyImportModal';
 import ImportModal from '../components/ImportModal';
 import { Search, Plus, Download, FolderOpen, Inbox, AlertCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,6 +50,7 @@ export default function Dashboard() {
   const [positionList, setPositionList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showEventForm, setShowEventForm] = useState(false);
+  const [showB3Import, setShowB3Import] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [filterClass, setFilterClass] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -172,7 +174,7 @@ export default function Dashboard() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
@@ -182,9 +184,13 @@ export default function Dashboard() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <Button variant="outline" onClick={() => setShowB3Import(true)}>
+            <Download className="w-4 h-4" />
+            Importar da B3
+          </Button>
           <Button variant="outline" onClick={() => setShowImport(true)}>
             <Download className="w-4 h-4" />
-            Importar
+            Importar Posições
           </Button>
           <Button onClick={() => setShowEventForm(true)}>
             <Plus className="w-4 h-4" />
@@ -373,6 +379,15 @@ export default function Dashboard() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* B3 import modal */}
+      {showB3Import && (
+        <B3MonthlyImportModal
+          portfolioId={activePortfolioId}
+          onClose={() => setShowB3Import(false)}
+          onSuccess={loadPositions}
+        />
+      )}
 
       {/* Import modal */}
       {showImport && (
