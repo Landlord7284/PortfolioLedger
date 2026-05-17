@@ -80,7 +80,7 @@ def _income_rows(
     table_year: int | None = None,
     table_month: int | None = None,
 ) -> list[sqlite3.Row]:
-    conditions = ["i.portfolio_id = ?"]
+    conditions = ["i.portfolio_id = ?", "i.status NOT LIKE 'ledger_%'"]
     params: list[Any] = [portfolio_id]
     if start_date:
         conditions.append("i.payment_date >= ?")
@@ -149,6 +149,16 @@ def _display_name(row: sqlite3.Row) -> str | None:
     return row["asset_name"] or row["current_name"] or row["product"]
 
 
+def _display_asset_class(row: sqlite3.Row) -> str | None:
+    if row["asset_class"]:
+        return row["asset_class"]
+    product = row["product"] or ""
+    prefix = product.split(" - ", 1)[0].strip().upper()
+    if prefix in {"CRI", "CRA"}:
+        return prefix
+    return None
+
+
 def _event_label(row: sqlite3.Row) -> str:
     ticker = _display_ticker(row)
     if ticker:
@@ -160,7 +170,7 @@ def _segment_key(row: sqlite3.Row, chart_group_by: str) -> str:
     if chart_group_by == "asset":
         return _event_label(row)
     if chart_group_by == "asset_class":
-        return row["asset_class"] or "Sem classe"
+        return _display_asset_class(row) or "Sem classe"
     return row["event_type"] or "Sem tipo"
 
 
@@ -170,7 +180,7 @@ def _table_row(row: sqlite3.Row) -> dict[str, Any]:
         "asset_id": row["asset_id"],
         "ticker": _display_ticker(row),
         "name": _display_name(row),
-        "asset_class": row["asset_class"],
+        "asset_class": _display_asset_class(row),
         "payment_date": row["payment_date"],
         "event_type": row["event_type"],
         "quantity": row["quantity"] or "0",
@@ -191,8 +201,9 @@ def _available_filters(rows: list[sqlite3.Row]) -> dict[str, list[dict[str, Any]
                 "name": _display_name(row),
                 "asset_class": row["asset_class"],
             }
-        if row["asset_class"]:
-            classes.add(row["asset_class"])
+        asset_class = _display_asset_class(row)
+        if asset_class:
+            classes.add(asset_class)
         if row["event_type"]:
             types.add(row["event_type"])
     return {

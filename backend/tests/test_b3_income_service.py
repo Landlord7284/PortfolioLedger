@@ -118,3 +118,31 @@ def test_b3_incomes_includes_review_fallback_rows(tmp_path, monkeypatch):
     assert report["filters"]["assets"] == []
     assert report["table"]["rows"][0]["ticker"] == "XPTO3"
     assert report["table"]["rows"][0]["name"] == "XPTO3 - Empresa XPTO"
+
+
+def test_b3_incomes_includes_summary_only_and_excludes_ledger_events(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    monkeypatch.setattr(b3_income_service, "date", type("FixedDate", (), {"today": staticmethod(lambda: date(2026, 5, 17))}))
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        import_id = _import_id(conn, portfolio["id"], "2026-02")
+        _income(conn, import_id, portfolio["id"], payment_date="2026-02-18", event_type="PAGAMENTO DE JUROS", product="CRI - SEC TESTE", quantity="4", net_value="138.14", status="summary_only")
+        _income(conn, import_id, portfolio["id"], payment_date="2026-02-19", event_type="AmortizaÃ§Ã£o", product="DEB - CIA TESTE", ticker="DEB123", quantity="0", net_value="50.00", status="ledger_event_created")
+
+        report = b3_income_service.list_b3_incomes(
+            conn,
+            portfolio["id"],
+            period="year",
+            chart_group_by="asset_class",
+            table_year=2026,
+            table_month=2,
+        )
+
+    assert report["summary"]["total_net_value"] == "138.14"
+    assert report["chart"]["segment_keys"] == ["CRI"]
+    assert report["table"]["total_net_value"] == "138.14"
+    assert len(report["table"]["rows"]) == 1
+    assert report["table"]["rows"][0]["asset_class"] == "CRI"
+    assert report["table"]["rows"][0]["name"] == "CRI - SEC TESTE"

@@ -9,6 +9,19 @@ from backend.services import asset_service, event_service, portfolio_service
 from backend.services.b3_monthly_import_service import SourceFile, import_b3_monthly_batch, sanitize_b3_monthly_import
 
 
+def _sheet_rows(rows_by_sheet, sheet_name):
+    if sheet_name in rows_by_sheet:
+        return rows_by_sheet[sheet_name]
+    variants = {
+        sheet_name.encode("latin1", errors="ignore").decode("utf-8", errors="ignore"),
+        sheet_name.encode("utf-8", errors="ignore").decode("latin1", errors="ignore"),
+    }
+    for variant in variants:
+        if variant in rows_by_sheet:
+            return rows_by_sheet[variant]
+    return []
+
+
 def _workbook_bytes(rows_by_sheet=None):
     rows_by_sheet = rows_by_sheet or {}
     wb = Workbook()
@@ -46,7 +59,7 @@ def _workbook_bytes(rows_by_sheet=None):
     for sheet_name, sheet_headers in headers.items():
         ws = wb.create_sheet(sheet_name)
         ws.append(sheet_headers)
-        for row in rows_by_sheet.get(sheet_name, []):
+        for row in _sheet_rows(rows_by_sheet, sheet_name):
             ws.append(row)
 
     stream = BytesIO()
@@ -100,7 +113,7 @@ def test_b3_import_persists_market_prices_income_and_auto_amortization(tmp_path)
     assert events[0]["event_value"] == "25"
 
 
-def test_b3_amortization_deduplicates_by_type_asset_and_date_not_value(tmp_path):
+def test_b3_amortization_imports_duplicate_by_type_asset_and_date_with_flag(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)
     content = _workbook_bytes(
@@ -116,14 +129,18 @@ def test_b3_amortization_deduplicates_by_type_asset_and_date_not_value(tmp_path)
         event_service.create_event(conn, portfolio["id"], asset["id"], EventType.AMORTIZACAO.value, "2025-11-28", "0", "24.99")
 
         result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
-        events = conn.execute("SELECT * FROM events WHERE event_type = ?", (EventType.AMORTIZACAO.value,)).fetchall()
+        events = conn.execute("SELECT * FROM events WHERE event_type = ? ORDER BY id", (EventType.AMORTIZACAO.value,)).fetchall()
         income = conn.execute("SELECT * FROM b3_income_events").fetchone()
+        asset_row = conn.execute("SELECT duplicate_flag FROM assets WHERE id = ?", (asset["id"],)).fetchone()
 
-    assert result["auto_events_created"] == 0
+    assert result["auto_events_created"] == 1
     assert result["duplicates"] >= 1
-    assert len(events) == 1
-    assert income["status"] == "ledger_duplicate"
-    assert income["ledger_event_id"] is None
+    assert len(events) == 2
+    assert events[1]["event_value"] == "25"
+    assert events[1]["duplicate_flag"] == 1
+    assert asset_row["duplicate_flag"] == 1
+    assert income["status"] == "ledger_event_created"
+    assert income["ledger_event_id"] == events[1]["id"]
 
 
 def test_b3_import_is_idempotent_for_same_file(tmp_path):
@@ -214,7 +231,7 @@ def test_sanitize_b3_monthly_import_removes_b3_rows_and_cancels_auto_ledger_even
         "portfolio_id": portfolio["id"],
         "reference_month": "2025-11",
         "imports_removed": 1,
-        "market_prices_removed": 1,
+        "market_prices_removed": 5,
         "income_events_removed": 1,
         "ledger_events_cancelled": 1,
     }
@@ -375,6 +392,91 @@ def test_b3_market_price_consolidates_fixed_income_and_treasury_positions(tmp_pa
     assert deb_price["is_unit_price"] == 0
     assert tesouro_price["value"] == "333"
     assert tesouro_price["is_unit_price"] == 0
+
+
+def test_b3_fixed_income_stops_on_blank_product_filters_and_creates_debenture_with_maturity(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "PosiÃ§Ã£o - Renda Fixa": [
+                ["CDB - BANCO TESTE", "ITAU", "BANCO TESTE", "CDB123", "IPCA", "DEPOSITADO", "01/01/2024", "01/01/2030", 1, 1, "-", "-", "-", 100, 100],
+                ["CRI - SEC TESTE", "ITAU", "SEC TESTE", "CRI123", "IPCA", "DEPOSITADO", "01/01/2024", "01/01/2031", 1, 1, "-", "-", "-", 100, 200],
+                ["DEB - CIA NOVA", "ITAU", "CIA NOVA", "DEB999", "IPCA", "DEPOSITADO", "01/01/2024", "15/07/2032", 7, 7, "-", "-", "-", 100, 700],
+                [None, "BTG", "CIA IGNORADA", "DEB000", "IPCA", "DEPOSITADO", "01/01/2024", "15/07/2033", 1, 1, "-", "-", "-", 100, 999],
+                ["DEB - CIA DEPOIS", "BTG", "CIA DEPOIS", "DEB111", "IPCA", "DEPOSITADO", "01/01/2024", "15/07/2034", 1, 1, "-", "-", "-", 100, 111],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        assets = asset_service.list_assets(conn)
+        prices = conn.execute("SELECT * FROM b3_market_prices").fetchall()
+
+    assert result["imported_prices"] == 1
+    assert len(prices) == 1
+    assert prices[0]["ticker"] == "DEB999"
+    assert prices[0]["value"] == "700"
+    assert len(assets) == 1
+    assert assets[0]["current_ticker"] == "DEB999"
+    assert assets[0]["name"] == "CIA NOVA"
+    assert assets[0]["maturity_date"] == "2032-07-15"
+
+
+def test_b3_debenture_income_matches_position_by_product_and_clean_quantity(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "PosiÃ§Ã£o - Renda Fixa": [
+                ["DEB - CIA MATCH", "ITAU", "CIA MATCH", "MATCH1", "IPCA", "DEPOSITADO", "01/01/2024", "15/07/2032", 4200, 4200, "-", "-", "-", 100, 4200],
+            ],
+            "Proventos Recebidos": [
+                ["DEB - CIA MATCH", "28/11/2025", "PAGAMENTO DE JUROS", "ITAU", "'4.200 ações'", 0.1, 420],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        income = conn.execute("SELECT * FROM b3_income_events").fetchone()
+
+    assert result["imported_prices"] == 1
+    assert result["imported_incomes"] == 1
+    assert result["review_count"] == 0
+    assert income["ticker"] == "MATCH1"
+    assert income["quantity"] == "4200"
+    assert income["status"] == "imported"
+
+
+def test_b3_income_summary_only_for_cri_and_unmapped_without_ledger_or_review(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Proventos Recebidos": [
+                ["CRI - SEC TESTE", "18/02/2026", "PAGAMENTO DE JUROS", "ITAU", "4", 34.535, 138.14],
+                ["Produto sem regra", "18/02/2026", "Rendimento", "ITAU", "1", 10, 10],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2026-02.xlsx", content)])
+        incomes = conn.execute("SELECT * FROM b3_income_events ORDER BY source_row").fetchall()
+        events_count = conn.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
+        reviews = asset_service.list_match_reviews(conn)
+
+    assert result["imported_incomes"] == 2
+    assert result["review_count"] == 0
+    assert events_count == 0
+    assert reviews == []
+    assert [row["status"] for row in incomes] == ["summary_only", "summary_only"]
+    assert [row["asset_id"] for row in incomes] == [None, None]
 
 
 def test_b3_import_creates_review_for_unmatched_asset(tmp_path):

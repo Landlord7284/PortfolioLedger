@@ -30,9 +30,8 @@ _FILENAME_RE = re.compile(r"^(?P<year>\d{4})-(?P<month>\d{2})\.xlsx$", re.IGNORE
 _TICKER_PREFIX_RE = re.compile(r"^\s*([A-Z]{4}\d{1,2}[A-Z]?)\s+-\s+(.+)$")
 _FIXED_INCOME_CLASSES = {
     "DEB": AssetClass.DEBENTURE,
-    "CRI": AssetClass.CRI,
-    "CRA": AssetClass.CRA,
 }
+_SUMMARY_ONLY_PREFIXES = {"CRI", "CRA"}
 
 
 @dataclass
@@ -74,6 +73,20 @@ def _decimal_str(value) -> str | None:
     if isinstance(value, str) and value.strip() in {"", "-"}:
         return None
     return str(to_decimal(value))
+
+
+def _clean_decimal_str(value) -> str | None:
+    text = _clean_str(value)
+    if text is None:
+        return None
+    cleaned = re.sub(r"[^0-9,.\-]", "", text.replace("'", "").replace('"', ""))
+    if cleaned in {"", "-", ".", ","}:
+        return None
+    if "," not in cleaned and "." in cleaned:
+        parts = cleaned.split(".")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]):
+            cleaned = "".join(parts)
+    return str(to_decimal(cleaned))
 
 
 def _json_dumps(value: object) -> str:
@@ -128,8 +141,9 @@ def _row_dicts(ws) -> Iterable[tuple[int, dict[str, object]]]:
     headers = [_header_key(cell) for cell in header_row]
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         data = {headers[i]: row[i] if i < len(row) else None for i in range(len(headers)) if headers[i]}
-        if any(value not in (None, "") for value in data.values()):
-            yield row_idx, data
+        if _clean_str(data.get("PRODUTO")) is None:
+            break
+        yield row_idx, data
 
 
 def _extract_ticker_product(product: str | None) -> tuple[str | None, str | None]:
@@ -531,6 +545,16 @@ def _upsert_income(conn: sqlite3.Connection, values: dict) -> bool:
     return True
 
 
+def _existing_income(conn: sqlite3.Connection, import_id: int, source_row: int) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT * FROM b3_income_events
+        WHERE import_id = ? AND source_row = ?
+        """,
+        (import_id, source_row),
+    ).fetchone()
+
+
 def _ledger_amortization_exists(conn: sqlite3.Connection, portfolio_id: int, asset_id: int, payment_date: str) -> bool:
     row = conn.execute(
         """
@@ -553,8 +577,7 @@ def _is_amortization(label: str) -> bool:
 
 
 def _auto_create_amortization(conn: sqlite3.Connection, portfolio_id: int, asset_id: int, payment_date: str, net_value: str) -> tuple[int | None, str | None]:
-    if _ledger_amortization_exists(conn, portfolio_id, asset_id, payment_date):
-        return None, "duplicate"
+    duplicate = _ledger_amortization_exists(conn, portfolio_id, asset_id, payment_date)
     event = event_service.create_event(
         conn,
         portfolio_id=portfolio_id,
@@ -565,6 +588,10 @@ def _auto_create_amortization(conn: sqlite3.Connection, portfolio_id: int, asset
         event_value=net_value,
         notes="Importado automaticamente de Proventos Recebidos B3",
     )
+    if duplicate:
+        conn.execute("UPDATE events SET duplicate_flag = 1 WHERE id = ?", (event["id"],))
+        conn.execute("UPDATE assets SET duplicate_flag = 1 WHERE id = ?", (asset_id,))
+        return event["id"], "duplicate"
     return event["id"], None
 
 
@@ -584,6 +611,7 @@ def _process_market_sheet(
     cnpj_header: str | None = None,
     maturity_header: str | None = None,
     fixed_income_only: bool = False,
+    fixed_income_positions: list[dict] | None = None,
 ) -> dict:
     result = {"total_rows": 0, "imported_prices": 0, "duplicates": 0, "review_count": 0, "review_details": [], "errors": []}
     for row_idx, row in _row_dicts(ws):
@@ -599,6 +627,11 @@ def _process_market_sheet(
         ticker = _clean_str(row.get(ticker_header)) if ticker_header else None
         cnpj = _digits(row.get(cnpj_header)) if cnpj_header else None
         maturity_date = _date_str(row.get(maturity_header)) if maturity_header else None
+        quantity = None
+        try:
+            quantity = _clean_decimal_str(row.get("QUANTIDADE"))
+        except (TypeError, ValueError):
+            quantity = None
         try:
             value = _decimal_str(row.get(value_header))
         except (TypeError, ValueError) as exc:
@@ -619,19 +652,41 @@ def _process_market_sheet(
         review_id = None
         status = "imported"
         if not asset_id:
-            payload = {
-                "sheet": sheet_name,
-                "source_row": row_idx,
-                "ticker": ticker,
-                "product": product,
-                "cnpj": cnpj,
-                "maturity_date": maturity_date,
-                "reference_date": reference_date,
-            }
-            review_id = _create_review(conn, ticker, asset_class.value, reference_date, candidates, "Ativo B3 nao resolvido com seguranca.", payload)
-            result["review_count"] += 1
-            result["review_details"].append(f"{sheet_name} linha {row_idx}: {ticker or product} enviado para revisao")
-            status = "review"
+            if fixed_income_only and asset_class == AssetClass.DEBENTURE and ticker and not candidates:
+                asset = asset_service.create_asset(
+                    conn,
+                    AssetClass.DEBENTURE.value,
+                    ticker,
+                    market="BR",
+                    name=_clean_str(row.get("EMISSOR")) or product,
+                    maturity_date=maturity_date,
+                    source="b3_monthly_import",
+                )
+                asset_id = asset["id"]
+            else:
+                payload = {
+                    "sheet": sheet_name,
+                    "source_row": row_idx,
+                    "ticker": ticker,
+                    "product": product,
+                    "cnpj": cnpj,
+                    "maturity_date": maturity_date,
+                    "reference_date": reference_date,
+                }
+                review_id = _create_review(conn, ticker, asset_class.value, reference_date, candidates, "Ativo B3 nao resolvido com seguranca.", payload)
+                result["review_count"] += 1
+                result["review_details"].append(f"{sheet_name} linha {row_idx}: {ticker or product} enviado para revisao")
+                status = "review"
+        if fixed_income_only and fixed_income_positions is not None and asset_class == AssetClass.DEBENTURE and ticker and quantity:
+            fixed_income_positions.append(
+                {
+                    "product_key": _norm_text(product),
+                    "quantity": quantity,
+                    "ticker": ticker,
+                    "asset_id": asset_id,
+                    "product": product,
+                }
+            )
         upsert_status = _upsert_market_price(
             conn,
             {
@@ -660,11 +715,31 @@ def _process_market_sheet(
 
 
 def _infer_income_class(ticker: str | None, product: str | None) -> AssetClass:
+    prefix = _norm_text(product).split(" - ")[0].strip()
+    if prefix == "DEB":
+        return AssetClass.DEBENTURE
+    if prefix == "CRI":
+        return AssetClass.CRI
+    if prefix == "CRA":
+        return AssetClass.CRA
     if not ticker and _norm_text(product).startswith("TESOURO "):
         return AssetClass.TESOURO_DIRETO
     if ticker and ticker.endswith("11"):
         return AssetClass.FII
     return AssetClass.ACAO
+
+
+def _match_fixed_income_income(product: str | None, quantity: str | None, fixed_income_positions: list[dict]) -> dict | None:
+    if not product or not quantity:
+        return None
+    product_key = _norm_text(product)
+    matches = [
+        item for item in fixed_income_positions
+        if item["product_key"] == product_key and item["quantity"] == quantity
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def _process_income_sheet(
@@ -673,7 +748,9 @@ def _process_income_sheet(
     *,
     import_id: int,
     portfolio_id: int,
+    fixed_income_positions: list[dict] | None = None,
 ) -> dict:
+    fixed_income_positions = fixed_income_positions or []
     result = {"total_rows": 0, "imported_incomes": 0, "auto_events_created": 0, "duplicates": 0, "review_count": 0, "review_details": [], "errors": []}
     for row_idx, row in _row_dicts(ws):
         result["total_rows"] += 1
@@ -684,7 +761,7 @@ def _process_income_sheet(
         payment_date = _date_str(row.get("PAGAMENTO"))
         event_type = _clean_str(row.get("TIPO DE EVENTO"))
         try:
-            quantity = _decimal_str(row.get("QUANTIDADE"))
+            quantity = _clean_decimal_str(row.get("QUANTIDADE"))
             unit_price = _decimal_str(row.get("PRECO UNITARIO"))
             net_value = _decimal_str(row.get("VALOR LIQUIDO"))
         except (TypeError, ValueError) as exc:
@@ -694,19 +771,32 @@ def _process_income_sheet(
             result["errors"].append(f"Proventos Recebidos linha {row_idx}: campos obrigatorios ausentes")
             continue
         inferred_class = _infer_income_class(ticker, product)
-        asset_id, candidates, _source = _resolve_asset(
-            conn,
-            ticker=ticker,
-            product=extracted_name or product,
-            cnpj=None,
-            maturity_date=None,
-            asset_class=inferred_class,
-            event_date=payment_date,
-        )
+        fixed_income_match = _match_fixed_income_income(product, quantity, fixed_income_positions) if inferred_class == AssetClass.DEBENTURE else None
+        if fixed_income_match:
+            ticker = fixed_income_match["ticker"]
+            asset_id = fixed_income_match["asset_id"]
+            candidates = []
+        else:
+            asset_id, candidates, _source = _resolve_asset(
+                conn,
+                ticker=ticker,
+                product=extracted_name or product,
+                cnpj=None,
+                maturity_date=None,
+                asset_class=inferred_class,
+                event_date=payment_date,
+            )
         review_id = None
         status = "imported"
         ledger_event_id = None
-        if not asset_id:
+        prefix = _norm_text(product).split(" - ")[0].strip()
+        summary_only = (
+            prefix in _SUMMARY_ONLY_PREFIXES
+            or (not ticker and inferred_class not in {AssetClass.DEBENTURE, AssetClass.TESOURO_DIRETO})
+        )
+        if not asset_id and summary_only:
+            status = "summary_only"
+        elif not asset_id:
             payload = {
                 "sheet": "Proventos Recebidos",
                 "source_row": row_idx,
@@ -724,13 +814,19 @@ def _process_income_sheet(
             status = "review"
         elif _is_amortization(event_type):
             try:
-                ledger_event_id, duplicate_reason = _auto_create_amortization(conn, portfolio_id, asset_id, payment_date, net_value)
-                if ledger_event_id:
+                existing = _existing_income(conn, import_id, row_idx)
+                if existing and existing["ledger_event_id"]:
+                    ledger_event_id = existing["ledger_event_id"]
+                    duplicate_reason = "import_duplicate"
+                else:
+                    ledger_event_id, duplicate_reason = _auto_create_amortization(conn, portfolio_id, asset_id, payment_date, net_value)
+                if ledger_event_id and duplicate_reason != "import_duplicate":
                     result["auto_events_created"] += 1
                     status = "ledger_event_created"
-                elif duplicate_reason == "duplicate":
+                elif ledger_event_id:
+                    status = existing["status"] if existing else "ledger_event_created"
+                if duplicate_reason == "duplicate":
                     result["duplicates"] += 1
-                    status = "ledger_duplicate"
             except Exception as exc:
                 status = "ledger_error"
                 result["errors"].append(f"Proventos Recebidos linha {row_idx}: amortizacao nao lancada no ledger: {exc}")
@@ -794,6 +890,7 @@ def import_b3_monthly_file(conn: sqlite3.Connection, portfolio_id: int, source: 
         ("Posição - Renda Fixa", AssetClass.DEBENTURE, "VALOR ATUALIZADO MTM", False, "CODIGO", None, "VENCIMENTO", True),
         ("Posição - Tesouro Direto", AssetClass.TESOURO_DIRETO, "VALOR ATUALIZADO", False, None, None, "VENCIMENTO", False),
     ]
+    fixed_income_positions: list[dict] = []
     for sheet_name, asset_class, value_header, is_unit, ticker_header, cnpj_header, maturity_header, fixed_only in sheet_specs:
         ws = _worksheet_by_title(workbook, sheet_name)
         if ws is None:
@@ -813,6 +910,7 @@ def import_b3_monthly_file(conn: sqlite3.Connection, portfolio_id: int, source: 
             cnpj_header=cnpj_header,
             maturity_header=maturity_header,
             fixed_income_only=fixed_only,
+            fixed_income_positions=fixed_income_positions if fixed_only else None,
         )
         _merge_counts(result, partial)
 
@@ -820,7 +918,16 @@ def import_b3_monthly_file(conn: sqlite3.Connection, portfolio_id: int, source: 
     if ws is None:
         result["errors"].append("Aba ausente: Proventos Recebidos")
     else:
-        _merge_counts(result, _process_income_sheet(conn, ws, import_id=import_id, portfolio_id=portfolio_id))
+        _merge_counts(
+            result,
+            _process_income_sheet(
+                conn,
+                ws,
+                import_id=import_id,
+                portfolio_id=portfolio_id,
+                fixed_income_positions=fixed_income_positions,
+            ),
+        )
 
     conn.execute(
         """
