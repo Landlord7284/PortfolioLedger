@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { assets as assetsApi } from '../api/client';
+import { AppContext } from '../App';
+import { assets as assetsApi, b3 as b3Api } from '../api/client';
 import AssetMetadataCard, { getMissingAssetMetadata } from '../components/AssetMetadataCard';
-import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, Check, ChevronsUpDown, ExternalLink, GitMerge, Loader2, Search } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, Check, ChevronsUpDown, ExternalLink, GitMerge, Loader2, Search, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -164,6 +165,7 @@ function AssetCombobox({ options, value, onChange }) {
 }
 
 export default function AssetManagement() {
+  const { activePortfolioId, portfolioList } = useContext(AppContext);
   const [assetList, setAssetList] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -175,7 +177,12 @@ export default function AssetManagement() {
   const [tickerForm, setTickerForm] = useState({ ticker: '', valid_from: '' });
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [sort, setSort] = useState({ key: 'id', direction: 'asc' });
+  const [sanitizeOpen, setSanitizeOpen] = useState(false);
+  const [sanitizeMonth, setSanitizeMonth] = useState('');
+  const [sanitizeConfirm, setSanitizeConfirm] = useState('');
+  const [sanitizing, setSanitizing] = useState(false);
   const navigate = useNavigate();
+  const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -256,6 +263,33 @@ export default function AssetManagement() {
     }
   };
 
+  const sanitizeB3Import = async () => {
+    if (!activePortfolioId) {
+      toast.error('Selecione uma carteira ativa.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}$/.test(sanitizeMonth) || sanitizeConfirm !== sanitizeMonth) return;
+
+    setSanitizing(true);
+    try {
+      const result = await b3Api.sanitizeMonthlyImport({
+        portfolioId: activePortfolioId,
+        referenceMonth: sanitizeMonth,
+      });
+      toast.success(
+        `Importacao B3 ${result.reference_month} removida: ${result.imports_removed} arquivo(s), ${result.market_prices_removed} preco(s), ${result.income_events_removed} provento(s), ${result.ledger_events_cancelled} evento(s) cancelado(s).`
+      );
+      setSanitizeOpen(false);
+      setSanitizeMonth('');
+      setSanitizeConfirm('');
+      await load();
+    } catch (err) {
+      toast.error(err.message || 'Falha ao sanitizar importacao B3.');
+    } finally {
+      setSanitizing(false);
+    }
+  };
+
   const createFromReview = async (id) => {
     try {
       const asset = await assetsApi.createFromReview(id);
@@ -317,11 +351,21 @@ export default function AssetManagement() {
           <h2 className="text-xl font-semibold tracking-tight">Gestão de Ativos</h2>
           <p className="text-muted-foreground text-sm mt-0.5">Cadastro global, revisões, tickers e mesclagem manual.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Label htmlFor="include-merged" className="text-sm text-muted-foreground cursor-pointer font-normal">
-            Exibir mesclados
-          </Label>
-          <Switch id="include-merged" checked={includeMerged} onCheckedChange={setIncludeMerged} />
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setSanitizeOpen(true)}
+            disabled={!activePortfolioId}
+          >
+            <Trash2 className="w-4 h-4" /> Sanitizar B3
+          </Button>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="include-merged" className="text-sm text-muted-foreground cursor-pointer font-normal">
+              Exibir mesclados
+            </Label>
+            <Switch id="include-merged" checked={includeMerged} onCheckedChange={setIncludeMerged} />
+          </div>
         </div>
       </div>
 
@@ -519,6 +563,63 @@ export default function AssetManagement() {
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={sanitizeOpen} onOpenChange={(open) => {
+        if (!open && !sanitizing) {
+          setSanitizeOpen(false);
+          setSanitizeMonth('');
+          setSanitizeConfirm('');
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sanitizar importacao B3</DialogTitle>
+            <DialogDescription>
+              Remove os dados B3 da carteira {activePortfolio?.name || 'ativa'} no mes informado e cancela eventos automaticos vinculados no ledger.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              Esta acao remove fisicamente os registros B3 do mes. Eventos manuais nao serao alterados.
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="sanitize-month">Mes da importacao</Label>
+              <Input
+                id="sanitize-month"
+                value={sanitizeMonth}
+                onChange={(event) => {
+                  setSanitizeMonth(event.target.value);
+                  setSanitizeConfirm('');
+                }}
+                placeholder="YYYY-MM"
+                disabled={sanitizing}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="sanitize-confirm">Digite {sanitizeMonth || 'YYYY-MM'} para confirmar</Label>
+              <Input
+                id="sanitize-confirm"
+                value={sanitizeConfirm}
+                onChange={(event) => setSanitizeConfirm(event.target.value)}
+                placeholder={sanitizeMonth || 'YYYY-MM'}
+                disabled={sanitizing || !/^\d{4}-\d{2}$/.test(sanitizeMonth)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSanitizeOpen(false)} disabled={sanitizing}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={sanitizeB3Import}
+              disabled={sanitizing || !/^\d{4}-\d{2}$/.test(sanitizeMonth) || sanitizeConfirm !== sanitizeMonth}
+            >
+              {sanitizing ? <><Loader2 className="w-4 h-4 animate-spin" /> Removendo...</> : <><Trash2 className="w-4 h-4" /> Remover importacao</>}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

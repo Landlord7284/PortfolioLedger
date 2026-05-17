@@ -353,6 +353,15 @@ class B3MonthlyImportResponse(BaseModel):
     files: list[B3MonthlyFileResult]
 
 
+class B3MonthlySanitizeResponse(BaseModel):
+    portfolio_id: int
+    reference_month: str
+    imports_removed: int
+    market_prices_removed: int
+    income_events_removed: int
+    ledger_events_cancelled: int
+
+
 class B3IncomeSummary(BaseModel):
     total_net_value: str
     monthly_average: str

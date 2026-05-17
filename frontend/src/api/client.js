@@ -137,6 +137,10 @@ export const b3 = {
       body: formData,
     });
   },
+  sanitizeMonthlyImport: ({ portfolioId, referenceMonth }) =>
+    request(`/b3/monthly-import?portfolio_id=${portfolioId}&reference_month=${encodeURIComponent(referenceMonth)}`, {
+      method: 'DELETE',
+    }),
   incomes: ({ portfolioId, period, assetId, assetClass, eventType, chartGroupBy, tableYear, tableMonth }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, period });
     if (assetId) params.set('asset_id', assetId);

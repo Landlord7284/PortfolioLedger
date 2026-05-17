@@ -889,3 +889,69 @@ def import_b3_monthly_batch(conn: sqlite3.Connection, portfolio_id: int, files: 
             response[key] += file_result[key]
         response["errors"].extend(f"{file_result['filename']}: {err}" for err in file_result.get("errors", []))
     return response
+
+
+def sanitize_b3_monthly_import(conn: sqlite3.Connection, portfolio_id: int, reference_month: str) -> dict:
+    if not re.fullmatch(r"\d{4}-\d{2}", reference_month or ""):
+        raise ValueError("Mes de referencia deve seguir o formato YYYY-MM.")
+    _year, month = (int(part) for part in reference_month.split("-"))
+    if month < 1 or month > 12:
+        raise ValueError("Mes de referencia deve seguir o formato YYYY-MM.")
+
+    import_rows = conn.execute(
+        """
+        SELECT id FROM b3_monthly_imports
+        WHERE portfolio_id = ? AND reference_month = ?
+        ORDER BY id
+        """,
+        (portfolio_id, reference_month),
+    ).fetchall()
+    import_ids = [row["id"] for row in import_rows]
+    if not import_ids:
+        return {
+            "portfolio_id": portfolio_id,
+            "reference_month": reference_month,
+            "imports_removed": 0,
+            "market_prices_removed": 0,
+            "income_events_removed": 0,
+            "ledger_events_cancelled": 0,
+        }
+
+    placeholders = ",".join("?" for _ in import_ids)
+    market_prices_removed = conn.execute(
+        f"SELECT COUNT(*) AS count FROM b3_market_prices WHERE import_id IN ({placeholders})",
+        import_ids,
+    ).fetchone()["count"]
+    income_events_removed = conn.execute(
+        f"SELECT COUNT(*) AS count FROM b3_income_events WHERE import_id IN ({placeholders})",
+        import_ids,
+    ).fetchone()["count"]
+    ledger_rows = conn.execute(
+        f"""
+        SELECT DISTINCT ledger_event_id
+        FROM b3_income_events
+        WHERE import_id IN ({placeholders})
+          AND ledger_event_id IS NOT NULL
+        ORDER BY ledger_event_id
+        """,
+        import_ids,
+    ).fetchall()
+    ledger_event_ids = [row["ledger_event_id"] for row in ledger_rows]
+
+    cancelled = []
+    if ledger_event_ids:
+        cancelled = event_service.delete_events_bulk(conn, ledger_event_ids)
+
+    conn.execute(
+        f"DELETE FROM b3_monthly_imports WHERE id IN ({placeholders})",
+        import_ids,
+    )
+
+    return {
+        "portfolio_id": portfolio_id,
+        "reference_month": reference_month,
+        "imports_removed": len(import_ids),
+        "market_prices_removed": market_prices_removed,
+        "income_events_removed": income_events_removed,
+        "ledger_events_cancelled": len(cancelled),
+    }

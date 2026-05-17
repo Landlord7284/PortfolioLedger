@@ -6,7 +6,7 @@ from openpyxl import Workbook
 from backend.database import get_db, init_db
 from backend.domain.enums import AssetClass, EventType
 from backend.services import asset_service, event_service, portfolio_service
-from backend.services.b3_monthly_import_service import SourceFile, import_b3_monthly_batch
+from backend.services.b3_monthly_import_service import SourceFile, import_b3_monthly_batch, sanitize_b3_monthly_import
 
 
 def _workbook_bytes(rows_by_sheet=None):
@@ -154,6 +154,132 @@ def test_b3_import_is_idempotent_for_same_file(tmp_path):
     assert prices == 1
     assert incomes == 1
     assert amortizations == 1
+
+
+def test_sanitize_b3_monthly_import_removes_b3_rows_and_cancels_auto_ledger_events(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "PosiÃ§Ã£o - AÃ§Ãµes": [["XPTO3 - XPTO S.A.", "ITAU", "1", "XPTO3", "12345678000190", None, "ON", None, 10, 10, "-", "-", 12.34, 123.4]],
+            "PosiÃ§Ã£o - Fundos": [["ABCD11 - ABCD FII", "ITAU", "1", "ABCD11", "11111111000111", None, "Cotas", None, 10, 10, "-", "-", 95.5, 955]],
+            "PosiÃ§Ã£o - Renda Fixa": [["DEB - CIA TESTE", "ITAU", "CIA", "DEB123", "IPCA", "DEPOSITADO", "01/01/2024", "01/01/2030", 1, 1, "-", "-", "-", 102.05, 1020.5]],
+            "PosiÃ§Ã£o - Tesouro Direto": [["Tesouro IPCA+ 2029", "ITAU", "BRSTN", "IPCA", "15/05/2029", 1, 1, 0, "-", 100, 110, 109, 111.22]],
+            "Proventos Recebidos": [["KNOX11 - KNOX DEBT FDO", "28/11/2025", EventType.AMORTIZACAO.value, "BTG", "10", 2.5, 25]],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR", cnpj="12345678000190")
+        asset_service.create_asset(conn, AssetClass.FII.value, "ABCD11", market="BR", cnpj="11111111000111")
+        asset_service.create_asset(conn, AssetClass.DEBENTURE.value, "DEB123", market="BR")
+        asset_service.create_asset(
+            conn,
+            AssetClass.TESOURO_DIRETO.value,
+            "TD2029",
+            market="BR",
+            name="Tesouro IPCA+ 2029",
+            maturity_date="2029-05-15",
+        )
+        knox = asset_service.create_asset(conn, AssetClass.FII.value, "KNOX11", market="BR")
+        manual = event_service.create_event(conn, portfolio["id"], knox["id"], EventType.COMPRA.value, "2025-01-01", "10", "1000")
+
+        import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        import_id = conn.execute("SELECT id FROM b3_monthly_imports WHERE portfolio_id = ?", (portfolio["id"],)).fetchone()["id"]
+        conn.execute(
+            """
+            INSERT INTO b3_market_prices (
+                import_id, asset_id, reference_month, reference_date, source_sheet,
+                source_row, ticker, product, value, is_unit_price, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (import_id, knox["id"], "2025-11", "2025-11-30", "Posicao - Fundos", 99, "KNOX11", "KNOX11", "10", 1, "imported"),
+        )
+        auto_event = conn.execute(
+            "SELECT * FROM events WHERE event_type = ? AND id <> ?",
+            (EventType.AMORTIZACAO.value, manual["id"]),
+        ).fetchone()
+
+        result = sanitize_b3_monthly_import(conn, portfolio["id"], "2025-11")
+        imports = conn.execute("SELECT COUNT(*) AS count FROM b3_monthly_imports").fetchone()["count"]
+        prices = conn.execute("SELECT COUNT(*) AS count FROM b3_market_prices").fetchone()["count"]
+        incomes = conn.execute("SELECT COUNT(*) AS count FROM b3_income_events").fetchone()["count"]
+        cancelled_auto = conn.execute("SELECT is_cancelled FROM events WHERE id = ?", (auto_event["id"],)).fetchone()
+        active_manual = conn.execute("SELECT is_cancelled FROM events WHERE id = ?", (manual["id"],)).fetchone()
+        position = event_service.get_position(conn, portfolio["id"], knox["id"])
+
+    assert result == {
+        "portfolio_id": portfolio["id"],
+        "reference_month": "2025-11",
+        "imports_removed": 1,
+        "market_prices_removed": 1,
+        "income_events_removed": 1,
+        "ledger_events_cancelled": 1,
+    }
+    assert imports == 0
+    assert prices == 0
+    assert incomes == 0
+    assert cancelled_auto["is_cancelled"] == 1
+    assert active_manual["is_cancelled"] == 0
+    assert position["quantity"] == "10"
+    assert position["total_cost"] == "1000"
+
+
+def test_sanitize_b3_monthly_import_is_scoped_to_portfolio(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        first = portfolio_service.create_portfolio(conn, "Principal")
+        second = portfolio_service.create_portfolio(conn, "Reserva")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR", cnpj="12345678000190")
+        first_import = conn.execute(
+            """
+            INSERT INTO b3_monthly_imports (portfolio_id, filename, reference_month, reference_date)
+            VALUES (?, ?, ?, ?)
+            """,
+            (first["id"], "2025-11.xlsx", "2025-11", "2025-11-30"),
+        ).lastrowid
+        second_import = conn.execute(
+            """
+            INSERT INTO b3_monthly_imports (portfolio_id, filename, reference_month, reference_date)
+            VALUES (?, ?, ?, ?)
+            """,
+            (second["id"], "2025-11.xlsx", "2025-11", "2025-11-30"),
+        ).lastrowid
+        for import_id, source_row in [(first_import, 2), (second_import, 3)]:
+            conn.execute(
+                """
+                INSERT INTO b3_market_prices (
+                    import_id, asset_id, reference_month, reference_date, source_sheet,
+                    source_row, ticker, product, value, is_unit_price, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (import_id, asset["id"], "2025-11", "2025-11-30", "Posicao - Acoes", source_row, "XPTO3", "XPTO3", "10", 1, "imported"),
+            )
+        result = sanitize_b3_monthly_import(conn, first["id"], "2025-11")
+        remaining_import = conn.execute("SELECT portfolio_id FROM b3_monthly_imports").fetchone()
+        remaining_prices = conn.execute("SELECT COUNT(*) AS count FROM b3_market_prices").fetchone()["count"]
+
+    assert result["imports_removed"] == 1
+    assert remaining_import["portfolio_id"] == second["id"]
+    assert remaining_prices == 1
+
+
+def test_sanitize_b3_monthly_import_validates_reference_month(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        try:
+            sanitize_b3_monthly_import(conn, 1, "2025-13")
+        except ValueError as exc:
+            assert "YYYY-MM" in str(exc)
+        else:
+            raise AssertionError("sanitize_b3_monthly_import should reject invalid months")
 
 
 def test_b3_market_price_preserves_multiple_b3_rows_for_same_asset_month_sheet(tmp_path):

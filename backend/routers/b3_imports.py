@@ -5,9 +5,9 @@ from typing import Optional
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 from backend.database import get_db
-from backend.models import B3IncomeReportResponse, B3MonthlyImportResponse
+from backend.models import B3IncomeReportResponse, B3MonthlyImportResponse, B3MonthlySanitizeResponse
 from backend.services import b3_income_service
-from backend.services.b3_monthly_import_service import SourceFile, import_b3_monthly_batch
+from backend.services.b3_monthly_import_service import SourceFile, import_b3_monthly_batch, sanitize_b3_monthly_import
 from backend.services.portfolio_service import get_portfolio
 
 router = APIRouter(prefix="/api/b3", tags=["b3"])
@@ -67,3 +67,17 @@ def list_b3_incomes(
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc))
+
+
+@router.delete("/monthly-import", response_model=B3MonthlySanitizeResponse)
+def sanitize_b3_monthly(
+    portfolio_id: int = Query(...),
+    reference_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+):
+    with get_db() as conn:
+        if not get_portfolio(conn, portfolio_id):
+            raise HTTPException(404, f"Carteira {portfolio_id} nao encontrada.")
+        try:
+            return sanitize_b3_monthly_import(conn, portfolio_id, reference_month)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
