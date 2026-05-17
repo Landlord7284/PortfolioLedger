@@ -73,10 +73,33 @@ def test_b3_incomes_summary_chart_filters_and_table(tmp_path, monkeypatch):
     assert report["filters"]["asset_classes"] == [AssetClass.ACAO.value, AssetClass.FII.value]
     march = next(month for month in report["chart"]["months"] if month["month"] == "2026-03")
     assert march["total_net_value"] == "120.00"
+    assert report["chart"]["segment_keys"] == ["ITSA4"]
+    assert march["segments"] == [{"key": "ITSA4", "value": "120.00"}]
     assert march["top_events"][0]["label"] == "ITSA4"
     assert march["top_events"][0]["share"] == "100.00"
     assert report["table"]["total_net_value"] == "200.00"
     assert [row["ticker"] for row in report["table"]["rows"]] == ["ITSA4", "KNRI11"]
+
+    with get_db(db_path) as conn:
+        by_class = b3_income_service.list_b3_incomes(
+            conn,
+            portfolio["id"],
+            period="year",
+            chart_group_by="asset_class",
+            table_year=2026,
+            table_month=3,
+        )
+        by_type = b3_income_service.list_b3_incomes(
+            conn,
+            portfolio["id"],
+            period="year",
+            chart_group_by="event_type",
+            table_year=2026,
+            table_month=3,
+        )
+
+    assert by_class["chart"]["segment_keys"] == [AssetClass.ACAO.value, AssetClass.FII.value]
+    assert by_type["chart"]["segment_keys"] == ["Dividendos", "Juros sobre Capital Próprio", "Rendimento"]
 
 
 def test_b3_incomes_includes_review_fallback_rows(tmp_path, monkeypatch):

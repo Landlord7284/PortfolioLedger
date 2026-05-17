@@ -10,6 +10,7 @@ from typing import Any
 
 
 PERIODS = {"year", "12m", "24m", "36m", "all"}
+CHART_GROUPS = {"asset", "asset_class", "event_type"}
 MONEY = Decimal("0.01")
 
 
@@ -155,8 +156,10 @@ def _event_label(row: sqlite3.Row) -> str:
     return _display_name(row) or "Sem ativo"
 
 
-def _segment_key(row: sqlite3.Row, event_type_filter: str | None) -> str:
-    if event_type_filter:
+def _segment_key(row: sqlite3.Row, chart_group_by: str) -> str:
+    if chart_group_by == "asset":
+        return _event_label(row)
+    if chart_group_by == "asset_class":
         return row["asset_class"] or "Sem classe"
     return row["event_type"] or "Sem tipo"
 
@@ -218,7 +221,7 @@ def _table_options(rows: list[sqlite3.Row]) -> tuple[list[dict[str, Any]], int |
     return years, default_year, default_month
 
 
-def _chart(rows: list[sqlite3.Row], start_date: str, end_date: str, event_type_filter: str | None) -> dict[str, Any]:
+def _chart(rows: list[sqlite3.Row], start_date: str, end_date: str, chart_group_by: str) -> dict[str, Any]:
     start_month = _month_key(start_date)
     end_month = _month_key(end_date)
     monthly_totals: dict[str, Decimal] = defaultdict(Decimal)
@@ -229,7 +232,7 @@ def _chart(rows: list[sqlite3.Row], start_date: str, end_date: str, event_type_f
         month = _month_key(row["payment_date"])
         value = _to_decimal(row["net_value"])
         monthly_totals[month] += value
-        monthly_segments[month][_segment_key(row, event_type_filter)] += value
+        monthly_segments[month][_segment_key(row, chart_group_by)] += value
         monthly_events[month].append(row)
 
     segment_names = sorted({name for segments in monthly_segments.values() for name in segments})
@@ -267,9 +270,13 @@ def list_b3_incomes(
     asset_id: int | None = None,
     asset_class: str | None = None,
     event_type: str | None = None,
+    chart_group_by: str = "asset",
     table_year: int | None = None,
     table_month: int | None = None,
 ) -> dict[str, Any]:
+    if chart_group_by not in CHART_GROUPS:
+        raise ValueError("Agrupamento do grafico invalido.")
+
     start_date, end_date, month_count = _period_bounds(conn, portfolio_id, period)
     period_rows = _income_rows(conn, portfolio_id, start_date=start_date, end_date=end_date)
     chart_rows = _income_rows(
@@ -313,7 +320,7 @@ def list_b3_incomes(
             "month_count": month_count,
         },
         "filters": filters,
-        "chart": _chart(chart_rows, start_date, end_date, event_type),
+        "chart": _chart(chart_rows, start_date, end_date, chart_group_by),
         "table": {
             "year": selected_year,
             "month": selected_month,

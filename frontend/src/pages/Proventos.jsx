@@ -21,6 +21,12 @@ const PERIOD_OPTIONS = [
   { value: 'all', label: 'Do início' },
 ];
 
+const CHART_GROUP_OPTIONS = [
+  { value: 'asset', label: 'Ativo' },
+  { value: 'asset_class', label: 'Classe de ativo' },
+  { value: 'event_type', label: 'Tipo de provento' },
+];
+
 const CHART_COLORS = [
   'var(--chart-1)',
   'var(--chart-2)',
@@ -64,11 +70,18 @@ function compareText(a, b) {
 function compareRows(a, b, key) {
   if (key === 'payment_date') return compareText(a.payment_date, b.payment_date);
   if (key === 'ticker') return compareText(a.ticker, b.ticker);
-  if (key === 'name') return compareText(a.name, b.name);
+  if (key === 'asset_class') return compareText(a.asset_class, b.asset_class);
+  if (key === 'name') return compareText(displayIncomeName(a), displayIncomeName(b));
   if (key === 'event_type') return compareText(a.event_type, b.event_type);
   if (key === 'quantity') return toNumber(a.quantity) - toNumber(b.quantity);
   if (key === 'net_value') return toNumber(a.net_value) - toNumber(b.net_value);
   return 0;
+}
+
+function displayIncomeName(row) {
+  const name = row?.name || '';
+  if (row?.asset_class === 'Tesouro Direto') return name;
+  return name.replace(/^[A-Z0-9]{2,12}\s+-\s+/, '');
 }
 
 function SortableHead({ sortKey, sort, onSort, className = '', children }) {
@@ -99,14 +112,14 @@ function IncomeTooltip({ active, payload, hideValues }) {
     <div className="min-w-72 rounded-lg border bg-background p-4 text-sm shadow-xl">
       <div className="mb-3 font-semibold">{month.monthLabel}</div>
       <div className="flex flex-col gap-2">
-        {month.topEvents.length === 0 ? (
+        {month.segmentDetails.length === 0 ? (
           <div className="text-muted-foreground">Nenhum provento no mês.</div>
         ) : (
-          month.topEvents.map((event, index) => (
-            <div key={`${event.label}-${index}`} className="grid grid-cols-[1fr_auto] items-center gap-4">
-              <span className="min-w-0 truncate font-medium">{event.label}</span>
+          month.segmentDetails.map((segment) => (
+            <div key={segment.key} className="grid grid-cols-[1fr_auto] items-center gap-4">
+              <span className="min-w-0 truncate font-medium">{segment.key}</span>
               <span className="font-mono font-semibold tabular-nums">
-                R$ {formatMoney(event.value, hideValues)} ({hideValues ? '•••' : `${formatPercent(event.share)}%`})
+                R$ {formatMoney(segment.value, hideValues)} ({hideValues ? '•••' : `${formatPercent(segment.share)}%`})
               </span>
             </div>
           ))
@@ -133,9 +146,7 @@ function LoadingCards() {
 export default function Proventos() {
   const { activePortfolioId, portfolioList, hideValues } = useContext(AppContext);
   const [period, setPeriod] = useState('year');
-  const [assetId, setAssetId] = useState('all');
-  const [assetClass, setAssetClass] = useState('all');
-  const [eventType, setEventType] = useState('all');
+  const [chartGroupBy, setChartGroupBy] = useState('asset');
   const [tableYear, setTableYear] = useState('');
   const [tableMonth, setTableMonth] = useState('');
   const [report, setReport] = useState(null);
@@ -154,9 +165,7 @@ export default function Proventos() {
         const data = await b3Api.incomes({
           portfolioId: activePortfolioId,
           period,
-          assetId: assetId === 'all' ? null : assetId,
-          assetClass: assetClass === 'all' ? null : assetClass,
-          eventType: eventType === 'all' ? null : eventType,
+          chartGroupBy,
           tableYear: tableYear || null,
           tableMonth: tableMonth || null,
         });
@@ -176,13 +185,10 @@ export default function Proventos() {
     return () => {
       active = false;
     };
-  }, [activePortfolioId, period, assetId, assetClass, eventType, tableYear, tableMonth]);
+  }, [activePortfolioId, period, chartGroupBy, tableYear, tableMonth]);
 
   const handlePeriodChange = (value) => {
     setPeriod(value);
-    setAssetId('all');
-    setAssetClass('all');
-    setEventType('all');
   };
 
   const chartSegments = useMemo(() => (
@@ -206,7 +212,18 @@ export default function Proventos() {
         month: month.month,
         monthLabel: formatMonth(month.month),
         totalNetValue: month.total_net_value,
-        topEvents: month.top_events,
+        segmentDetails: month.segments
+          .map((segment) => {
+            const value = toNumber(segment.value);
+            const total = toNumber(month.total_net_value);
+            return {
+              key: segment.key,
+              value: segment.value,
+              share: total ? (value / total) * 100 : 0,
+            };
+          })
+          .filter((segment) => toNumber(segment.value) > 0)
+          .sort((a, b) => toNumber(b.value) - toNumber(a.value)),
       };
       chartSegments.forEach((segment) => {
         const item = month.segments.find((entry) => entry.key === segment.key);
@@ -306,52 +323,22 @@ export default function Proventos() {
 
       <Card className="overflow-hidden">
         <CardHeader className="border-b">
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <CardTitle className="text-base">Proventos mensais</CardTitle>
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-              <Select value={assetId} onValueChange={setAssetId}>
-                <SelectTrigger className="w-full" aria-label="Ativo">
-                  <SelectValue placeholder="Ativo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="all">Todos os ativos</SelectItem>
-                    {(report?.filters.assets || []).map((asset) => (
-                      <SelectItem key={asset.asset_id} value={String(asset.asset_id)}>
-                        {asset.ticker || `#${asset.asset_id}`}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-
-              <Select value={assetClass} onValueChange={setAssetClass}>
-                <SelectTrigger className="w-full" aria-label="Classe de Ativo">
-                  <SelectValue placeholder="Classe de Ativo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="all">Todas as classes</SelectItem>
-                    {(report?.filters.asset_classes || []).map((option) => (
-                      <SelectItem key={option} value={option}>{option}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-
-              <Select value={eventType} onValueChange={setEventType}>
-                <SelectTrigger className="w-full" aria-label="Tipo de Provento">
-                  <SelectValue placeholder="Tipo de Provento" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="all">Todos os tipos</SelectItem>
-                    {(report?.filters.event_types || []).map((option) => (
-                      <SelectItem key={option} value={option}>{option}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium">Agrupar por:</span>
+              {CHART_GROUP_OPTIONS.map((option) => (
+                <Button
+                  key={option.value}
+                  type="button"
+                  variant={chartGroupBy === option.value ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 rounded-full px-3"
+                  onClick={() => setChartGroupBy(option.value)}
+                >
+                  {option.label}
+                </Button>
+              ))}
             </div>
           </div>
         </CardHeader>
@@ -450,6 +437,7 @@ export default function Proventos() {
                 <TableHeader>
                   <TableRow>
                     <SortableHead sortKey="ticker" sort={sort} onSort={handleSort}>Ticker</SortableHead>
+                    <SortableHead sortKey="asset_class" sort={sort} onSort={handleSort}>Classe</SortableHead>
                     <SortableHead sortKey="name" sort={sort} onSort={handleSort}>Nome</SortableHead>
                     <SortableHead sortKey="payment_date" sort={sort} onSort={handleSort}>Pagamento</SortableHead>
                     <SortableHead sortKey="event_type" sort={sort} onSort={handleSort}>Tipo</SortableHead>
@@ -461,7 +449,8 @@ export default function Proventos() {
                   {sortedRows.map((row) => (
                     <TableRow key={row.id}>
                       <TableCell className="font-medium">{row.ticker || '-'}</TableCell>
-                      <TableCell className="min-w-[220px] text-muted-foreground">{row.name || '-'}</TableCell>
+                      <TableCell className="text-muted-foreground">{row.asset_class || '-'}</TableCell>
+                      <TableCell className="min-w-[220px] text-muted-foreground">{displayIncomeName(row) || '-'}</TableCell>
                       <TableCell>{formatDate(row.payment_date)}</TableCell>
                       <TableCell>{row.event_type}</TableCell>
                       <TableCell className="text-right font-mono text-sm">
@@ -473,11 +462,12 @@ export default function Proventos() {
                     </TableRow>
                   ))}
                   <TableRow className="border-b-0 hover:bg-transparent">
-                    <TableCell colSpan={6} className="h-auto p-0">
+                    <TableCell colSpan={7} className="h-auto p-0">
                       <Separator />
                     </TableCell>
                   </TableRow>
                   <TableRow className="border-b-0 hover:bg-transparent">
+                    <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>

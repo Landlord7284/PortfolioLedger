@@ -46,6 +46,7 @@ def list_b3_incomes(
     asset_id: Optional[int] = Query(None),
     asset_class: Optional[str] = Query(None),
     event_type: Optional[str] = Query(None),
+    chart_group_by: str = Query("asset", pattern="^(asset|asset_class|event_type)$"),
     table_year: Optional[int] = Query(None),
     table_month: Optional[int] = Query(None, ge=1, le=12),
 ):
@@ -60,6 +61,7 @@ def list_b3_incomes(
                 asset_id=asset_id,
                 asset_class=asset_class,
                 event_type=event_type,
+                chart_group_by=chart_group_by,
                 table_year=table_year,
                 table_month=table_month,
             )

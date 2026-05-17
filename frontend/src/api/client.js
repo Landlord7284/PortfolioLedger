@@ -137,11 +137,12 @@ export const b3 = {
       body: formData,
     });
   },
-  incomes: ({ portfolioId, period, assetId, assetClass, eventType, tableYear, tableMonth }) => {
+  incomes: ({ portfolioId, period, assetId, assetClass, eventType, chartGroupBy, tableYear, tableMonth }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, period });
     if (assetId) params.set('asset_id', assetId);
     if (assetClass) params.set('asset_class', assetClass);
     if (eventType) params.set('event_type', eventType);
+    if (chartGroupBy) params.set('chart_group_by', chartGroupBy);
     if (tableYear) params.set('table_year', tableYear);
     if (tableMonth) params.set('table_month', tableMonth);
     return request(`/b3/incomes?${params.toString()}`);
