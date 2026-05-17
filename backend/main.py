@@ -5,6 +5,8 @@ Initialises the database on startup and mounts all API routers.
 """
 
 from contextlib import asynccontextmanager
+import logging
+import threading
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +16,19 @@ from backend.database import init_db
 from backend.routers import portfolios, assets, events, brokerage_notes, reports, tax, b3_imports
 from backend.database import get_db
 from backend.services.event_service import backfill_event_brl_conversions
+from backend.services.ptax_service import warm_ptax_monthly_cache
 
+logger = logging.getLogger(__name__)
+
+
+def _warm_ptax_monthly_cache_background() -> None:
+    try:
+        with get_db() as conn:
+            result = warm_ptax_monthly_cache(conn)
+        if result["created"] or result["failed"]:
+            logger.info("PTAX monthly cache warmup result: %s", result)
+    except Exception:
+        logger.exception("PTAX monthly cache warmup failed")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,6 +36,11 @@ async def lifespan(app: FastAPI):
     init_db()
     with get_db() as conn:
         backfill_event_brl_conversions(conn)
+    threading.Thread(
+        target=_warm_ptax_monthly_cache_background,
+        name="ptax-monthly-cache-warmup",
+        daemon=True,
+    ).start()
     yield
 
 

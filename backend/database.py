@@ -119,6 +119,15 @@ CREATE TABLE IF NOT EXISTS ptax_cache (
     venda   REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ptax_monthly_cache (
+    reference_month TEXT PRIMARY KEY,
+    ptax_date       TEXT NOT NULL,
+    venda           TEXT NOT NULL,
+    source          TEXT NOT NULL DEFAULT 'startup',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Fiscal lots for USD assets
 CREATE TABLE IF NOT EXISTS fiscal_lots (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -240,6 +249,18 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "events", "gross_value_brl", "gross_value_brl TEXT")
     _add_column_if_missing(conn, "events", "ptax_compra", "ptax_compra TEXT")
     _add_column_if_missing(conn, "events", "ptax_venda", "ptax_venda TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ptax_monthly_cache (
+            reference_month TEXT PRIMARY KEY,
+            ptax_date       TEXT NOT NULL,
+            venda           TEXT NOT NULL,
+            source          TEXT NOT NULL DEFAULT 'startup',
+            created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
     _ensure_b3_schema(conn)
 
     conn.execute(

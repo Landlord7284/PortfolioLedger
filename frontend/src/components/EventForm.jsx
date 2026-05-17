@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext } from 'react';
 import { AppContext } from '../App';
-import { events as eventsApi, assets as assetsApi, tax as taxApi } from '../api/client';
+import { events as eventsApi, assets as assetsApi } from '../api/client';
 import { Plus, Trash2, ArrowLeft, Loader2, AlertTriangle, Check, ChevronsUpDown } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,15 +31,6 @@ const ASSET_CLASSES = [
 const CLASSES_WITH_MATURITY = ['Debênture', 'CRI', 'CRA', 'Tesouro Direto'];
 
 const VALUE_IGNORED = ['Desdobramento', 'Grupamento'];
-
-function formatPtax(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return value || '-';
-  return parsed.toLocaleString('pt-BR', {
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  });
-}
 
 function AssetCombobox({ options, value, onChange, disabled }) {
   const [open, setOpen] = useState(false);
@@ -125,8 +116,6 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   const [grossValue, setGrossValue] = useState('');
   const [originUsd, setOriginUsd] = useState('');
   const [notes, setNotes] = useState('');
-  const [ptax, setPtax] = useState(null);
-  const [ptaxLoading, setPtaxLoading] = useState(false);
 
   const [isNewAsset, setIsNewAsset] = useState(false);
   const [newTicker, setNewTicker] = useState('');
@@ -144,31 +133,6 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
       toast.error(err.message || 'Falha ao carregar lista de ativos.');
     });
   }, []);
-
-  useEffect(() => {
-    if (isBulkMode || !['Compra', 'Venda'].includes(eventType) || !eventDate) {
-      setPtax(null);
-      setPtaxLoading(false);
-      return;
-    }
-
-    let active = true;
-    setPtaxLoading(true);
-    taxApi.ptax({ date: eventDate })
-      .then((data) => {
-        if (active) setPtax(data);
-      })
-      .catch(() => {
-        if (active) setPtax(null);
-      })
-      .finally(() => {
-        if (active) setPtaxLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [eventDate, eventType, isBulkMode]);
 
   const assetOptions = assetList.map((a) => ({
     value: a.id,
@@ -513,20 +477,6 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Data</Label>
               <DatePicker value={eventDate} onChange={setEventDate} />
-              {['Compra', 'Venda'].includes(eventType) && eventDate && (
-                <div className="flex min-h-5 items-center gap-1.5 text-xs text-muted-foreground">
-                  {ptaxLoading ? (
-                    <>
-                      <Loader2 className="size-3 animate-spin" />
-                      <span>Buscando PTAX...</span>
-                    </>
-                  ) : ptax ? (
-                    <span>
-                      Compra: R$ {formatPtax(ptax.compra)} · Venda: R$ {formatPtax(ptax.venda)}
-                    </span>
-                  ) : null}
-                </div>
-              )}
             </div>
           </div>
 
