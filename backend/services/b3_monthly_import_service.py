@@ -27,7 +27,9 @@ from backend.services import asset_service, event_service
 
 
 _FILENAME_RE = re.compile(r"^(?P<year>\d{4})-(?P<month>\d{2})\.xlsx$", re.IGNORECASE)
-_TICKER_PREFIX_RE = re.compile(r"^\s*([A-Z]{4}\d{1,2}[A-Z]?)\s+-\s+(.+)$")
+_TICKER_PREFIX_RE = re.compile(r"^\s*([A-Z]{4}\d{1,2}[A-Z]*)\s+-\s+(.+)$")
+_TRADED_TICKER_RE = re.compile(r"^[A-Z]{4}\d{1,2}$")
+_BR_TICKER_WITH_ALPHA_SUFFIX_RE = re.compile(r"^([A-Z]{4}\d{1,2})[A-Z]+$")
 _FIXED_INCOME_CLASSES = {
     "DEB": AssetClass.DEBENTURE,
 }
@@ -38,6 +40,13 @@ _SUMMARY_ONLY_PREFIXES = {"CRI", "CRA"}
 class SourceFile:
     filename: str
     content: bytes
+
+
+@dataclass(frozen=True)
+class ProductParse:
+    original_ticker: str | None
+    canonical_ticker: str | None
+    extracted_name: str | None
 
 
 def _norm_text(value) -> str:
@@ -146,13 +155,16 @@ def _row_dicts(ws) -> Iterable[tuple[int, dict[str, object]]]:
         yield row_idx, data
 
 
-def _extract_ticker_product(product: str | None) -> tuple[str | None, str | None]:
+def _extract_ticker_product(product: str | None) -> ProductParse:
     if not product:
-        return None, None
+        return ProductParse(None, None, None)
     match = _TICKER_PREFIX_RE.match(product.strip())
     if match:
-        return match.group(1).upper(), match.group(2).strip()
-    return None, product.strip()
+        ticker = match.group(1).upper()
+        suffix_match = _BR_TICKER_WITH_ALPHA_SUFFIX_RE.match(ticker)
+        canonical_ticker = suffix_match.group(1) if suffix_match and _TRADED_TICKER_RE.match(suffix_match.group(1)) else None
+        return ProductParse(ticker, canonical_ticker, match.group(2).strip())
+    return ProductParse(None, None, product.strip())
 
 
 def _get_current_ticker(conn: sqlite3.Connection, asset_id: int) -> str | None:
@@ -200,6 +212,59 @@ def _find_by_ticker(conn: sqlite3.Connection, ticker: str | None, event_date: st
     ).fetchall()
     asset = _single_asset(rows)
     return (asset["id"], []) if asset else (None, [row["id"] for row in rows])
+
+
+def _names_match(imported_name: str | None, candidate_names: list[str]) -> bool:
+    names = [name for name in candidate_names if name]
+    if not names:
+        return True
+    imported = _norm_text(imported_name)
+    if not imported:
+        return False
+    imported_tokens = set(re.findall(r"[A-Z0-9]{3,}", imported))
+    for name in names:
+        candidate = _norm_text(name)
+        if imported == candidate or imported in candidate or candidate in imported:
+            return True
+        candidate_tokens = set(re.findall(r"[A-Z0-9]{3,}", candidate))
+        overlap = imported_tokens & candidate_tokens
+        if len(overlap) >= 2 and len(overlap) * 10 >= max(1, min(len(imported_tokens), len(candidate_tokens))) * 6:
+            return True
+    return False
+
+
+def _find_by_canonical_income_ticker(
+    conn: sqlite3.Connection,
+    ticker: str | None,
+    imported_name: str | None,
+    event_date: str | None,
+) -> tuple[int | None, list[int]]:
+    if not ticker:
+        return None, []
+    date_clause = ""
+    params: list[object] = [ticker.upper()]
+    if event_date:
+        date_clause = "AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_until IS NULL OR t.valid_until > ?)"
+        params.extend([event_date, event_date])
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT a.id, a.name AS asset_name, t.name AS ticker_name
+        FROM asset_tickers t
+        JOIN assets a ON a.id = t.asset_id
+        WHERE UPPER(t.ticker) = ?
+          AND a.merged_into_asset_id IS NULL
+          {date_clause}
+        ORDER BY a.id
+        """,
+        params,
+    ).fetchall()
+    asset = _single_asset(rows)
+    candidates = [row["id"] for row in rows]
+    if not asset:
+        return None, candidates
+    candidate_names = [row["asset_name"] for row in rows if row["id"] == asset["id"]]
+    candidate_names.extend(row["ticker_name"] for row in rows if row["id"] == asset["id"])
+    return (asset["id"], []) if _names_match(imported_name, candidate_names) else (None, [asset["id"]])
 
 
 def _find_by_cnpj(conn: sqlite3.Connection, cnpj: str | None) -> tuple[int | None, list[int]]:
@@ -729,6 +794,32 @@ def _infer_income_class(ticker: str | None, product: str | None) -> AssetClass:
     return AssetClass.ACAO
 
 
+def _resolve_income_asset(
+    conn: sqlite3.Connection,
+    *,
+    parsed_product: ProductParse,
+    product: str,
+    asset_class: AssetClass,
+    event_date: str,
+) -> tuple[int | None, list[int], str | None, str | None]:
+    asset_id, candidates = _find_by_ticker(conn, parsed_product.original_ticker, event_date)
+    if asset_id or candidates:
+        return asset_id, candidates, "ticker", parsed_product.original_ticker
+    asset_id, candidates = _find_by_canonical_income_ticker(
+        conn,
+        parsed_product.canonical_ticker,
+        parsed_product.extracted_name,
+        event_date,
+    )
+    if asset_id or candidates:
+        return asset_id, candidates, "canonical_ticker", parsed_product.canonical_ticker
+    if asset_class == AssetClass.TESOURO_DIRETO:
+        asset_id, candidates = _find_tesouro(conn, parsed_product.extracted_name or product, None)
+        return asset_id, candidates, "tesouro", parsed_product.original_ticker
+    asset_id, candidates = _find_by_name(conn, parsed_product.extracted_name or product, asset_class.value)
+    return asset_id, candidates, "name", parsed_product.original_ticker
+
+
 def _match_fixed_income_income(product: str | None, quantity: str | None, fixed_income_positions: list[dict]) -> dict | None:
     if not product or not quantity:
         return None
@@ -757,7 +848,8 @@ def _process_income_sheet(
         product = _clean_str(row.get("PRODUTO"))
         if _norm_text(product).startswith("TOTAL"):
             continue
-        ticker, extracted_name = _extract_ticker_product(product)
+        parsed_product = _extract_ticker_product(product)
+        ticker = parsed_product.canonical_ticker or parsed_product.original_ticker
         payment_date = _date_str(row.get("PAGAMENTO"))
         event_type = _clean_str(row.get("TIPO DE EVENTO"))
         try:
@@ -777,12 +869,10 @@ def _process_income_sheet(
             asset_id = fixed_income_match["asset_id"]
             candidates = []
         else:
-            asset_id, candidates, _source = _resolve_asset(
+            asset_id, candidates, _source, ticker = _resolve_income_asset(
                 conn,
-                ticker=ticker,
-                product=extracted_name or product,
-                cnpj=None,
-                maturity_date=None,
+                parsed_product=parsed_product,
+                product=product,
                 asset_class=inferred_class,
                 event_date=payment_date,
             )

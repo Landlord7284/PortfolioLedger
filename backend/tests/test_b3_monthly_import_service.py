@@ -349,6 +349,96 @@ def test_b3_income_preserves_same_asset_date_type_with_different_values(tmp_path
     assert [row["net_value"] for row in rows] == ["4", "5"]
 
 
+def test_b3_income_matches_known_assets_when_product_ticker_has_alpha_suffix(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Proventos Recebidos": [
+                ["HGLG11L - PÁTRIA LOG - FDO INV IMOB - RESPONSABILIDADE LTDA.", "15/01/2026", "Rendimento", "ITAU", "500", 1.1, 550],
+                ["KNRI11L - KINEA RENDA IMOBILIÁRIA FDO INV IMOB - FII", "15/01/2026", "Rendimento", "ITAU", "2361", 1.25, 2951.25],
+                ["FRAS3L - FRAS-LE S.A.", "16/01/2026", "Juros Sobre Capital Próprio", "ITAU", "4800", 0.37, 1506.58],
+                ["AAPL34X - APPLE INC.", "16/01/2026", "Dividendo", "ITAU", "12", 0.5, 6],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        hglg = asset_service.create_asset(conn, AssetClass.FII.value, "HGLG11", market="BR")
+        knri = asset_service.create_asset(conn, AssetClass.FII.value, "KNRI11", market="BR", name="KINEA RENDA IMOBILIÁRIA FDO INV IMOB - FII")
+        fras = asset_service.create_asset(conn, AssetClass.ACAO.value, "FRAS3", market="BR", name="FRAS-LE S.A.")
+        aapl = asset_service.create_asset(conn, AssetClass.BDR.value, "AAPL34", market="BR", name="APPLE INC.")
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2026-01.xlsx", content)])
+        incomes = conn.execute("SELECT * FROM b3_income_events ORDER BY source_row").fetchall()
+        reviews = asset_service.list_match_reviews(conn)
+
+    assert result["imported_incomes"] == 4
+    assert result["review_count"] == 0
+    assert reviews == []
+    assert [row["ticker"] for row in incomes] == ["HGLG11", "KNRI11", "FRAS3", "AAPL34"]
+    assert [row["asset_id"] for row in incomes] == [hglg["id"], knri["id"], fras["id"], aapl["id"]]
+    assert [row["status"] for row in incomes] == ["imported", "imported", "imported", "imported"]
+    assert incomes[0]["product"].startswith("HGLG11L - ")
+
+
+def test_b3_income_l_suffix_keeps_review_when_canonical_ticker_is_ambiguous(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Proventos Recebidos": [
+                ["HGLG11L - PÁTRIA LOG - FDO INV IMOB - RESPONSABILIDADE LTDA.", "15/01/2026", "Rendimento", "ITAU", "500", 1.1, 550],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset_service.create_asset(conn, AssetClass.FII.value, "HGLG11", market="BR")
+        asset_service.create_asset(conn, AssetClass.FII.value, "HGLG11", market="BR", allow_existing=False)
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2026-01.xlsx", content)])
+        income = conn.execute("SELECT * FROM b3_income_events").fetchone()
+        reviews = asset_service.list_match_reviews(conn)
+
+    assert result["imported_incomes"] == 1
+    assert result["review_count"] == 1
+    assert income["asset_id"] is None
+    assert income["ticker"] == "HGLG11"
+    assert income["status"] == "review"
+    assert len(reviews) == 1
+    assert reviews[0]["ticker"] == "HGLG11"
+
+
+def test_b3_income_l_suffix_keeps_review_when_registered_name_conflicts(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Proventos Recebidos": [
+                ["FRAS3L - FRAS-LE S.A.", "16/01/2026", "Juros Sobre Capital Próprio", "ITAU", "4800", 0.37, 1506.58],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset_service.create_asset(conn, AssetClass.ACAO.value, "FRAS3", market="BR", name="EMPRESA DIFERENTE S.A.")
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2026-01.xlsx", content)])
+        income = conn.execute("SELECT * FROM b3_income_events").fetchone()
+        reviews = asset_service.list_match_reviews(conn)
+
+    assert result["review_count"] == 1
+    assert income["asset_id"] is None
+    assert income["ticker"] == "FRAS3"
+    assert income["status"] == "review"
+    assert len(reviews) == 1
+    assert reviews[0]["ticker"] == "FRAS3"
+
+
 def test_b3_market_price_consolidates_fixed_income_and_treasury_positions(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)
