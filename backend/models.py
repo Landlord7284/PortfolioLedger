@@ -353,6 +353,89 @@ class B3MonthlyImportResponse(BaseModel):
     files: list[B3MonthlyFileResult]
 
 
+class B3IncomeSummary(BaseModel):
+    total_net_value: str
+    monthly_average: str
+    period_start: str
+    period_end: str
+    month_count: int
+
+
+class B3IncomeAssetFilter(BaseModel):
+    asset_id: int
+    ticker: Optional[str] = None
+    name: Optional[str] = None
+    asset_class: Optional[str] = None
+
+
+class B3IncomeYearFilter(BaseModel):
+    year: int
+    months: list[int]
+
+
+class B3IncomeFilters(BaseModel):
+    assets: list[B3IncomeAssetFilter]
+    asset_classes: list[str]
+    event_types: list[str]
+    years: list[B3IncomeYearFilter]
+    default_year: Optional[int] = None
+    default_month: Optional[int] = None
+
+
+class B3IncomeChartSegment(BaseModel):
+    key: str
+    value: str
+
+
+class B3IncomeChartTopEvent(BaseModel):
+    label: str
+    name: Optional[str] = None
+    event_type: str
+    value: str
+    share: str
+
+
+class B3IncomeChartMonth(BaseModel):
+    month: str
+    total_net_value: str
+    segments: list[B3IncomeChartSegment]
+    top_events: list[B3IncomeChartTopEvent]
+
+
+class B3IncomeChart(BaseModel):
+    segment_keys: list[str]
+    months: list[B3IncomeChartMonth]
+
+
+class B3IncomeTableRow(BaseModel):
+    id: int
+    asset_id: Optional[int] = None
+    ticker: Optional[str] = None
+    name: Optional[str] = None
+    asset_class: Optional[str] = None
+    payment_date: str
+    event_type: str
+    quantity: str
+    net_value: str
+    status: str
+
+
+class B3IncomeTable(BaseModel):
+    year: Optional[int] = None
+    month: Optional[int] = None
+    total_net_value: str
+    rows: list[B3IncomeTableRow]
+
+
+class B3IncomeReportResponse(BaseModel):
+    portfolio_id: int
+    period: str
+    summary: B3IncomeSummary
+    filters: B3IncomeFilters
+    chart: B3IncomeChart
+    table: B3IncomeTable
+
+
 # â”€â”€ Brokerage notes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class BrokerageNoteOperation(BaseModel):

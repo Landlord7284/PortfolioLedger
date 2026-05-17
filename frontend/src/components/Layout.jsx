@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useContext } from 'react';
 import { AppContext } from '../App';
-import { Check, ChevronsUpDown, LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Wallet, Layers3, ReceiptText, Moon, Sun, FileText } from 'lucide-react';
+import { Check, ChevronsUpDown, LayoutDashboard, Settings as SettingsIcon, Eye, EyeOff, Wallet, Layers3, ReceiptText, Moon, Sun, FileText, HandCoins } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +28,7 @@ export default function Layout({ children }) {
   const { portfolioList, activePortfolioId, setActivePortfolioId, hideValues, setHideValues, theme, setTheme } = useContext(AppContext);
   const location = useLocation();
   const isDashboard = location.pathname === '/';
+  const isProventos = location.pathname === '/proventos';
   const isSettings = location.pathname === '/settings';
   const isAssetManagement = location.pathname === '/asset-management';
   const isBrokerageNote = location.pathname === '/brokerage-note';
@@ -37,6 +38,7 @@ export default function Layout({ children }) {
   const pageTitle = () => {
     if (location.pathname === '/settings') return 'Configurações';
     if (location.pathname === '/asset-management') return 'Gestão de Ativos';
+    if (location.pathname === '/proventos') return 'Proventos';
     if (location.pathname === '/brokerage-note') return 'Rateio de Nota';
     if (location.pathname === '/reports/assets-and-rights') return 'Bens e Direitos';
     if (location.pathname === '/reports/income') return 'Rendimentos';
@@ -100,6 +102,15 @@ export default function Layout({ children }) {
                 <NavLink to="/">
                   <LayoutDashboard className="w-4 h-4" />
                   <span>Dashboard</span>
+                </NavLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={isProventos}>
+                <NavLink to="/proventos">
+                  <HandCoins className="w-4 h-4" />
+                  <span>Proventos</span>
                 </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>

@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 export const AppContext = createContext(null);
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Proventos = lazy(() => import('./pages/Proventos'));
 const AssetDetail = lazy(() => import('./pages/AssetDetail'));
 const AssetManagement = lazy(() => import('./pages/AssetManagement'));
 const BrokerageNote = lazy(() => import('./pages/BrokerageNote'));
@@ -112,6 +113,7 @@ function App() {
             <Suspense fallback={<RouteLoading />}>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/proventos" element={<Proventos />} />
                 <Route path="/asset-management" element={<AssetManagement />} />
                 <Route path="/brokerage-note" element={<BrokerageNote />} />
                 <Route path="/reports/assets-and-rights" element={<AssetsAndRightsReport />} />
