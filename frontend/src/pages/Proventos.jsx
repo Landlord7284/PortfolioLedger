@@ -37,6 +37,7 @@ const CHART_COLORS = [
 ];
 const TOP_SEGMENT_LIMIT = 5;
 const OTHERS_SEGMENT_KEY = 'Outros';
+const ALL_FILTER_VALUE = 'all';
 
 function toNumber(value) {
   const parsed = Number(value || 0);
@@ -158,6 +159,7 @@ export default function Proventos() {
   const [chartGroupBy, setChartGroupBy] = useState('asset');
   const [tableYear, setTableYear] = useState('');
   const [tableMonth, setTableMonth] = useState('');
+  const [tableAssetClass, setTableAssetClass] = useState(ALL_FILTER_VALUE);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState({ key: 'payment_date', direction: 'desc' });
@@ -177,6 +179,7 @@ export default function Proventos() {
           chartGroupBy,
           tableYear: tableYear || null,
           tableMonth: tableMonth || null,
+          tableAssetClass: tableAssetClass === ALL_FILTER_VALUE ? null : tableAssetClass,
         });
         if (!active) return;
         setReport(data);
@@ -194,7 +197,7 @@ export default function Proventos() {
     return () => {
       active = false;
     };
-  }, [activePortfolioId, period, chartGroupBy, tableYear, tableMonth]);
+  }, [activePortfolioId, period, chartGroupBy, tableYear, tableMonth, tableAssetClass]);
 
   const handlePeriodChange = (value) => {
     setPeriod(value);
@@ -292,9 +295,19 @@ export default function Proventos() {
   }, [monthlyChartSegments, chartSegments]);
 
   const yearOptions = report?.filters.years || [];
+  const classOptions = report?.filters.asset_classes || [];
   const effectiveTableYear = tableYear || (report?.table.year ? String(report.table.year) : '');
   const effectiveTableMonth = tableMonth || (report?.table.month ? String(report.table.month) : '');
-  const monthOptions = yearOptions.find((option) => String(option.year) === String(effectiveTableYear))?.months || [];
+  const monthOptions = [...new Set(yearOptions.flatMap((option) => option.months || []))]
+    .sort((a, b) => b - a);
+  const handleTableYearChange = (value) => {
+    setTableYear(value);
+    if (!tableMonth) setTableMonth(effectiveTableMonth || ALL_FILTER_VALUE);
+  };
+  const handleTableMonthChange = (value) => {
+    setTableMonth(value);
+    if (!tableYear) setTableYear(effectiveTableYear || ALL_FILTER_VALUE);
+  };
   const sortedRows = useMemo(() => {
     const rows = report?.table.rows || [];
     return [...rows]
@@ -451,30 +464,41 @@ export default function Proventos() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <CardTitle className="text-base">Detalhamento Mensal</CardTitle>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Select value={effectiveTableYear} onValueChange={(value) => {
-                setTableYear(value);
-                const selected = yearOptions.find((option) => String(option.year) === value);
-                setTableMonth(String(selected?.months?.[0] || ''));
-              }}>
+              <Select value={effectiveTableYear} onValueChange={handleTableYearChange}>
                 <SelectTrigger className="w-full sm:w-[120px]" aria-label="Ano">
                   <SelectValue placeholder="Ano" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
+                    <SelectItem value={ALL_FILTER_VALUE}>Todos</SelectItem>
                     {yearOptions.map((option) => (
                       <SelectItem key={option.year} value={String(option.year)}>{option.year}</SelectItem>
                     ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <Select value={effectiveTableMonth} onValueChange={setTableMonth}>
+              <Select value={effectiveTableMonth} onValueChange={handleTableMonthChange}>
                 <SelectTrigger className="w-full sm:w-[140px]" aria-label="Mês">
                   <SelectValue placeholder="Mês" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
+                    <SelectItem value={ALL_FILTER_VALUE}>Todos</SelectItem>
                     {monthOptions.map((month) => (
                       <SelectItem key={month} value={String(month)}>{String(month).padStart(2, '0')}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Select value={tableAssetClass} onValueChange={setTableAssetClass}>
+                <SelectTrigger className="w-full sm:w-[160px]" aria-label="Classe">
+                  <SelectValue placeholder="Classe" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value={ALL_FILTER_VALUE}>Todas</SelectItem>
+                    {classOptions.map((assetClass) => (
+                      <SelectItem key={assetClass} value={assetClass}>{assetClass}</SelectItem>
                     ))}
                   </SelectGroup>
                 </SelectContent>
@@ -489,7 +513,7 @@ export default function Proventos() {
             </div>
           ) : sortedRows.length === 0 ? (
             <div className="flex min-h-[220px] items-center justify-center text-center text-sm text-muted-foreground">
-              Nenhum provento encontrado para o mês selecionado.
+              Nenhum provento encontrado para os filtros selecionados.
             </div>
           ) : (
             <div className="w-full overflow-x-auto">

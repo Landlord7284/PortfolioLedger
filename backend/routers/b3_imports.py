@@ -13,6 +13,15 @@ from backend.services.portfolio_service import get_portfolio
 router = APIRouter(prefix="/api/b3", tags=["b3"])
 
 
+def _parse_optional_int_filter(value: Optional[str], field: str) -> int | None:
+    if value in (None, "", "all"):
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise HTTPException(422, f"{field} invalido.") from exc
+
+
 @router.post("/monthly-import", response_model=B3MonthlyImportResponse)
 async def import_b3_monthly(
     portfolio_id: int = Query(...),
@@ -47,9 +56,15 @@ def list_b3_incomes(
     asset_class: Optional[str] = Query(None),
     event_type: Optional[str] = Query(None),
     chart_group_by: str = Query("asset", pattern="^(asset|asset_class|event_type)$"),
-    table_year: Optional[int] = Query(None),
-    table_month: Optional[int] = Query(None, ge=1, le=12),
+    table_year: Optional[str] = Query(None),
+    table_month: Optional[str] = Query(None),
+    table_asset_class: Optional[str] = Query(None),
 ):
+    parsed_table_year = _parse_optional_int_filter(table_year, "table_year")
+    parsed_table_month = _parse_optional_int_filter(table_month, "table_month")
+    if parsed_table_month is not None and not 1 <= parsed_table_month <= 12:
+        raise HTTPException(422, "table_month invalido.")
+
     with get_db() as conn:
         if not get_portfolio(conn, portfolio_id):
             raise HTTPException(404, f"Carteira {portfolio_id} nao encontrada.")
@@ -62,8 +77,10 @@ def list_b3_incomes(
                 asset_class=asset_class,
                 event_type=event_type,
                 chart_group_by=chart_group_by,
-                table_year=table_year,
-                table_month=table_month,
+                table_year=parsed_table_year,
+                table_month=parsed_table_month,
+                table_asset_class=table_asset_class,
+                use_default_table_period=table_year is None and table_month is None,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc))

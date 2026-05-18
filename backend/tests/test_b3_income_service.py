@@ -102,6 +102,48 @@ def test_b3_incomes_summary_chart_filters_and_table(tmp_path, monkeypatch):
     assert by_type["chart"]["segment_keys"] == ["Dividendos", "Juros sobre Capital Próprio", "Rendimento"]
 
 
+def test_b3_incomes_table_filters_are_independent(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    monkeypatch.setattr(b3_income_service, "date", type("FixedDate", (), {"today": staticmethod(lambda: date(2026, 5, 17))}))
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        itsa = asset_service.create_asset(conn, AssetClass.ACAO.value, "ITSA4", market="BR", name="Itausa")
+        knri = asset_service.create_asset(conn, AssetClass.FII.value, "KNRI11", market="BR", name="Kinea")
+        import_2025 = _import_id(conn, portfolio["id"], "2025-03")
+        import_2026 = _import_id(conn, portfolio["id"], "2026-04")
+        _income(conn, import_2025, portfolio["id"], asset_id=itsa["id"], payment_date="2025-03-10", event_type="Dividendos", product="ITSA4 - Itausa", ticker="ITSA4", quantity="100", net_value="120.00")
+        _income(conn, import_2026, portfolio["id"], asset_id=knri["id"], payment_date="2026-03-20", event_type="Rendimento", product="KNRI11 - Kinea", ticker="KNRI11", quantity="10", net_value="80.00")
+        _income(conn, import_2026, portfolio["id"], asset_id=itsa["id"], payment_date="2026-04-15", event_type="Juros sobre Capital Proprio", product="ITSA4 - Itausa", ticker="ITSA4", quantity="100", net_value="60.00")
+
+        latest_default = b3_income_service.list_b3_incomes(conn, portfolio["id"], period="year")
+        only_year = b3_income_service.list_b3_incomes(conn, portfolio["id"], period="year", table_year=2026, use_default_table_period=False)
+        only_month = b3_income_service.list_b3_incomes(conn, portfolio["id"], period="year", table_month=3, use_default_table_period=False)
+        all_history = b3_income_service.list_b3_incomes(conn, portfolio["id"], period="year", use_default_table_period=False)
+        class_filtered = b3_income_service.list_b3_incomes(
+            conn,
+            portfolio["id"],
+            period="year",
+            table_month=3,
+            table_asset_class=AssetClass.ACAO.value,
+            use_default_table_period=False,
+        )
+
+    assert latest_default["table"]["year"] == 2026
+    assert latest_default["table"]["month"] == 4
+    assert [row["ticker"] for row in latest_default["table"]["rows"]] == ["ITSA4"]
+    assert only_year["table"]["total_net_value"] == "140.00"
+    assert [row["ticker"] for row in only_year["table"]["rows"]] == ["KNRI11", "ITSA4"]
+    assert only_month["table"]["total_net_value"] == "200.00"
+    assert [row["ticker"] for row in only_month["table"]["rows"]] == ["ITSA4", "KNRI11"]
+    assert all_history["table"]["total_net_value"] == "260.00"
+    assert [row["ticker"] for row in all_history["table"]["rows"]] == ["ITSA4", "KNRI11", "ITSA4"]
+    assert class_filtered["table"]["total_net_value"] == "120.00"
+    assert [row["ticker"] for row in class_filtered["table"]["rows"]] == ["ITSA4"]
+    assert class_filtered["chart"]["segment_keys"] == ["ITSA4", "KNRI11"]
+
+
 def test_b3_incomes_includes_review_fallback_rows(tmp_path, monkeypatch):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)

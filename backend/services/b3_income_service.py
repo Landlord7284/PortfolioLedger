@@ -92,15 +92,21 @@ def _income_rows(
         conditions.append("i.asset_id = ?")
         params.append(asset_id)
     if asset_class:
-        conditions.append("a.asset_class = ?")
-        params.append(asset_class)
+        if asset_class in {"CRI", "CRA"}:
+            conditions.append("(a.asset_class = ? OR (a.asset_class IS NULL AND UPPER(i.product) LIKE ?))")
+            params.extend([asset_class, f"{asset_class} - %"])
+        else:
+            conditions.append("a.asset_class = ?")
+            params.append(asset_class)
     if event_type:
         conditions.append("i.event_type = ?")
         params.append(event_type)
-    if table_year and table_month:
+    if table_year:
         conditions.append("strftime('%Y', i.payment_date) = ?")
+        params.append(str(table_year))
+    if table_month:
         conditions.append("strftime('%m', i.payment_date) = ?")
-        params.extend([str(table_year), f"{table_month:02d}"])
+        params.append(f"{table_month:02d}")
 
     return conn.execute(
         f"""
@@ -284,6 +290,8 @@ def list_b3_incomes(
     chart_group_by: str = "asset",
     table_year: int | None = None,
     table_month: int | None = None,
+    table_asset_class: str | None = None,
+    use_default_table_period: bool = True,
 ) -> dict[str, Any]:
     if chart_group_by not in CHART_GROUPS:
         raise ValueError("Agrupamento do grafico invalido.")
@@ -301,12 +309,17 @@ def list_b3_incomes(
     )
     all_rows = _income_rows(conn, portfolio_id)
     years, default_year, default_month = _table_options(all_rows)
-    selected_year = table_year or default_year
-    selected_month = table_month or default_month
-    table_rows = (
-        _income_rows(conn, portfolio_id, table_year=selected_year, table_month=selected_month)
-        if selected_year and selected_month
-        else []
+    selected_year = table_year
+    selected_month = table_month
+    if use_default_table_period and selected_year is None and selected_month is None:
+        selected_year = default_year
+        selected_month = default_month
+    table_rows = _income_rows(
+        conn,
+        portfolio_id,
+        asset_class=table_asset_class,
+        table_year=selected_year,
+        table_month=selected_month,
     )
 
     total = sum((_to_decimal(row["net_value"]) for row in period_rows), Decimal("0"))

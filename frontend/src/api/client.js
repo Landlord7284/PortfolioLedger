@@ -141,7 +141,7 @@ export const b3 = {
     request(`/b3/monthly-import?portfolio_id=${portfolioId}&reference_month=${encodeURIComponent(referenceMonth)}`, {
       method: 'DELETE',
     }),
-  incomes: ({ portfolioId, period, assetId, assetClass, eventType, chartGroupBy, tableYear, tableMonth }) => {
+  incomes: ({ portfolioId, period, assetId, assetClass, eventType, chartGroupBy, tableYear, tableMonth, tableAssetClass }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, period });
     if (assetId) params.set('asset_id', assetId);
     if (assetClass) params.set('asset_class', assetClass);
@@ -149,6 +149,7 @@ export const b3 = {
     if (chartGroupBy) params.set('chart_group_by', chartGroupBy);
     if (tableYear) params.set('table_year', tableYear);
     if (tableMonth) params.set('table_month', tableMonth);
+    if (tableAssetClass) params.set('table_asset_class', tableAssetClass);
     return request(`/b3/incomes?${params.toString()}`);
   },
 };
