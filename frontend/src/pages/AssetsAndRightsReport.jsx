@@ -124,7 +124,7 @@ export default function AssetsAndRightsReport() {
     }
   };
 
-  const rows = report?.rows || [];
+  const rows = useMemo(() => report?.rows || [], [report]);
   const classes = useMemo(() => [...new Set(rows.map((row) => row.asset_class).filter(Boolean))].sort(), [rows]);
   const visibleRows = useMemo(() => {
     if (!filterClass) return rows;

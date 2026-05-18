@@ -14,17 +14,17 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const PERIOD_OPTIONS = [
-  { value: 'year', label: 'No ano' },
-  { value: '12m', label: '12 meses' },
-  { value: '24m', label: '24 meses' },
-  { value: '36m', label: '36 meses' },
-  { value: 'all', label: 'Do início' },
+  { value: 'year', label: 'Ano' },
+  { value: '12m', label: '12m' },
+  { value: '24m', label: '24m' },
+  { value: '36m', label: '36m' },
+  { value: 'all', label: 'Tudo' },
 ];
 
 const CHART_GROUP_OPTIONS = [
   { value: 'asset', label: 'Ativo' },
-  { value: 'asset_class', label: 'Classe de ativo' },
-  { value: 'event_type', label: 'Tipo de provento' },
+  { value: 'asset_class', label: 'Classe' },
+  { value: 'event_type', label: 'Tipo' },
 ];
 
 const CHART_COLORS = [
@@ -449,7 +449,7 @@ export default function Proventos() {
       <Card className="overflow-hidden">
         <CardHeader className="border-b">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <CardTitle className="text-base">Detalhamento mensal</CardTitle>
+            <CardTitle className="text-base">Detalhamento Mensal</CardTitle>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Select value={effectiveTableYear} onValueChange={(value) => {
                 setTableYear(value);
@@ -496,11 +496,11 @@ export default function Proventos() {
               <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <SortableHead sortKey="ticker" sort={sort} onSort={handleSort} className="w-[86px]">Ticker</SortableHead>
-                    <SortableHead sortKey="asset_class" sort={sort} onSort={handleSort} className="w-[112px]">Classe</SortableHead>
-                    <SortableHead sortKey="name" sort={sort} onSort={handleSort} className="w-[190px]">Nome</SortableHead>
+                    <SortableHead sortKey="ticker" sort={sort} onSort={handleSort} className="w-[100px]">Ticker</SortableHead>
+                    <SortableHead sortKey="asset_class" sort={sort} onSort={handleSort} className="w-[107px]">Classe</SortableHead>
+                    <SortableHead sortKey="name" sort={sort} onSort={handleSort} className="w-[255px]">Nome</SortableHead>
                     <SortableHead sortKey="payment_date" sort={sort} onSort={handleSort} className="w-[118px]">Pagamento</SortableHead>
-                    <SortableHead sortKey="event_type" sort={sort} onSort={handleSort} className="w-[210px]">Tipo</SortableHead>
+                    <SortableHead sortKey="event_type" sort={sort} onSort={handleSort} className="w-[165px]">Tipo</SortableHead>
                     <SortableHead sortKey="quantity" sort={sort} onSort={handleSort} className="w-[128px] text-right">Quantidade</SortableHead>
                     <SortableHead sortKey="net_value" sort={sort} onSort={handleSort} className="w-[132px] text-right">Valor líquido</SortableHead>
                   </TableRow>
