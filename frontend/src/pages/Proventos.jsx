@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, RotateCcw } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { toast } from 'sonner';
 import { AppContext } from '../App';
@@ -8,10 +8,12 @@ import { formatMoney, formatQuantity } from '@/lib/formatters';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip } from '@/components/ui/chart';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const PERIOD_OPTIONS = [
   { value: 'year', label: 'Ano' },
@@ -56,6 +58,13 @@ function formatMonth(value) {
   const date = new Date(Number(year), Number(month) - 1, 1);
   const label = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(date).replace('.', '');
   return `${label}.${year}`;
+}
+
+function formatMonthName(value) {
+  if (!value || value === ALL_FILTER_VALUE) return '';
+  const date = new Date(2026, Number(value) - 1, 1);
+  const label = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(date);
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function formatPercent(value) {
@@ -300,6 +309,7 @@ export default function Proventos() {
   const effectiveTableMonth = tableMonth || (report?.table.month ? String(report.table.month) : '');
   const monthOptions = [...new Set(yearOptions.flatMap((option) => option.months || []))]
     .sort((a, b) => b - a);
+  const hasActiveTableFilters = tableAssetClass !== ALL_FILTER_VALUE || Boolean(tableYear) || Boolean(tableMonth);
   const handleTableYearChange = (value) => {
     setTableYear(value);
     if (!tableMonth) setTableMonth(effectiveTableMonth || ALL_FILTER_VALUE);
@@ -307,6 +317,11 @@ export default function Proventos() {
   const handleTableMonthChange = (value) => {
     setTableMonth(value);
     if (!tableYear) setTableYear(effectiveTableYear || ALL_FILTER_VALUE);
+  };
+  const handleClearTableFilters = () => {
+    setTableAssetClass(ALL_FILTER_VALUE);
+    setTableYear('');
+    setTableMonth('');
   };
   const sortedRows = useMemo(() => {
     const rows = report?.table.rows || [];
@@ -461,48 +476,79 @@ export default function Proventos() {
 
       <Card className="overflow-hidden">
         <CardHeader className="border-b">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <CardTitle className="text-base">Detalhamento Mensal</CardTitle>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Select value={effectiveTableYear} onValueChange={handleTableYearChange}>
-                <SelectTrigger className="w-full sm:w-[120px]" aria-label="Ano">
-                  <SelectValue placeholder="Ano" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={ALL_FILTER_VALUE}>Todos</SelectItem>
-                    {yearOptions.map((option) => (
-                      <SelectItem key={option.year} value={String(option.year)}>{option.year}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <Select value={effectiveTableMonth} onValueChange={handleTableMonthChange}>
-                <SelectTrigger className="w-full sm:w-[140px]" aria-label="Mês">
-                  <SelectValue placeholder="Mês" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={ALL_FILTER_VALUE}>Todos</SelectItem>
-                    {monthOptions.map((month) => (
-                      <SelectItem key={month} value={String(month)}>{String(month).padStart(2, '0')}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <Select value={tableAssetClass} onValueChange={setTableAssetClass}>
-                <SelectTrigger className="w-full sm:w-[160px]" aria-label="Classe">
-                  <SelectValue placeholder="Classe" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={ALL_FILTER_VALUE}>Todas</SelectItem>
-                    {classOptions.map((assetClass) => (
-                      <SelectItem key={assetClass} value={assetClass}>{assetClass}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+            <div className="flex w-full flex-col gap-3 sm:flex-row md:w-auto md:items-end">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Classe</Label>
+                <Select value={tableAssetClass} onValueChange={setTableAssetClass}>
+                  <SelectTrigger className="h-10 w-full sm:min-w-[180px]" aria-label="Classe">
+                    <SelectValue placeholder="Classe" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value={ALL_FILTER_VALUE}>Todas as classes</SelectItem>
+                      {classOptions.map((assetClass) => (
+                        <SelectItem key={assetClass} value={assetClass}>{assetClass}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Ano</Label>
+                <Select value={effectiveTableYear} onValueChange={handleTableYearChange}>
+                  <SelectTrigger className="h-10 w-full sm:min-w-[110px]" aria-label="Ano">
+                    <SelectValue placeholder="Ano" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value={ALL_FILTER_VALUE}>Todos</SelectItem>
+                      {yearOptions.map((option) => (
+                        <SelectItem key={option.year} value={String(option.year)}>{option.year}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Mês</Label>
+                <Select value={effectiveTableMonth} onValueChange={handleTableMonthChange}>
+                  <SelectTrigger className="h-10 w-full sm:min-w-[140px]" aria-label="Mês">
+                    <SelectValue placeholder="Mês" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value={ALL_FILTER_VALUE}>Todos</SelectItem>
+                      {monthOptions.map((month) => (
+                        <SelectItem key={month} value={String(month)}>{formatMonthName(month)}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <span className="invisible text-xs">Reset</span>
+                <div className="h-10 w-10">
+                  {hasActiveTableFilters && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-10 w-10 shrink-0 text-muted-foreground"
+                          onClick={handleClearTableFilters}
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          <span className="sr-only">Limpar filtros</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Limpar filtros</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </CardHeader>
