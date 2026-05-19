@@ -171,9 +171,11 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
   // Format the quantity to local format (replace dot with comma) if it comes with dot
   const initialQty = event.quantity ? event.quantity.replace('.', ',') : '';
   const initialVal = event.event_value ? event.event_value.replace('.', ',') : '';
+  const initialGrossVal = event.gross_value ? event.gross_value.replace('.', ',') : '';
   
   const [quantity, setQuantity] = useState(initialQty);
   const [eventValue, setEventValue] = useState(initialVal);
+  const [grossValue, setGrossValue] = useState(initialGrossVal);
   const [notes, setNotes] = useState(event.notes || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -181,6 +183,11 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
   const normalizeValue = (val, evType) => {
     if (VALUE_IGNORED.includes(evType)) return '0';
     return currencyToBackend(val) || '0';
+  };
+
+  const grossValuePayload = (val, evType) => {
+    if (evType !== 'Venda') return {};
+    return { gross_value: currencyToBackend(val) };
   };
 
   const handleSubmit = async (e) => {
@@ -193,6 +200,7 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
         event_date: eventDate,
         quantity: quantity.replace(',', '.'),
         event_value: normalizeValue(eventValue, eventType),
+        ...grossValuePayload(grossValue, eventType),
         notes: notes || null,
       });
       toast.success('Evento corrigido com sucesso.');
@@ -250,11 +258,22 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
 
           {!VALUE_IGNORED.includes(eventType) && (
             <div className="space-y-2">
-              <Label className="text-xs font-medium text-muted-foreground uppercase">Valor Total</Label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase">Valor Op. Líquido</Label>
               <Input 
                 value={eventValue} 
                 onChange={(e) => setEventValue(applyCurrencyMask(e.target.value))} 
                 required 
+              />
+            </div>
+          )}
+
+          {eventType === 'Venda' && (
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground uppercase">Valor Op. Bruto</Label>
+              <Input
+                value={grossValue}
+                onChange={(e) => setGrossValue(applyCurrencyMask(e.target.value))}
+                required
               />
             </div>
           )}
