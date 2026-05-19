@@ -1,6 +1,15 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { b3 as b3Api } from '../api/client';
-import { AlertCircle, AlertTriangle, CheckCircle2, FileSpreadsheet, Loader2, UploadCloud } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  FileSpreadsheet,
+  Loader2,
+  UploadCloud,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -24,16 +33,16 @@ function DetailList({ title, icon: Icon, items, destructive = false }) {
   if (!items?.length) return null;
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       <h4 className={`flex items-center gap-1 text-sm font-medium ${destructive ? 'text-destructive' : ''}`}>
         <Icon className="h-4 w-4" />
         {title}
       </h4>
-      <div className="max-h-32 space-y-1 overflow-y-auto">
+      <div className="max-h-40 space-y-1 overflow-y-auto overflow-x-hidden">
         {items.map((item, index) => (
           <div
             key={`${item}-${index}`}
-            className={`rounded p-2 font-mono text-xs ${
+            className={`whitespace-pre-wrap break-words rounded p-2 font-mono text-xs ${
               destructive ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'
             }`}
           >
@@ -45,23 +54,39 @@ function DetailList({ title, icon: Icon, items, destructive = false }) {
   );
 }
 
+function fileKey(file) {
+  return `${file.filename}-${file.reference_month}`;
+}
+
+function hasFileLogs(file) {
+  return Boolean(file?.duplicate_details?.length || file?.review_details?.length || file?.errors?.length);
+}
+
 export default function B3MonthlyImportModal({ portfolioId, onClose, onSuccess }) {
   const [files, setFiles] = useState([]);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
-
-  const allReviewDetails = useMemo(() => (
-    result?.files?.flatMap((file) => file.review_details || []) || []
-  ), [result]);
+  const [expandedFiles, setExpandedFiles] = useState(() => new Set());
 
   const allErrors = useMemo(() => {
     if (!result) return [];
-    return [
-      ...(result.errors || []),
-      ...(result.files || []).flatMap((file) => file.errors || []),
-    ];
+    return result.errors || [];
   }, [result]);
+
+  const toggleFile = (file) => {
+    if (!hasFileLogs(file)) return;
+    const key = fileKey(file);
+    setExpandedFiles((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
 
   const handleImport = async () => {
     if (files.length === 0) return;
@@ -178,25 +203,54 @@ export default function B3MonthlyImportModal({ portfolioId, onClose, onSuccess }
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(result.files || []).map((file) => (
-                    <TableRow key={`${file.filename}-${file.reference_month}`}>
-                      <TableCell className="font-medium">{file.filename}</TableCell>
-                      <TableCell>{file.reference_month}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{file.total_rows}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{file.imported_prices}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{file.imported_incomes}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{file.auto_events_created}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{file.duplicates}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{file.review_count}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{file.errors?.length || 0}</TableCell>
-                    </TableRow>
-                  ))}
+                  {(result.files || []).map((file) => {
+                    const key = fileKey(file);
+                    const expandable = hasFileLogs(file);
+                    const expanded = expandedFiles.has(key);
+                    const ArrowIcon = expanded ? ChevronDown : ChevronRight;
+
+                    return (
+                      <Fragment key={key}>
+                        <TableRow
+                          className={expandable ? 'cursor-pointer hover:bg-muted/50' : ''}
+                          onClick={() => toggleFile(file)}
+                        >
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              {expandable ? (
+                                <ArrowIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              ) : (
+                                <span className="h-4 w-4 shrink-0" />
+                              )}
+                              <span>{file.filename}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>{file.reference_month}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{file.total_rows}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{file.imported_prices}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{file.imported_incomes}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{file.auto_events_created}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{file.duplicates}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{file.review_count}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{file.errors?.length || 0}</TableCell>
+                        </TableRow>
+                        {expanded && (
+                          <TableRow className="bg-muted/20 hover:bg-muted/20">
+                            <TableCell colSpan={9} className="p-4">
+                              <div className="w-full space-y-4">
+                                <DetailList title="Duplicados" icon={AlertTriangle} items={file.duplicate_details || []} />
+                                <DetailList title="Revisoes" icon={AlertTriangle} items={file.review_details || []} />
+                                <DetailList title="Erros" icon={AlertCircle} items={file.errors || []} destructive />
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
-
-            <DetailList title="Revisoes pendentes" icon={AlertTriangle} items={allReviewDetails} />
-            <DetailList title="Detalhes dos erros" icon={AlertCircle} items={allErrors} destructive />
 
             <DialogFooter>
               <Button onClick={onClose} className="w-full sm:w-auto">Fechar</Button>

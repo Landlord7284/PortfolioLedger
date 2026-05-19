@@ -335,6 +335,7 @@ class B3MonthlyFileResult(BaseModel):
     imported_incomes: int
     auto_events_created: int
     duplicates: int = 0
+    duplicate_details: list[str] = []
     review_count: int = 0
     review_details: list[str] = []
     errors: list[str] = []

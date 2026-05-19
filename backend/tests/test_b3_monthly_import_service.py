@@ -135,6 +135,7 @@ def test_b3_amortization_imports_duplicate_by_type_asset_and_date_with_flag(tmp_
 
     assert result["auto_events_created"] == 1
     assert result["duplicates"] >= 1
+    assert any("amortizacao ja existia no ledger" in detail for detail in result["files"][0]["duplicate_details"])
     assert len(events) == 2
     assert events[1]["event_value"] == "25"
     assert events[1]["duplicate_flag"] == 1
@@ -168,6 +169,8 @@ def test_b3_import_is_idempotent_for_same_file(tmp_path):
     assert first["auto_events_created"] == 1
     assert second["auto_events_created"] == 0
     assert second["duplicates"] >= 2
+    assert any("ja reprocessada para 2025-11" in detail for detail in second["files"][0]["duplicate_details"])
+    assert any("ja processado neste arquivo" in detail for detail in second["files"][0]["duplicate_details"])
     assert prices == 1
     assert incomes == 1
     assert amortizations == 1

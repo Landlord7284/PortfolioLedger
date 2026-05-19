@@ -413,7 +413,7 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
             except json.JSONDecodeError:
                 existing_payload = {}
             if len(existing_payload.get("consolidated_source_rows") or []) > 1:
-                return "updated"
+                return "consolidated_reprocessed"
         conn.execute(
             """
             UPDATE b3_market_prices
@@ -469,7 +469,7 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
                 existing_payload = {}
             source_rows = existing_payload.get("consolidated_source_rows") or [asset_existing["source_row"]]
             if values["source_row"] in source_rows:
-                return "updated"
+                return "consolidated_reprocessed"
             current_value = to_decimal(asset_existing["value"]) if asset_existing["value"] is not None else Decimal("0")
             added_value = to_decimal(values["value"]) if values.get("value") is not None else Decimal("0")
             source_rows.append(values["source_row"])
@@ -678,7 +678,15 @@ def _process_market_sheet(
     fixed_income_only: bool = False,
     fixed_income_positions: list[dict] | None = None,
 ) -> dict:
-    result = {"total_rows": 0, "imported_prices": 0, "duplicates": 0, "review_count": 0, "review_details": [], "errors": []}
+    result = {
+        "total_rows": 0,
+        "imported_prices": 0,
+        "duplicates": 0,
+        "duplicate_details": [],
+        "review_count": 0,
+        "review_details": [],
+        "errors": [],
+    }
     for row_idx, row in _row_dicts(ws):
         product = _clean_str(row.get(product_header))
         if _norm_text(product).startswith("TOTAL"):
@@ -776,6 +784,14 @@ def _process_market_sheet(
             result["imported_prices"] += 1
         else:
             result["duplicates"] += 1
+            duplicate_reason = (
+                "posicao consolidada ja reprocessada"
+                if upsert_status == "consolidated_reprocessed"
+                else "linha ja reprocessada"
+            )
+            result["duplicate_details"].append(
+                f"{sheet_name} linha {row_idx}: {ticker or product} {duplicate_reason} para {reference_month}"
+            )
     return result
 
 
@@ -842,7 +858,16 @@ def _process_income_sheet(
     fixed_income_positions: list[dict] | None = None,
 ) -> dict:
     fixed_income_positions = fixed_income_positions or []
-    result = {"total_rows": 0, "imported_incomes": 0, "auto_events_created": 0, "duplicates": 0, "review_count": 0, "review_details": [], "errors": []}
+    result = {
+        "total_rows": 0,
+        "imported_incomes": 0,
+        "auto_events_created": 0,
+        "duplicates": 0,
+        "duplicate_details": [],
+        "review_count": 0,
+        "review_details": [],
+        "errors": [],
+    }
     for row_idx, row in _row_dicts(ws):
         result["total_rows"] += 1
         product = _clean_str(row.get("PRODUTO"))
@@ -917,6 +942,9 @@ def _process_income_sheet(
                     status = existing["status"] if existing else "ledger_event_created"
                 if duplicate_reason == "duplicate":
                     result["duplicates"] += 1
+                    result["duplicate_details"].append(
+                        f"Proventos Recebidos linha {row_idx}: amortizacao ja existia no ledger para {ticker or product} em {payment_date}"
+                    )
             except Exception as exc:
                 status = "ledger_error"
                 result["errors"].append(f"Proventos Recebidos linha {row_idx}: amortizacao nao lancada no ledger: {exc}")
@@ -944,12 +972,16 @@ def _process_income_sheet(
             result["imported_incomes"] += 1
         else:
             result["duplicates"] += 1
+            result["duplicate_details"].append(
+                f"Proventos Recebidos linha {row_idx}: {ticker or product} ja processado neste arquivo"
+            )
     return result
 
 
 def _merge_counts(target: dict, source: dict) -> None:
     for key in ("total_rows", "imported_prices", "imported_incomes", "auto_events_created", "duplicates", "review_count"):
         target[key] = target.get(key, 0) + source.get(key, 0)
+    target.setdefault("duplicate_details", []).extend(source.get("duplicate_details", []))
     target.setdefault("errors", []).extend(source.get("errors", []))
     target.setdefault("review_details", []).extend(source.get("review_details", []))
 
@@ -969,6 +1001,7 @@ def import_b3_monthly_file(conn: sqlite3.Connection, portfolio_id: int, source: 
         "imported_incomes": 0,
         "auto_events_created": 0,
         "duplicates": 0,
+        "duplicate_details": [],
         "review_count": 0,
         "review_details": [],
         "errors": [],
@@ -1076,6 +1109,7 @@ def import_b3_monthly_batch(conn: sqlite3.Connection, portfolio_id: int, files: 
                 "imported_incomes": 0,
                 "auto_events_created": 0,
                 "duplicates": 0,
+                "duplicate_details": [],
                 "review_count": 0,
                 "review_details": [],
                 "errors": [str(exc)],
