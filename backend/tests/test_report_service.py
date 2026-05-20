@@ -143,7 +143,7 @@ def test_income_report_aggregates_eligible_b3_and_ledger_rows(tmp_path):
     assert tables["exclusive_taxation"]["total"] == "70.00"
 
 
-def test_income_report_excludes_pending_duplicates_and_avoids_b3_double_count(tmp_path):
+def test_income_report_resolves_cancelled_and_duplicate_amortizations(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)
 
@@ -188,6 +188,86 @@ def test_income_report_excludes_pending_duplicates_and_avoids_b3_double_count(tm
 
     assert rows[EventType.AMORTIZACAO.value]["value"] == "271.81"
     assert confirmed_rows[EventType.AMORTIZACAO.value]["value"] == "271.81"
+
+
+def test_income_report_keeps_active_side_of_duplicate_amortizations(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.FII.value, "FUND11", market="BR", name="FUND FII", cnpj="11.111.111/0001-11")
+        import_id = _b3_import(conn, portfolio["id"])
+
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2024-01-01", "100", "1000")
+
+        manual_cancelled = event_service.create_event(conn, portfolio["id"], asset["id"], EventType.AMORTIZACAO.value, "2025-06-30", "0", "100.00")
+        duplicate_only_active = event_service.create_event(conn, portfolio["id"], asset["id"], EventType.AMORTIZACAO.value, "2025-06-30", "0", "100.00")
+        conn.execute("UPDATE events SET is_cancelled = 1 WHERE id = ?", (manual_cancelled["id"],))
+        conn.execute("UPDATE events SET duplicate_flag = 1 WHERE id = ?", (duplicate_only_active["id"],))
+        _b3_income(
+            conn,
+            import_id,
+            portfolio["id"],
+            asset["id"],
+            payment_date="2025-06-30",
+            event_type=EventType.AMORTIZACAO.value,
+            net_value="100.00",
+            ledger_event_id=duplicate_only_active["id"],
+            status="ledger_event_created",
+            source_row=1,
+        )
+
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.AMORTIZACAO.value, "2025-07-31", "0", "200.00")
+        duplicate_cancelled = event_service.create_event(conn, portfolio["id"], asset["id"], EventType.AMORTIZACAO.value, "2025-07-31", "0", "200.00")
+        conn.execute("UPDATE events SET duplicate_flag = 1, is_cancelled = 1 WHERE id = ?", (duplicate_cancelled["id"],))
+        _b3_income(
+            conn,
+            import_id,
+            portfolio["id"],
+            asset["id"],
+            payment_date="2025-07-31",
+            event_type=EventType.AMORTIZACAO.value,
+            net_value="200.00",
+            ledger_event_id=duplicate_cancelled["id"],
+            status="ledger_event_created",
+            source_row=2,
+        )
+
+        both_manual_cancelled = event_service.create_event(conn, portfolio["id"], asset["id"], EventType.AMORTIZACAO.value, "2025-08-29", "0", "300.00")
+        both_duplicate_cancelled = event_service.create_event(conn, portfolio["id"], asset["id"], EventType.AMORTIZACAO.value, "2025-08-29", "0", "300.00")
+        conn.execute("UPDATE events SET is_cancelled = 1 WHERE id = ?", (both_manual_cancelled["id"],))
+        conn.execute("UPDATE events SET duplicate_flag = 1, is_cancelled = 1 WHERE id = ?", (both_duplicate_cancelled["id"],))
+        _b3_income(
+            conn,
+            import_id,
+            portfolio["id"],
+            asset["id"],
+            payment_date="2025-08-29",
+            event_type=EventType.AMORTIZACAO.value,
+            net_value="300.00",
+            ledger_event_id=both_duplicate_cancelled["id"],
+            status="ledger_event_created",
+            source_row=3,
+        )
+
+        _b3_income(
+            conn,
+            import_id,
+            portfolio["id"],
+            asset["id"],
+            payment_date="2025-09-30",
+            event_type="Rendimento",
+            net_value="25.00",
+            source_row=4,
+        )
+
+        report = report_service.list_income_report(conn, portfolio["id"], 2025)
+
+    rows = {row["income_type"]: row for row in report["tables"][0]["rows"]}
+
+    assert rows[EventType.AMORTIZACAO.value]["value"] == "300.00"
+    assert rows["Rendimento"]["value"] == "25.00"
 
 
 def test_fiscal_report_xlsx_uses_assets_and_rights_section(tmp_path):

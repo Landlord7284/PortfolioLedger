@@ -181,6 +181,7 @@ def list_income_report(conn: sqlite3.Connection, portfolio_id: int, year: int) -
             e.event_date,
             e.event_value,
             e.event_value_brl,
+            e.duplicate_flag,
             a.asset_class,
             a.name,
             a.cnpj,
@@ -198,7 +199,6 @@ def list_income_report(conn: sqlite3.Connection, portfolio_id: int, year: int) -
           AND e.event_date BETWEEN ? AND ?
           AND e.is_cancelled = 0
           AND e.is_storno = 0
-          AND e.duplicate_flag = 0
           AND a.merged_into_asset_id IS NULL
           AND a.asset_class IN ({",".join("?" for _ in class_params)})
           AND e.event_type IN ({",".join("?" for _ in ledger_types)})
@@ -207,12 +207,21 @@ def list_income_report(conn: sqlite3.Connection, portfolio_id: int, year: int) -
         (portfolio_id, start_date, end_date, *class_params, *ledger_types),
     ).fetchall()
 
-    active_ledger_income_keys = set()
+    ledger_rows_by_income_key = defaultdict(list)
     for row in ledger_rows:
         rule = INCOME_RULE_BY_ALIAS.get(_norm_label(row["event_type"]))
         if not rule:
             continue
-        active_ledger_income_keys.add((row["asset_id"], _norm_label(rule["income_type"]), row["event_date"], _money(_event_brl_value(row))))
+        income_key = (row["asset_id"], _norm_label(rule["income_type"]), row["event_date"], _money(_event_brl_value(row)))
+        ledger_rows_by_income_key[income_key].append((row, rule))
+
+    active_ledger_income_keys = set()
+    for income_key, keyed_rows in ledger_rows_by_income_key.items():
+        active_ledger_income_keys.add(income_key)
+        row, rule = next(
+            ((candidate, candidate_rule) for candidate, candidate_rule in keyed_rows if not candidate["duplicate_flag"]),
+            keyed_rows[0],
+        )
         _add_income_amount(
             grouped,
             table_key=rule["table_key"],
@@ -250,14 +259,9 @@ def list_income_report(conn: sqlite3.Connection, portfolio_id: int, year: int) -
           AND i.payment_date BETWEEN ? AND ?
           AND i.asset_id IS NOT NULL
           AND i.status != 'review'
+          AND i.ledger_event_id IS NULL
           AND a.merged_into_asset_id IS NULL
           AND a.asset_class IN ({",".join("?" for _ in class_params)})
-          AND NOT EXISTS (
-              SELECT 1
-              FROM events e
-              WHERE e.id = i.ledger_event_id
-                AND e.is_cancelled = 0
-          )
         ORDER BY current_ticker, i.payment_date, i.id
         """,
         (portfolio_id, start_date, end_date, *class_params),
