@@ -108,7 +108,7 @@ export default function AssetsAndRightsReport() {
     if (!activePortfolioId) return;
     setExporting(true);
     try {
-      const { blob, filename } = await reportsApi.assetsAndRightsXlsx({ portfolioId: activePortfolioId, year });
+      const { blob, filename } = await reportsApi.fiscalExportXlsx({ portfolioId: activePortfolioId, year });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;

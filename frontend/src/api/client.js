@@ -120,9 +120,17 @@ export const reports = {
     const params = new URLSearchParams({ portfolio_id: portfolioId, year });
     return request(`/reports/assets-and-rights?${params.toString()}`);
   },
+  income: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, year });
+    return request(`/reports/income?${params.toString()}`);
+  },
   assetsAndRightsXlsx: ({ portfolioId, year }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, year });
     return requestBlob(`/reports/assets-and-rights.xlsx?${params.toString()}`);
+  },
+  fiscalExportXlsx: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, year });
+    return requestBlob(`/reports/fiscal/export.xlsx?${params.toString()}`);
   },
 };
 

@@ -269,6 +269,28 @@ class AssetsAndRightsReportResponse(BaseModel):
     rows: list[AssetsAndRightsRow]
 
 
+class IncomeReportRow(BaseModel):
+    id: str
+    ticker: Optional[str] = None
+    payer_cnpj: Optional[str] = None
+    payer_name: Optional[str] = None
+    income_type: str
+    value: str
+
+
+class IncomeReportTable(BaseModel):
+    key: str
+    title: str
+    rows: list[IncomeReportRow]
+    total: str
+
+
+class IncomeReportResponse(BaseModel):
+    portfolio_id: int
+    year: int
+    tables: list[IncomeReportTable]
+
+
 # ── Tax ──────────────────────────────────────────────────────
 
 class TaxEventResponse(BaseModel):
