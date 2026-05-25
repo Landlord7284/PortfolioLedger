@@ -9,8 +9,13 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from backend.database import get_db
-from backend.models import AssetsAndRightsReportResponse, CapitalGainReportResponse, IncomeReportResponse
-from backend.services import capital_gain_report_service, report_service
+from backend.models import (
+    AssetsAndRightsReportResponse,
+    CapitalGainReportResponse,
+    IncomeReportResponse,
+    TaxExemptIncomeReportResponse,
+)
+from backend.services import capital_gain_report_service, report_service, tax_exempt_income_report_service
 from backend.services.portfolio_service import get_portfolio
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -58,6 +63,21 @@ def capital_gains_report(
             raise HTTPException(404, f"Carteira {portfolio_id} nÃ£o encontrada.")
         try:
             return capital_gain_report_service.list_capital_gains(conn, portfolio_id, year)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+
+@router.get("/tax-exempt-income", response_model=TaxExemptIncomeReportResponse)
+def tax_exempt_income_report(
+    portfolio_id: int = Query(...),
+    year: int = Query(...),
+):
+    _validate_year(year)
+    with get_db() as conn:
+        if not get_portfolio(conn, portfolio_id):
+            raise HTTPException(404, f"Carteira {portfolio_id} nÃƒÂ£o encontrada.")
+        try:
+            return tax_exempt_income_report_service.list_tax_exempt_income(conn, portfolio_id, year)
         except ValueError as e:
             raise HTTPException(400, str(e))
 

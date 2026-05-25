@@ -31,6 +31,7 @@ TREATMENT_EXEMPT_ZERO = "EXEMPT_ZERO"
 
 @dataclass
 class SaleItem:
+    event_id: int
     asset_id: int
     ticker: str | None
     asset_class: str
@@ -60,6 +61,7 @@ class AssetAggregate:
     taxable_result_before_compensation: Decimal = ZERO
     theoretical_irrf: Decimal = ZERO
     effective_irrf: Decimal = ZERO
+    source_items: list[SaleItem] = field(default_factory=list)
 
     def add(self, item: SaleItem) -> None:
         self.gross_sale += item.gross_sale
@@ -67,6 +69,7 @@ class AssetAggregate:
         self.costs += item.costs
         self.cost_basis += item.cost_basis
         self.realized_result += item.net_result
+        self.source_items.append(item)
 
 
 def _money(value: Decimal) -> str:
@@ -185,6 +188,7 @@ def _fetch_sales(conn: sqlite3.Connection, portfolio_id: int, year: int) -> list
             gross_sale = _d(gross_source)
             sales.append(
                 SaleItem(
+                    event_id=row["id"],
                     asset_id=row["asset_id"],
                     ticker=row["current_ticker"],
                     asset_class=row["asset_class"],
@@ -276,6 +280,23 @@ def _asset_rows(assets: dict[int, AssetAggregate]) -> list[dict]:
                 "taxable_result_before_compensation": _money(aggregate.taxable_result_before_compensation),
                 "theoretical_irrf": _money(aggregate.theoretical_irrf),
                 "effective_irrf": _money(aggregate.effective_irrf),
+                "source_events": [
+                    {
+                        "event_id": item.event_id,
+                        "event_date": item.event_date,
+                        "source_event_type": "capital_gain_sale",
+                        "amount": _money(item.net_result),
+                        "year_month": _month_key(item.event_date),
+                    }
+                    for item in sorted(
+                        (
+                            item
+                            for item in getattr(aggregate, "source_items", [])
+                            if item.net_result > ZERO
+                        ),
+                        key=lambda item: (item.event_date, item.event_id),
+                    )
+                ],
             }
         )
     return result

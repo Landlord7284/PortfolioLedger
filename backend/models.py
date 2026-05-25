@@ -348,6 +348,46 @@ class CapitalGainReportResponse(BaseModel):
     months: list[CapitalGainMonthRow]
 
 
+class TaxExemptIncomeSourceEvent(BaseModel):
+    event_id: int
+    event_date: str
+    source_event_type: str
+    amount: str
+    year_month: str
+
+
+class TaxExemptIncomeAssetRow(BaseModel):
+    asset_id: int
+    ticker: Optional[str] = None
+    asset_class: str
+    fiscal_regime: str
+    amount: str
+    source_event_type: Optional[str] = None
+    year_month: str
+    source_events: list[TaxExemptIncomeSourceEvent] = Field(default_factory=list)
+
+
+class TaxExemptIncomeMonthRow(BaseModel):
+    year_month: str
+    month: int
+    total: str
+    assets: list[TaxExemptIncomeAssetRow]
+
+
+class TaxExemptIncomeGroup(BaseModel):
+    source: str
+    label: str
+    total: str
+    months: list[TaxExemptIncomeMonthRow]
+
+
+class TaxExemptIncomeReportResponse(BaseModel):
+    portfolio_id: int
+    year: int
+    total: str
+    groups: list[TaxExemptIncomeGroup]
+
+
 # ── Tax ──────────────────────────────────────────────────────
 
 class TaxEventResponse(BaseModel):
