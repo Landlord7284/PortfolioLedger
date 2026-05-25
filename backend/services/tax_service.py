@@ -10,6 +10,10 @@ from typing import Any, Optional
 
 from backend.domain.engine import to_decimal
 from backend.domain.enums import EventType
+from backend.services.fiscal_regime_service import (
+    has_tax_parameter,
+    require_supported_capital_gain_regime,
+)
 from backend.services import ptax_service
 
 
@@ -432,8 +436,11 @@ def upsert_irrf_override(
     notes: Optional[str] = None,
 ) -> dict:
     _validate_year_month(year_month)
+    require_supported_capital_gain_regime(regime)
     if not conn.execute("SELECT 1 FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone():
         raise ValueError(f"Carteira {portfolio_id} nao encontrada.")
+    if not has_tax_parameter(conn, regime, f"{year_month}-01"):
+        raise ValueError(f"Parametro fiscal nao encontrado para {regime} em {year_month}.")
     value = _d(effective_irrf)
     if value < ZERO:
         raise ValueError("IRRF efetivo nao pode ser negativo.")

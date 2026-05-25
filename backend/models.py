@@ -301,13 +301,16 @@ class CapitalGainAssetRow(BaseModel):
     asset_id: int
     ticker: Optional[str] = None
     asset_class: str
+    fiscal_regime: str
     gross_sale: str
     net_sale: str
     costs: str
     cost_basis: str
-    net_result: str
+    realized_result: str
     exempt_gain: str
     taxable_result_before_compensation: str
+    theoretical_irrf: str
+    effective_irrf: str
 
 
 class CapitalGainRegimeRow(BaseModel):
@@ -317,10 +320,10 @@ class CapitalGainRegimeRow(BaseModel):
     net_sale: str
     costs: str
     cost_basis: str
-    net_result: str
+    realized_result: str
     exempt_gain: str
     taxable_result_before_compensation: str
-    initial_loss: str
+    initial_loss_carryforward: str
     used_loss: str
     taxable_base: str
     tax_rate: str
@@ -329,12 +332,13 @@ class CapitalGainRegimeRow(BaseModel):
     irrf_override: Optional[str] = None
     effective_irrf: str
     darf_estimated: str
-    final_loss: str
+    final_loss_carryforward: str
     assets: list[CapitalGainAssetRow]
 
 
 class CapitalGainMonthRow(BaseModel):
-    month: str
+    year_month: str
+    month: int
     regimes: list[CapitalGainRegimeRow]
 
 

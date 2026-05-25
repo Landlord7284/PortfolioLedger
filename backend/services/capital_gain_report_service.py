@@ -15,14 +15,17 @@ from typing import Any
 
 from backend.domain.engine import EventRecord, PositionState, process_event, to_decimal
 from backend.domain.enums import AssetClass, EventType
+from backend.services.fiscal_regime_service import (
+    REGIME_B3_COMMON,
+    REGIME_B3_FII,
+    REGIME_CRYPTO,
+    REGIME_FI_INFRA_EXEMPT,
+    is_supported_capital_gain_regime,
+)
 
 
 ZERO = Decimal("0")
 CENTS = Decimal("0.01")
-REGIME_B3_COMMON = "B3_COMMON_15"
-REGIME_B3_FII = "B3_FII_FIAGRO_20"
-REGIME_FI_INFRA_EXEMPT = "FI_INFRA_EXEMPT"
-REGIME_CRYPTO = "CRYPTO_GCAP"
 TREATMENT_EXEMPT_ZERO = "EXEMPT_ZERO"
 
 
@@ -47,20 +50,23 @@ class AssetAggregate:
     asset_id: int
     ticker: str | None
     asset_class: str
+    fiscal_regime: str
     gross_sale: Decimal = ZERO
     net_sale: Decimal = ZERO
     costs: Decimal = ZERO
     cost_basis: Decimal = ZERO
-    net_result: Decimal = ZERO
+    realized_result: Decimal = ZERO
     exempt_gain: Decimal = ZERO
     taxable_result_before_compensation: Decimal = ZERO
+    theoretical_irrf: Decimal = ZERO
+    effective_irrf: Decimal = ZERO
 
     def add(self, item: SaleItem) -> None:
         self.gross_sale += item.gross_sale
         self.net_sale += item.net_sale
         self.costs += item.costs
         self.cost_basis += item.cost_basis
-        self.net_result += item.net_result
+        self.realized_result += item.net_result
 
 
 def _money(value: Decimal) -> str:
@@ -88,7 +94,7 @@ def _is_action_br(item: SaleItem) -> bool:
 def _resolve_regime(row: sqlite3.Row) -> str | None:
     override = row["fiscal_regime_override"]
     if override:
-        return override
+        return override if is_supported_capital_gain_regime(override) else None
 
     asset_class = row["asset_class"]
     market = row["market"]
@@ -235,10 +241,10 @@ def _empty_regime_row(regime: str, bucket: str | None, param: dict) -> dict:
         "net_sale": ZERO,
         "costs": ZERO,
         "cost_basis": ZERO,
-        "net_result": ZERO,
+        "realized_result": ZERO,
         "exempt_gain": ZERO,
         "taxable_result_before_compensation": ZERO,
-        "initial_loss": ZERO,
+        "initial_loss_carryforward": ZERO,
         "used_loss": ZERO,
         "taxable_base": ZERO,
         "tax_rate": _d(param["tax_rate"]),
@@ -247,7 +253,7 @@ def _empty_regime_row(regime: str, bucket: str | None, param: dict) -> dict:
         "irrf_override": None,
         "effective_irrf": ZERO,
         "darf_estimated": ZERO,
-        "final_loss": ZERO,
+        "final_loss_carryforward": ZERO,
         "assets": {},
     }
 
@@ -260,13 +266,16 @@ def _asset_rows(assets: dict[int, AssetAggregate]) -> list[dict]:
                 "asset_id": aggregate.asset_id,
                 "ticker": aggregate.ticker,
                 "asset_class": aggregate.asset_class,
+                "fiscal_regime": aggregate.fiscal_regime,
                 "gross_sale": _money(aggregate.gross_sale),
                 "net_sale": _money(aggregate.net_sale),
                 "costs": _money(aggregate.costs),
                 "cost_basis": _money(aggregate.cost_basis),
-                "net_result": _money(aggregate.net_result),
+                "realized_result": _money(aggregate.realized_result),
                 "exempt_gain": _money(aggregate.exempt_gain),
                 "taxable_result_before_compensation": _money(aggregate.taxable_result_before_compensation),
+                "theoretical_irrf": _money(aggregate.theoretical_irrf),
+                "effective_irrf": _money(aggregate.effective_irrf),
             }
         )
     return result
@@ -280,10 +289,10 @@ def _format_regime_row(row: dict) -> dict:
         "net_sale": _money(row["net_sale"]),
         "costs": _money(row["costs"]),
         "cost_basis": _money(row["cost_basis"]),
-        "net_result": _money(row["net_result"]),
+        "realized_result": _money(row["realized_result"]),
         "exempt_gain": _money(row["exempt_gain"]),
         "taxable_result_before_compensation": _money(row["taxable_result_before_compensation"]),
-        "initial_loss": _money(row["initial_loss"]),
+        "initial_loss_carryforward": _money(row["initial_loss_carryforward"]),
         "used_loss": _money(row["used_loss"]),
         "taxable_base": _money(row["taxable_base"]),
         "tax_rate": _rate(row["tax_rate"]),
@@ -292,9 +301,25 @@ def _format_regime_row(row: dict) -> dict:
         "irrf_override": _money(row["irrf_override"]) if row["irrf_override"] is not None else None,
         "effective_irrf": _money(row["effective_irrf"]),
         "darf_estimated": _money(row["darf_estimated"]),
-        "final_loss": _money(row["final_loss"]),
+        "final_loss_carryforward": _money(row["final_loss_carryforward"]),
         "assets": _asset_rows(row["assets"]),
     }
+
+
+def _allocate_effective_irrf(row: dict) -> None:
+    assets = row["assets"]
+    if not assets:
+        return
+
+    theoretical_total = row["theoretical_irrf"]
+    gross_total = row["gross_sale"]
+    for aggregate in assets.values():
+        if theoretical_total > ZERO:
+            aggregate.effective_irrf = row["effective_irrf"] * aggregate.theoretical_irrf / theoretical_total
+        elif gross_total > ZERO:
+            aggregate.effective_irrf = row["effective_irrf"] * aggregate.gross_sale / gross_total
+        else:
+            aggregate.effective_irrf = ZERO
 
 
 def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -> dict:
@@ -306,8 +331,9 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
     loss_carry: dict[str, Decimal] = defaultdict(Decimal)
     months = []
 
-    for month_number in range(1, 13):
-        month = f"{year}-{month_number:02d}"
+    year_months = sorted({month for month, _ in sales_by_month_regime} | {month for month, _ in overrides})
+
+    for month in year_months:
         regime_rows = []
         month_regimes = sorted(
             {
@@ -318,7 +344,7 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
             | {
                 regime
                 for key_month, regime in overrides
-                if key_month == month
+                if key_month == month and is_supported_capital_gain_regime(regime)
             }
         )
 
@@ -345,14 +371,16 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
                 row["net_sale"] += item.net_sale
                 row["costs"] += item.costs
                 row["cost_basis"] += item.cost_basis
-                row["net_result"] += item.net_result
-                row["theoretical_irrf"] += item.gross_sale * _d(param["withholding_rate"])
+                row["realized_result"] += item.net_result
+                item_theoretical_irrf = item.gross_sale * _d(param["withholding_rate"])
+                row["theoretical_irrf"] += item_theoretical_irrf
 
                 aggregate = assets.setdefault(
                     item.asset_id,
-                    AssetAggregate(item.asset_id, item.ticker, item.asset_class),
+                    AssetAggregate(item.asset_id, item.ticker, item.asset_class, item.regime),
                 )
                 aggregate.add(item)
+                aggregate.theoretical_irrf += item_theoretical_irrf
 
                 if action_is_exempt and _is_action_br(item):
                     if action_result > ZERO and item.net_result > ZERO:
@@ -367,25 +395,25 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
                 aggregate.taxable_result_before_compensation += taxable_component
 
             if regime == REGIME_FI_INFRA_EXEMPT:
-                row["exempt_gain"] = row["net_result"] if row["net_result"] > ZERO else ZERO
+                row["exempt_gain"] = row["realized_result"] if row["realized_result"] > ZERO else ZERO
             elif action_is_exempt and action_result > ZERO:
                 row["exempt_gain"] = action_result
 
             row["assets"] = assets
             if bucket:
-                row["initial_loss"] = loss_carry[bucket]
+                row["initial_loss_carryforward"] = loss_carry[bucket]
                 taxable_result = row["taxable_result_before_compensation"]
                 if taxable_result < ZERO:
                     loss_carry[bucket] += -taxable_result
-                    row["final_loss"] = loss_carry[bucket]
+                    row["final_loss_carryforward"] = loss_carry[bucket]
                 else:
                     used = min(loss_carry[bucket], taxable_result)
                     row["used_loss"] = used
                     loss_carry[bucket] -= used
                     row["taxable_base"] = taxable_result - used
-                    row["final_loss"] = loss_carry[bucket]
+                    row["final_loss_carryforward"] = loss_carry[bucket]
             else:
-                row["final_loss"] = ZERO
+                row["final_loss_carryforward"] = ZERO
 
             if param["monthly_darf_enabled"] and row["taxable_base"] > ZERO:
                 row["tax_due"] = row["taxable_base"] * row["tax_rate"]
@@ -400,8 +428,10 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
             if param["monthly_darf_enabled"]:
                 row["darf_estimated"] = max(row["tax_due"] - row["effective_irrf"], ZERO)
 
+            _allocate_effective_irrf(row)
             regime_rows.append(_format_regime_row(row))
 
-        months.append({"month": month, "regimes": regime_rows})
+        if regime_rows:
+            months.append({"year_month": month, "month": int(month[-2:]), "regimes": regime_rows})
 
     return {"portfolio_id": portfolio_id, "year": year, "months": months}

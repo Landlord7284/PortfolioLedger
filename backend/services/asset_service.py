@@ -13,6 +13,7 @@ import sqlite3
 from typing import Optional
 
 from backend.domain.enums import AssetClass, Currency, Market, default_market_for_class, currency_for_market
+from backend.services.fiscal_regime_service import require_supported_capital_gain_regime
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -255,6 +256,7 @@ def create_asset(
     allow_probable: bool = False,
 ) -> dict:
     ac = AssetClass(asset_class)
+    require_supported_capital_gain_regime(fiscal_regime_override)
     if currency:
         Currency(currency)
     resolved_market = _resolve_market(ac.value, market, ticker, source)
@@ -415,6 +417,7 @@ def update_asset_metadata(
     current = get_asset(conn, asset_id)
     if not current:
         return None
+    require_supported_capital_gain_regime(fiscal_regime_override)
 
     next_class = AssetClass(asset_class).value if asset_class is not None else current["asset_class"]
     next_market = _resolve_market(next_class, market if market is not None else current["market"], ticker or current.get("current_ticker"), "manual")
