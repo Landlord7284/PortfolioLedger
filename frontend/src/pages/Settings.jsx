@@ -22,6 +22,7 @@ const EMPTY_PARAMETER_FORM = {
   withholding_rate_percent: '',
   exemption_limit: '',
   darf_code: '',
+  minimum_darf_amount: '10,00',
   loss_bucket: '',
   active: true,
   monthly_darf_enabled: true,
@@ -81,6 +82,7 @@ function parameterToForm(parameter) {
     withholding_rate_percent: decimalToPercentInput(parameter.withholding_rate),
     exemption_limit: parameter.exemption_limit || '',
     darf_code: parameter.darf_code || '',
+    minimum_darf_amount: parameter.minimum_darf_amount || '10.00',
     loss_bucket: parameter.loss_bucket || '',
     active: Boolean(parameter.active),
     monthly_darf_enabled: Boolean(parameter.monthly_darf_enabled),
@@ -219,6 +221,7 @@ export default function Settings() {
     withholding_rate: percentInputToBackend(parameterForm.withholding_rate_percent),
     exemption_limit: decimalInputToBackend(parameterForm.exemption_limit),
     darf_code: parameterForm.darf_code.trim() || null,
+    minimum_darf_amount: decimalInputToBackend(parameterForm.minimum_darf_amount) || '0',
     loss_bucket: parameterForm.loss_bucket.trim() || null,
     active: parameterForm.active,
     monthly_darf_enabled: parameterForm.monthly_darf_enabled,
@@ -393,6 +396,7 @@ export default function Settings() {
                     <TableHead className="text-right">IRRF</TableHead>
                     <TableHead className="text-right">Limite isenção</TableHead>
                     <TableHead>DARF</TableHead>
+                    <TableHead className="text-right">DARF mínima</TableHead>
                     <TableHead>Regra de compensação</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
@@ -401,13 +405,13 @@ export default function Settings() {
                 <TableBody>
                   {loadingParameters ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="py-10 text-center text-muted-foreground">
+                      <TableCell colSpan={11} className="py-10 text-center text-muted-foreground">
                         Carregando parâmetros fiscais...
                       </TableCell>
                     </TableRow>
                   ) : parameters.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="py-10 text-center text-muted-foreground">
+                      <TableCell colSpan={11} className="py-10 text-center text-muted-foreground">
                         Nenhum parâmetro fiscal cadastrado.
                       </TableCell>
                     </TableRow>
@@ -425,6 +429,7 @@ export default function Settings() {
                             {parameter.exemption_limit ? `R$ ${formatMoney(parameter.exemption_limit)}` : '-'}
                           </TableCell>
                           <TableCell className="font-mono">{parameter.darf_code || '-'}</TableCell>
+                          <TableCell className="text-right font-mono">R$ {formatMoney(parameter.minimum_darf_amount)}</TableCell>
                           <TableCell>{parameter.loss_bucket || '-'}</TableCell>
                           <TableCell>
                             <Badge variant={status.variant}>{status.label}</Badge>
@@ -523,6 +528,15 @@ export default function Settings() {
                   value={parameterForm.darf_code}
                   onChange={(e) => updateParameterForm('darf_code', e.target.value)}
                   placeholder="6015"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5 text-sm font-medium">
+                DARF mínima
+                <Input
+                  value={parameterForm.minimum_darf_amount}
+                  onChange={(e) => updateParameterForm('minimum_darf_amount', e.target.value)}
+                  placeholder="10,00"
+                  inputMode="decimal"
                 />
               </label>
             </div>

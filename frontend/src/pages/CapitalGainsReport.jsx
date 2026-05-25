@@ -65,7 +65,14 @@ const TABLE_COLUMNS = {
     ['tax_due', 'Imposto'],
     ['theoretical_irrf', 'IRRF teórico'],
     ['effective_irrf', 'IRRF efetivo'],
+    ['initial_irrf_carryforward', 'IRRF acum. inicial'],
+    ['used_irrf', 'IRRF usado'],
+    ['final_irrf_carryforward', 'IRRF acum. final'],
+    ['minimum_darf_amount', 'DARF mínima'],
+    ['initial_darf_carryforward', 'DARF acum. inicial'],
+    ['darf_before_minimum', 'DARF antes mínimo'],
     ['darf_estimated', 'DARF estimado'],
+    ['final_darf_carryforward', 'DARF acum. final'],
     ['final_loss_carryforward', 'Prejuízo final'],
   ],
   B3_FII_FIAGRO_20: [
@@ -81,7 +88,14 @@ const TABLE_COLUMNS = {
     ['tax_due', 'Imposto'],
     ['theoretical_irrf', 'IRRF teórico'],
     ['effective_irrf', 'IRRF efetivo'],
+    ['initial_irrf_carryforward', 'IRRF acum. inicial'],
+    ['used_irrf', 'IRRF usado'],
+    ['final_irrf_carryforward', 'IRRF acum. final'],
+    ['minimum_darf_amount', 'DARF mínima'],
+    ['initial_darf_carryforward', 'DARF acum. inicial'],
+    ['darf_before_minimum', 'DARF antes mínimo'],
     ['darf_estimated', 'DARF estimado'],
+    ['final_darf_carryforward', 'DARF acum. final'],
     ['final_loss_carryforward', 'Prejuízo final'],
   ],
   FI_INFRA_EXEMPT: [
@@ -216,10 +230,10 @@ function SummaryCard({ title, value, hideValues }) {
   );
 }
 
-function AssetRows({ assets, hideValues }) {
+function AssetRows({ assets, hideValues, colSpan }) {
   return (
     <TableRow className="bg-muted/25 hover:bg-muted/25">
-      <TableCell colSpan={20} className="p-0">
+      <TableCell colSpan={colSpan} className="p-0">
         <div className="overflow-x-auto p-3">
           <Table>
             <TableHeader>
@@ -267,6 +281,7 @@ function RegimeTable({
   onEditIrrf,
 }) {
   const columns = TABLE_COLUMNS[regime] || [];
+  const expandedColSpan = columns.length + 2 + (IRRF_REGIMES.has(regime) ? 1 : 0);
 
   return (
     <Card className="overflow-hidden">
@@ -339,7 +354,7 @@ function RegimeTable({
                       )}
                     </TableRow>
                     {isExpanded && (
-                      <AssetRows assets={row.assets || []} hideValues={hideValues} />
+                      <AssetRows assets={row.assets || []} hideValues={hideValues} colSpan={expandedColSpan} />
                     )}
                   </Fragment>
                 );

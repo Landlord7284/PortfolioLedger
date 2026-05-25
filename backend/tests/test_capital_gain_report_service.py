@@ -83,7 +83,8 @@ def test_action_profit_under_monthly_limit_is_exempt(tmp_path):
     assert row["assets"][0]["fiscal_regime"] == "B3_COMMON_15"
     assert row["assets"][0]["realized_result"] == "1000.00"
     assert row["assets"][0]["theoretical_irrf"] == "0.55"
-    assert row["assets"][0]["effective_irrf"] == "0.55"
+    assert row["effective_irrf"] == "0.00"
+    assert row["assets"][0]["effective_irrf"] == "0.00"
 
 
 def test_action_loss_under_monthly_limit_does_not_offset_etf_same_month(tmp_path):
@@ -104,7 +105,7 @@ def test_action_loss_under_monthly_limit_does_not_offset_etf_same_month(tmp_path
     assert row["realized_result"] == "0.00"
     assert row["taxable_result_before_compensation"] == "1000.00"
     assert row["taxable_base"] == "1000.00"
-    assert row["darf_estimated"] == "149.00"
+    assert row["darf_estimated"] == "150.00"
     assert row["final_loss_carryforward"] == "0.00"
 
 
@@ -131,7 +132,8 @@ def test_action_above_limit_and_etf_use_common_bucket_chronologically(tmp_path):
     assert january["tax_rate"] == "0.15"
     assert january["tax_due"] == "3150.00"
     assert january["theoretical_irrf"] == "1.55"
-    assert january["darf_estimated"] == "3148.45"
+    assert january["effective_irrf"] == "0.00"
+    assert january["darf_estimated"] == "3150.00"
     assert january["taxable_base"] == "21000.00"
     assert february["final_loss_carryforward"] == "1000.00"
     assert march["initial_loss_carryforward"] == "1000.00"
@@ -157,7 +159,7 @@ def test_etf_and_bdr_are_common_taxable_without_stock_exemption(tmp_path):
     assert row["gross_sale"] == "17000.00"
     assert row["exempt_gain"] == "0.00"
     assert row["taxable_base"] == "2000.00"
-    assert row["darf_estimated"] == "299.15"
+    assert row["darf_estimated"] == "300.00"
     assert {asset["asset_class"]: asset["fiscal_regime"] for asset in row["assets"]} == {
         AssetClass.BDR.value: "B3_COMMON_15",
         AssetClass.ETF.value: "B3_COMMON_15",
@@ -210,7 +212,7 @@ def test_fii_fi_infra_crypto_and_irrf_override_are_separate(tmp_path):
 
     assert fii_row["taxable_base"] == "2000.00"
     assert fii_row["tax_rate"] == "0.2"
-    assert fii_row["darf_estimated"] == "399.40"
+    assert fii_row["darf_estimated"] == "400.00"
     assert common_row["final_loss_carryforward"] == "1000.00"
     assert fii_row["initial_loss_carryforward"] == "0.00"
     assert fii_row["used_loss"] == "0.00"
@@ -312,7 +314,7 @@ def test_tax_parameters_are_selected_by_effective_period(tmp_path):
     row = _regime(report, "2025-07", "B3_COMMON_15")
     assert row["tax_rate"] == "0.1"
     assert row["theoretical_irrf"] == "11.00"
-    assert row["darf_estimated"] == "89.00"
+    assert row["darf_estimated"] == "100.00"
 
 
 def test_irrf_override_api_lifecycle_and_report_fallback(tmp_path, monkeypatch):
@@ -424,7 +426,117 @@ def test_irrf_override_api_lifecycle_and_report_fallback(tmp_path, monkeypatch):
     fallback_response = client.get(f"/api/reports/capital-gains?portfolio_id={portfolio['id']}&year=2025")
     row = _regime(fallback_response.json(), "2025-08", "B3_COMMON_15")
     assert row["irrf_override"] is None
-    assert row["effective_irrf"] == "0.55"
+    assert row["effective_irrf"] == "0.00"
+
+
+def test_loss_carryforward_crosses_year_by_bucket(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        asset = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2024-11-01", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2024-12-20", "100", "9000", gross_value="9000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-01-20", "100", "11500", gross_value="11500")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    row = _regime(report, "2025-01", "B3_COMMON_15")
+    assert [month["year_month"] for month in report["months"]] == ["2025-01"]
+    assert row["initial_loss_carryforward"] == "1000.00"
+    assert row["used_loss"] == "1000.00"
+    assert row["taxable_base"] == "500.00"
+    assert row["final_loss_carryforward"] == "0.00"
+
+
+def test_irrf_credit_carries_within_year_and_resets_next_year(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        asset = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        for date, sale in [
+            ("2025-01-20", "11000"),
+            ("2025-02-20", "11000"),
+            ("2025-12-20", "11000"),
+            ("2026-01-20", "11000"),
+        ]:
+            event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, date[:8] + "01", "100", "10000")
+            event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, date, "100", sale, gross_value=sale)
+        tax_service.upsert_irrf_override(
+            conn,
+            portfolio_id=portfolio["id"],
+            year_month="2025-01",
+            regime="B3_COMMON_15",
+            effective_irrf="200",
+        )
+        tax_service.upsert_irrf_override(
+            conn,
+            portfolio_id=portfolio["id"],
+            year_month="2025-12",
+            regime="B3_COMMON_15",
+            effective_irrf="200",
+        )
+
+        report_2025 = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+        report_2026 = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2026)
+    finally:
+        _close(ctx)
+
+    january = _regime(report_2025, "2025-01", "B3_COMMON_15")
+    february = _regime(report_2025, "2025-02", "B3_COMMON_15")
+    december = _regime(report_2025, "2025-12", "B3_COMMON_15")
+    next_january = _regime(report_2026, "2026-01", "B3_COMMON_15")
+
+    assert january["tax_due"] == "150.00"
+    assert january["used_irrf"] == "150.00"
+    assert january["final_irrf_carryforward"] == "50.00"
+    assert january["darf_estimated"] == "0.00"
+    assert february["initial_irrf_carryforward"] == "50.00"
+    assert february["used_irrf"] == "50.00"
+    assert february["darf_estimated"] == "100.00"
+    assert december["final_irrf_carryforward"] == "50.00"
+    assert next_january["initial_irrf_carryforward"] == "0.00"
+    assert next_january["used_irrf"] == "0.00"
+    assert next_january["darf_estimated"] == "150.00"
+
+
+def test_minimum_darf_defers_until_threshold_and_crosses_year(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.001', withholding_rate = '0', exemption_limit = '0'
+            WHERE regime = 'B3_COMMON_15'
+            """
+        )
+        asset = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        for date in ["2025-01-20", "2025-02-20", "2025-12-20", "2026-01-20"]:
+            event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, date[:8] + "01", "100", "10000")
+            event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, date, "100", "15000", gross_value="15000")
+
+        report_2025 = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+        report_2026 = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2026)
+    finally:
+        _close(ctx)
+
+    january = _regime(report_2025, "2025-01", "B3_COMMON_15")
+    february = _regime(report_2025, "2025-02", "B3_COMMON_15")
+    december = _regime(report_2025, "2025-12", "B3_COMMON_15")
+    next_january = _regime(report_2026, "2026-01", "B3_COMMON_15")
+
+    assert january["tax_due"] == "5.00"
+    assert january["minimum_darf_amount"] == "10.00"
+    assert january["darf_before_minimum"] == "5.00"
+    assert january["darf_estimated"] == "0.00"
+    assert january["final_darf_carryforward"] == "5.00"
+    assert february["initial_darf_carryforward"] == "5.00"
+    assert february["darf_before_minimum"] == "10.00"
+    assert february["darf_estimated"] == "10.00"
+    assert february["final_darf_carryforward"] == "0.00"
+    assert december["final_darf_carryforward"] == "5.00"
+    assert next_january["initial_darf_carryforward"] == "5.00"
+    assert next_january["darf_estimated"] == "10.00"
 
 
 def test_fiscal_tax_parameter_api_lifecycle_and_overlap_validation(tmp_path, monkeypatch):
@@ -446,6 +558,7 @@ def test_fiscal_tax_parameter_api_lifecycle_and_overlap_validation(tmp_path, mon
     common_default = next(item for item in parameters if item["regime"] == "B3_COMMON_15")
     assert common_default["valid_from"] == "1900-01-01"
     assert common_default["active"] is True
+    assert common_default["minimum_darf_amount"] == "10.00"
 
     close_default_response = client.patch(
         f"/api/tax/parameters/{common_default['id']}",
@@ -463,6 +576,7 @@ def test_fiscal_tax_parameter_api_lifecycle_and_overlap_validation(tmp_path, mon
             "withholding_rate": "0.001",
             "exemption_limit": "0",
             "darf_code": "6015",
+            "minimum_darf_amount": "20.00",
             "loss_bucket": "B3_COMMON",
             "active": True,
             "monthly_darf_enabled": True,
@@ -471,7 +585,15 @@ def test_fiscal_tax_parameter_api_lifecycle_and_overlap_validation(tmp_path, mon
     assert create_response.status_code == 200
     created = create_response.json()
     assert created["tax_rate"] == "0.10"
+    assert created["minimum_darf_amount"] == "20.00"
     assert created["active"] is True
+
+    minimum_update_response = client.patch(
+        f"/api/tax/parameters/{created['id']}",
+        json={"minimum_darf_amount": "5.00"},
+    )
+    assert minimum_update_response.status_code == 200
+    assert minimum_update_response.json()["minimum_darf_amount"] == "5.00"
 
     overlap_response = client.post(
         "/api/tax/parameters",
@@ -500,6 +622,20 @@ def test_fiscal_tax_parameter_api_lifecycle_and_overlap_validation(tmp_path, mon
     )
     assert inactive_overlap_response.status_code == 200
     assert inactive_overlap_response.json()["active"] is False
+
+    negative_minimum_response = client.post(
+        "/api/tax/parameters",
+        json={
+            "regime": "B3_COMMON_15",
+            "valid_from": "2026-01-01",
+            "tax_rate": "0.12",
+            "withholding_rate": "0",
+            "minimum_darf_amount": "-1",
+            "active": False,
+        },
+    )
+    assert negative_minimum_response.status_code == 400
+    assert "DARF minima" in negative_minimum_response.json()["detail"]
 
     deactivate_response = client.patch(
         f"/api/tax/parameters/{created['id']}",

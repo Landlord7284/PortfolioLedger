@@ -467,10 +467,13 @@ def _validate_tax_parameter_payload(values: dict[str, Any]) -> dict[str, Any]:
         "withholding_rate": _decimal_text(values.get("withholding_rate", "0"), "IRRF"),
         "exemption_limit": _nullable_decimal_text(values.get("exemption_limit"), "Limite de isencao"),
         "darf_code": _nullable_text(values.get("darf_code")),
+        "minimum_darf_amount": _decimal_text(values.get("minimum_darf_amount", "10.00"), "DARF minima"),
         "loss_bucket": _nullable_text(values.get("loss_bucket")),
         "active": bool(values.get("active", True)),
         "monthly_darf_enabled": bool(values.get("monthly_darf_enabled", True)),
     }
+    if _d(normalized["minimum_darf_amount"]) < ZERO:
+        raise ValueError("DARF minima nao pode ser negativa.")
     return normalized
 
 
@@ -527,9 +530,9 @@ def create_tax_parameter(conn: sqlite3.Connection, values: dict[str, Any]) -> di
         """
         INSERT INTO fiscal_tax_parameters (
             regime, valid_from, valid_until, tax_rate, withholding_rate,
-            exemption_limit, darf_code, loss_bucket, active, monthly_darf_enabled
+            exemption_limit, darf_code, minimum_darf_amount, loss_bucket, active, monthly_darf_enabled
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             normalized["regime"],
@@ -539,6 +542,7 @@ def create_tax_parameter(conn: sqlite3.Connection, values: dict[str, Any]) -> di
             normalized["withholding_rate"],
             normalized["exemption_limit"],
             normalized["darf_code"],
+            normalized["minimum_darf_amount"],
             normalized["loss_bucket"],
             int(normalized["active"]),
             int(normalized["monthly_darf_enabled"]),
@@ -571,6 +575,7 @@ def update_tax_parameter(conn: sqlite3.Connection, parameter_id: int, updates: d
             withholding_rate = ?,
             exemption_limit = ?,
             darf_code = ?,
+            minimum_darf_amount = ?,
             loss_bucket = ?,
             active = ?,
             monthly_darf_enabled = ?,
@@ -585,6 +590,7 @@ def update_tax_parameter(conn: sqlite3.Connection, parameter_id: int, updates: d
             normalized["withholding_rate"],
             normalized["exemption_limit"],
             normalized["darf_code"],
+            normalized["minimum_darf_amount"],
             normalized["loss_bucket"],
             int(normalized["active"]),
             int(normalized["monthly_darf_enabled"]),

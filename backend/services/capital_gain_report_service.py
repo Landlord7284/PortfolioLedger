@@ -76,6 +76,10 @@ def _money(value: Decimal) -> str:
     return str(value.quantize(CENTS, rounding=ROUND_HALF_UP))
 
 
+def _round_money(value: Decimal) -> Decimal:
+    return value.quantize(CENTS, rounding=ROUND_HALF_UP)
+
+
 def _rate(value: Decimal) -> str:
     return str(value.normalize())
 
@@ -169,7 +173,7 @@ def _fetch_sales(conn: sqlite3.Connection, portfolio_id: int, year: int) -> list
             realized = process_event(event, state, skip_validation=True)
             if event.is_cancelled or event.is_storno:
                 continue
-            if event_type != EventType.VENDA or row["event_date"][:4] != str(year):
+            if event_type != EventType.VENDA:
                 continue
             regime = _resolve_regime(row)
             if not regime:
@@ -231,9 +235,9 @@ def _overrides(conn: sqlite3.Connection, portfolio_id: int, year: int) -> dict[t
         SELECT *
         FROM fiscal_irrf_overrides
         WHERE portfolio_id = ?
-          AND year_month BETWEEN ? AND ?
+          AND year_month <= ?
         """,
-        (portfolio_id, f"{year}-01", f"{year}-12"),
+        (portfolio_id, f"{year}-12"),
     ).fetchall()
     return {(row["year_month"], row["regime"]): dict(row) for row in rows}
 
@@ -257,7 +261,14 @@ def _empty_regime_row(regime: str, bucket: str | None, param: dict) -> dict:
         "theoretical_irrf": ZERO,
         "irrf_override": None,
         "effective_irrf": ZERO,
+        "minimum_darf_amount": _d(param["minimum_darf_amount"]),
+        "initial_darf_carryforward": ZERO,
+        "darf_before_minimum": ZERO,
         "darf_estimated": ZERO,
+        "final_darf_carryforward": ZERO,
+        "initial_irrf_carryforward": ZERO,
+        "used_irrf": ZERO,
+        "final_irrf_carryforward": ZERO,
         "final_loss_carryforward": ZERO,
         "assets": {},
     }
@@ -322,7 +333,14 @@ def _format_regime_row(row: dict) -> dict:
         "theoretical_irrf": _money(row["theoretical_irrf"]),
         "irrf_override": _money(row["irrf_override"]) if row["irrf_override"] is not None else None,
         "effective_irrf": _money(row["effective_irrf"]),
+        "minimum_darf_amount": _money(row["minimum_darf_amount"]),
+        "initial_darf_carryforward": _money(row["initial_darf_carryforward"]),
+        "darf_before_minimum": _money(row["darf_before_minimum"]),
         "darf_estimated": _money(row["darf_estimated"]),
+        "final_darf_carryforward": _money(row["final_darf_carryforward"]),
+        "initial_irrf_carryforward": _money(row["initial_irrf_carryforward"]),
+        "used_irrf": _money(row["used_irrf"]),
+        "final_irrf_carryforward": _money(row["final_irrf_carryforward"]),
         "final_loss_carryforward": _money(row["final_loss_carryforward"]),
         "assets": _asset_rows(row["assets"]),
     }
@@ -351,11 +369,19 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
 
     overrides = _overrides(conn, portfolio_id, year)
     loss_carry: dict[str, Decimal] = defaultdict(Decimal)
+    darf_carry: dict[str, Decimal] = defaultdict(Decimal)
+    irrf_carry: dict[str, Decimal] = defaultdict(Decimal)
     months = []
+    current_irrf_year: str | None = None
 
     year_months = sorted({month for month, _ in sales_by_month_regime} | {month for month, _ in overrides})
 
     for month in year_months:
+        month_year = month[:4]
+        if current_irrf_year != month_year:
+            irrf_carry = defaultdict(Decimal)
+            current_irrf_year = month_year
+
         regime_rows = []
         month_regimes = sorted(
             {
@@ -438,20 +464,36 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
                 row["final_loss_carryforward"] = ZERO
 
             if param["monthly_darf_enabled"] and row["taxable_base"] > ZERO:
-                row["tax_due"] = row["taxable_base"] * row["tax_rate"]
+                row["tax_due"] = _round_money(row["taxable_base"] * row["tax_rate"])
 
             override = overrides.get((month, regime))
             if override:
                 row["irrf_override"] = _d(override["effective_irrf"])
                 row["effective_irrf"] = row["irrf_override"]
             else:
-                row["effective_irrf"] = row["theoretical_irrf"]
+                row["effective_irrf"] = ZERO
 
             if param["monthly_darf_enabled"]:
-                row["darf_estimated"] = max(row["tax_due"] - row["effective_irrf"], ZERO)
+                row["initial_darf_carryforward"] = darf_carry[regime]
+                row["initial_irrf_carryforward"] = irrf_carry[regime]
+                available_irrf = row["initial_irrf_carryforward"] + row["effective_irrf"]
+                gross_darf = row["initial_darf_carryforward"] + row["tax_due"]
+                row["used_irrf"] = min(available_irrf, gross_darf)
+                row["final_irrf_carryforward"] = available_irrf - row["used_irrf"]
+                row["darf_before_minimum"] = gross_darf - row["used_irrf"]
+                minimum_darf = row["minimum_darf_amount"]
+                if row["darf_before_minimum"] > ZERO and (minimum_darf <= ZERO or row["darf_before_minimum"] >= minimum_darf):
+                    row["darf_estimated"] = row["darf_before_minimum"]
+                    row["final_darf_carryforward"] = ZERO
+                else:
+                    row["darf_estimated"] = ZERO
+                    row["final_darf_carryforward"] = row["darf_before_minimum"]
+                darf_carry[regime] = row["final_darf_carryforward"]
+                irrf_carry[regime] = row["final_irrf_carryforward"]
 
             _allocate_effective_irrf(row)
-            regime_rows.append(_format_regime_row(row))
+            if month_year == str(year):
+                regime_rows.append(_format_regime_row(row))
 
         if regime_rows:
             months.append({"year_month": month, "month": int(month[-2:]), "regimes": regime_rows})

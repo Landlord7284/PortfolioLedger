@@ -331,7 +331,14 @@ class CapitalGainRegimeRow(BaseModel):
     theoretical_irrf: str
     irrf_override: Optional[str] = None
     effective_irrf: str
+    minimum_darf_amount: str
+    initial_darf_carryforward: str
+    darf_before_minimum: str
     darf_estimated: str
+    final_darf_carryforward: str
+    initial_irrf_carryforward: str
+    used_irrf: str
+    final_irrf_carryforward: str
     final_loss_carryforward: str
     assets: list[CapitalGainAssetRow]
 
@@ -459,6 +466,7 @@ class FiscalTaxParameterCreate(BaseModel):
     withholding_rate: str = "0"
     exemption_limit: Optional[str] = None
     darf_code: Optional[str] = None
+    minimum_darf_amount: str = "10.00"
     loss_bucket: Optional[str] = None
     active: bool = True
     monthly_darf_enabled: bool = True
@@ -477,6 +485,7 @@ class FiscalTaxParameterUpdate(BaseModel):
     withholding_rate: Optional[str] = None
     exemption_limit: Optional[str] = None
     darf_code: Optional[str] = None
+    minimum_darf_amount: Optional[str] = None
     loss_bucket: Optional[str] = None
     active: Optional[bool] = None
     monthly_darf_enabled: Optional[bool] = None
@@ -496,6 +505,7 @@ class FiscalTaxParameterResponse(BaseModel):
     withholding_rate: str
     exemption_limit: Optional[str] = None
     darf_code: Optional[str] = None
+    minimum_darf_amount: str
     loss_bucket: Optional[str] = None
     active: bool
     monthly_darf_enabled: bool

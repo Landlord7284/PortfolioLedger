@@ -192,6 +192,7 @@ CREATE TABLE IF NOT EXISTS fiscal_tax_parameters (
     withholding_rate      TEXT    NOT NULL DEFAULT '0',
     exemption_limit       TEXT,
     darf_code             TEXT,
+    minimum_darf_amount   TEXT    NOT NULL DEFAULT '10.00',
     loss_bucket           TEXT,
     active                INTEGER NOT NULL DEFAULT 1,
     monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1,
@@ -364,6 +365,7 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
             withholding_rate      TEXT    NOT NULL DEFAULT '0',
             exemption_limit       TEXT,
             darf_code             TEXT,
+            minimum_darf_amount   TEXT    NOT NULL DEFAULT '10.00',
             loss_bucket           TEXT,
             active                INTEGER NOT NULL DEFAULT 1,
             monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1,
@@ -390,11 +392,17 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
             ON fiscal_irrf_overrides(portfolio_id, year_month, regime);
         """
     )
+    _add_column_if_missing(
+        conn,
+        "fiscal_tax_parameters",
+        "minimum_darf_amount",
+        "minimum_darf_amount TEXT NOT NULL DEFAULT '10.00'",
+    )
     defaults = [
-        ("B3_COMMON_15", "1900-01-01", None, "0.15", "0.00005", "20000", "6015", "B3_COMMON", 1),
-        ("B3_FII_FIAGRO_20", "1900-01-01", None, "0.20", "0.00005", None, "6015", "B3_FII_FIAGRO", 1),
-        ("FI_INFRA_EXEMPT", "1900-01-01", None, "0", "0", None, None, None, 0),
-        ("CRYPTO_GCAP", "1900-01-01", None, "0", "0", None, None, "CRYPTO_GCAP_INFO", 0),
+        ("B3_COMMON_15", "1900-01-01", None, "0.15", "0.00005", "20000", "6015", "10.00", "B3_COMMON", 1),
+        ("B3_FII_FIAGRO_20", "1900-01-01", None, "0.20", "0.00005", None, "6015", "10.00", "B3_FII_FIAGRO", 1),
+        ("FI_INFRA_EXEMPT", "1900-01-01", None, "0", "0", None, None, "10.00", None, 0),
+        ("CRYPTO_GCAP", "1900-01-01", None, "0", "0", None, None, "10.00", "CRYPTO_GCAP_INFO", 0),
     ]
     for row in defaults:
         exists = conn.execute(
@@ -409,9 +417,9 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
                 """
                 INSERT INTO fiscal_tax_parameters (
                     regime, valid_from, valid_until, tax_rate, withholding_rate,
-                    exemption_limit, darf_code, loss_bucket, monthly_darf_enabled
+                    exemption_limit, darf_code, minimum_darf_amount, loss_bucket, monthly_darf_enabled
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row,
             )
