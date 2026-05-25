@@ -430,8 +430,8 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
                 aggregate.add(item)
                 aggregate.theoretical_irrf += item_theoretical_irrf
 
-                if action_is_exempt and _is_action_br(item):
-                    if action_result > ZERO and item.net_result > ZERO:
+                if action_is_exempt and _is_action_br(item) and action_result > ZERO:
+                    if item.net_result > ZERO:
                         aggregate.exempt_gain += item.net_result
                     continue
 

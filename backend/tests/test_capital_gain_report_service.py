@@ -87,7 +87,27 @@ def test_action_profit_under_monthly_limit_is_exempt(tmp_path):
     assert row["assets"][0]["effective_irrf"] == "0.00"
 
 
-def test_action_loss_under_monthly_limit_does_not_offset_etf_same_month(tmp_path):
+def test_action_loss_under_monthly_limit_increases_loss_carryforward(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "LOSS3", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-01-20", "100", "9000", gross_value="9000")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    row = _regime(report, "2025-01", "B3_COMMON_15")
+    assert row["gross_sale"] == "9000.00"
+    assert row["realized_result"] == "-1000.00"
+    assert row["exempt_gain"] == "0.00"
+    assert row["taxable_result_before_compensation"] == "-1000.00"
+    assert row["taxable_base"] == "0.00"
+    assert row["final_loss_carryforward"] == "1000.00"
+
+
+def test_action_loss_under_monthly_limit_offsets_etf_same_month(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:
         stock = asset_service.create_asset(conn, AssetClass.ACAO.value, "LOSS3", market="BR")
@@ -103,9 +123,9 @@ def test_action_loss_under_monthly_limit_does_not_offset_etf_same_month(tmp_path
 
     row = _regime(report, "2025-01", "B3_COMMON_15")
     assert row["realized_result"] == "0.00"
-    assert row["taxable_result_before_compensation"] == "1000.00"
-    assert row["taxable_base"] == "1000.00"
-    assert row["darf_estimated"] == "150.00"
+    assert row["taxable_result_before_compensation"] == "0.00"
+    assert row["taxable_base"] == "0.00"
+    assert row["darf_estimated"] == "0.00"
     assert row["final_loss_carryforward"] == "0.00"
 
 
