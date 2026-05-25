@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { assets as assetsApi, events as eventsApi, positions as posApi } from '../api/client';
 import EventForm from '../components/EventForm';
+import SharedAssetMetadataCard from '../components/AssetMetadataCard';
 import { ArrowLeft, Edit2, Check, X, Plus, Trash2, AlertCircle, HelpCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -18,142 +19,6 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from 'sonner';
 import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput, formatMoney, formatQuantity } from '@/lib/formatters';
-
-// Editable Metadata Component
-function AssetMetadataCard({ asset, onSave }) {
-  const [editing, setEditing] = useState(false);
-  const [formData, setFormData] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState('');
-
-  useEffect(() => {
-    if (asset) {
-      setFormData({
-        name: asset.name || '',
-        cnpj: asset.cnpj || '',
-        isin: asset.isin || '',
-        sector: asset.sector || '',
-        subsector: asset.subsector || '',
-        segment: asset.segment || '',
-        maturity_date: asset.maturity_date || '',
-      });
-      setSaveError('');
-    }
-  }, [asset]);
-
-  if (!asset) return null;
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
-  };
-
-  const handleDateChange = (val) => {
-    setFormData({ ...formData, maturity_date: val });
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveError('');
-    try {
-      await onSave({ ...formData });
-      setEditing(false);
-      toast.success('Informações cadastrais atualizadas.');
-    } catch (err) {
-      setSaveError(err.message);
-      toast.error(err.message || 'Falha ao salvar informações cadastrais.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const fields = [];
-  const c = asset.asset_class;
-
-  let nameLabel = 'Nome da Empresa/Emissor';
-  if (['FII', 'FI-INFRA', 'ETF'].includes(c)) {
-    nameLabel = 'Nome do Fundo';
-  } else if (c === 'Tesouro Direto') {
-    nameLabel = 'Nome do Título';
-  }
-
-  fields.push({ name: 'name', label: nameLabel });
-
-  if (['Ação', 'BDR'].includes(c)) {
-    fields.push({ name: 'cnpj', label: 'CNPJ' });
-    fields.push({ name: 'sector', label: 'Setor' });
-    fields.push({ name: 'subsector', label: 'Subsetor' });
-    fields.push({ name: 'segment', label: 'Segmento' });
-  } else if (['Debênture', 'CRI', 'CRA', 'Tesouro Direto'].includes(c)) {
-    if (c !== 'Tesouro Direto') fields.push({ name: 'isin', label: 'Código ISIN' });
-    fields.push({ name: 'maturity_date', label: 'Vencimento', type: 'date' });
-  } else if (c === 'ETF') {
-    fields.push({ name: 'cnpj', label: 'CNPJ' });
-    fields.push({ name: 'isin', label: 'Código ISIN' });
-  } else if (['FII', 'FI-INFRA'].includes(c)) {
-    fields.push({ name: 'cnpj', label: 'CNPJ' });
-    fields.push({ name: 'segment', label: 'Segmento' });
-  } else if (['Stock', 'REIT'].includes(c)) {
-    fields.push({ name: 'isin', label: 'Código ISIN' });
-  }
-
-  const formatDisplayDate = (isoStr) => {
-    if (!isoStr) return '—';
-    const [y, m, d] = isoStr.split('-');
-    return `${d}/${m}/${y}`;
-  };
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between border-b">
-        <CardTitle className="text-base">Informações Cadastrais</CardTitle>
-        {!editing ? (
-          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-            <Edit2 className="w-4 h-4" /> Editar
-          </Button>
-        ) : (
-          <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setSaveError(''); }}>Cancelar</Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salvar'}
-            </Button>
-          </div>
-        )}
-      </CardHeader>
-      <CardContent className="pt-4">
-        {saveError && (
-          <Alert variant="destructive" className="mb-4">
-            <AlertDescription>{saveError}</AlertDescription>
-          </Alert>
-        )}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {fields.map(f => (
-            <div className="flex flex-col gap-1.5" key={f.name}>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{f.label}</Label>
-              {editing ? (
-                f.type === 'date' ? (
-                  <DatePicker value={formData[f.name]} onChange={handleDateChange} />
-                ) : (
-                  <Input
-                    className="h-9 text-sm"
-                    name={f.name}
-                    value={formData[f.name]}
-                    onChange={handleChange}
-                    placeholder={f.placeholder || ''}
-                  />
-                )
-              ) : (
-                <div className="text-sm font-medium py-1 h-9 flex items-center">
-                  {f.name === 'maturity_date' && asset[f.name] ? formatDisplayDate(asset[f.name]) : (asset[f.name] || '—')}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 // Correction Modal using Dialog
 function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
@@ -510,7 +375,7 @@ export default function AssetDetail() {
         </Alert>
       )}
 
-      <AssetMetadataCard
+      <SharedAssetMetadataCard
         asset={asset}
         onSave={(data) => assetsApi.updateMetadata(asset.id, data).then(setAsset)}
       />

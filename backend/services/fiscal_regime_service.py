@@ -22,11 +22,13 @@ SUPPORTED_CAPITAL_GAIN_REGIMES: Final = {
 
 
 def is_supported_capital_gain_regime(regime: str | None) -> bool:
+    if regime in (None, ""):
+        return True
     return regime in SUPPORTED_CAPITAL_GAIN_REGIMES
 
 
 def require_supported_capital_gain_regime(regime: str | None) -> str | None:
-    if regime is None:
+    if regime in (None, ""):
         return None
     if not is_supported_capital_gain_regime(regime):
         raise ValueError(f"Regime fiscal nao suportado nesta entrega: {regime}.")

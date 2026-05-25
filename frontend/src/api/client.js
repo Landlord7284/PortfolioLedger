@@ -124,6 +124,10 @@ export const reports = {
     const params = new URLSearchParams({ portfolio_id: portfolioId, year });
     return request(`/reports/income?${params.toString()}`);
   },
+  capitalGains: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, year });
+    return request(`/reports/capital-gains?${params.toString()}`);
+  },
   assetsAndRightsXlsx: ({ portfolioId, year }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, year });
     return requestBlob(`/reports/assets-and-rights.xlsx?${params.toString()}`);
@@ -167,6 +171,15 @@ export const tax = {
     const params = new URLSearchParams({ date });
     return request(`/tax/ptax?${params.toString()}`);
   },
+  irrfOverrides: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId });
+    if (year) params.set('year', year);
+    return request(`/tax/irrf-overrides?${params.toString()}`);
+  },
+  upsertIrrfOverride: (data) =>
+    request('/tax/irrf-overrides', { method: 'PUT', body: JSON.stringify(data) }),
+  deleteIrrfOverride: (id) =>
+    request(`/tax/irrf-overrides/${id}`, { method: 'DELETE' }),
 };
 
 // ── Import ──────────────────────────────────────────────────
