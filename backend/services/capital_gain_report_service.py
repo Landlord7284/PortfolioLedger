@@ -214,6 +214,7 @@ def _tax_parameter(conn: sqlite3.Connection, regime: str, event_date: str) -> di
         WHERE regime = ?
           AND valid_from <= ?
           AND (valid_until IS NULL OR valid_until >= ?)
+          AND active = 1
         ORDER BY valid_from DESC, id DESC
         LIMIT 1
         """,

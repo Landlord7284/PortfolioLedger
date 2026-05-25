@@ -5,6 +5,7 @@ Fiscal tax calculation service for USD assets.
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -402,6 +403,195 @@ def _validate_year_month(year_month: str) -> None:
     year, month = year_month.split("-")
     if not (year.isdigit() and month.isdigit() and 1 <= int(month) <= 12):
         raise ValueError("Mes deve estar no formato YYYY-MM.")
+
+
+def _validate_iso_date(value: str, field_name: str) -> str:
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f"{field_name} deve estar no formato YYYY-MM-DD.")
+    return value
+
+
+def _nullable_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _decimal_text(value: Any, field_name: str) -> str:
+    try:
+        parsed = _d(value)
+    except Exception:
+        raise ValueError(f"{field_name} deve ser numerico.")
+    if parsed < ZERO:
+        raise ValueError(f"{field_name} nao pode ser negativo.")
+    return str(parsed)
+
+
+def _nullable_decimal_text(value: Any, field_name: str) -> str | None:
+    if value in (None, ""):
+        return None
+    return _decimal_text(value, field_name)
+
+
+def _tax_parameter_row(conn: sqlite3.Connection, parameter_id: int) -> dict:
+    row = conn.execute(
+        "SELECT * FROM fiscal_tax_parameters WHERE id = ?",
+        (parameter_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError("Parametro fiscal nao encontrado.")
+    return dict(row)
+
+
+def _validate_tax_parameter_payload(values: dict[str, Any]) -> dict[str, Any]:
+    regime = _nullable_text(values.get("regime"))
+    if not regime:
+        raise ValueError("Regime fiscal e obrigatorio.")
+    require_supported_capital_gain_regime(regime)
+
+    valid_from = _validate_iso_date(values.get("valid_from") or "", "Vigencia inicial")
+    valid_until = _nullable_text(values.get("valid_until"))
+    if valid_until is not None:
+        valid_until = _validate_iso_date(valid_until, "Vigencia final")
+        if valid_until < valid_from:
+            raise ValueError("Vigencia final deve ser maior ou igual a vigencia inicial.")
+
+    normalized = {
+        "regime": regime,
+        "valid_from": valid_from,
+        "valid_until": valid_until,
+        "tax_rate": _decimal_text(values.get("tax_rate", "0"), "Aliquota"),
+        "withholding_rate": _decimal_text(values.get("withholding_rate", "0"), "IRRF"),
+        "exemption_limit": _nullable_decimal_text(values.get("exemption_limit"), "Limite de isencao"),
+        "darf_code": _nullable_text(values.get("darf_code")),
+        "loss_bucket": _nullable_text(values.get("loss_bucket")),
+        "active": bool(values.get("active", True)),
+        "monthly_darf_enabled": bool(values.get("monthly_darf_enabled", True)),
+    }
+    return normalized
+
+
+def _assert_no_active_overlap(
+    conn: sqlite3.Connection,
+    *,
+    regime: str,
+    valid_from: str,
+    valid_until: str | None,
+    exclude_id: int | None = None,
+) -> None:
+    params: list[Any] = [regime, valid_until or "9999-12-31", valid_from]
+    exclude_clause = ""
+    if exclude_id is not None:
+        exclude_clause = "AND id <> ?"
+        params.append(exclude_id)
+    row = conn.execute(
+        f"""
+        SELECT id
+        FROM fiscal_tax_parameters
+        WHERE regime = ?
+          AND active = 1
+          AND valid_from <= ?
+          AND COALESCE(valid_until, '9999-12-31') >= ?
+          {exclude_clause}
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    if row:
+        raise ValueError("Ja existe parametro fiscal ativo sobreposto para este regime.")
+
+
+def list_tax_parameters(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM fiscal_tax_parameters
+        ORDER BY regime, active DESC, valid_from DESC, id DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_tax_parameter(conn: sqlite3.Connection, values: dict[str, Any]) -> dict:
+    normalized = _validate_tax_parameter_payload(values)
+    if normalized["active"]:
+        _assert_no_active_overlap(conn, **{
+            "regime": normalized["regime"],
+            "valid_from": normalized["valid_from"],
+            "valid_until": normalized["valid_until"],
+        })
+    cur = conn.execute(
+        """
+        INSERT INTO fiscal_tax_parameters (
+            regime, valid_from, valid_until, tax_rate, withholding_rate,
+            exemption_limit, darf_code, loss_bucket, active, monthly_darf_enabled
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            normalized["regime"],
+            normalized["valid_from"],
+            normalized["valid_until"],
+            normalized["tax_rate"],
+            normalized["withholding_rate"],
+            normalized["exemption_limit"],
+            normalized["darf_code"],
+            normalized["loss_bucket"],
+            int(normalized["active"]),
+            int(normalized["monthly_darf_enabled"]),
+        ),
+    )
+    return _tax_parameter_row(conn, cur.lastrowid)
+
+
+def update_tax_parameter(conn: sqlite3.Connection, parameter_id: int, updates: dict[str, Any]) -> dict:
+    current = _tax_parameter_row(conn, parameter_id)
+    if not updates:
+        return current
+    merged = {**current, **updates}
+    normalized = _validate_tax_parameter_payload(merged)
+    if normalized["active"]:
+        _assert_no_active_overlap(
+            conn,
+            regime=normalized["regime"],
+            valid_from=normalized["valid_from"],
+            valid_until=normalized["valid_until"],
+            exclude_id=parameter_id,
+        )
+    conn.execute(
+        """
+        UPDATE fiscal_tax_parameters
+        SET regime = ?,
+            valid_from = ?,
+            valid_until = ?,
+            tax_rate = ?,
+            withholding_rate = ?,
+            exemption_limit = ?,
+            darf_code = ?,
+            loss_bucket = ?,
+            active = ?,
+            monthly_darf_enabled = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (
+            normalized["regime"],
+            normalized["valid_from"],
+            normalized["valid_until"],
+            normalized["tax_rate"],
+            normalized["withholding_rate"],
+            normalized["exemption_limit"],
+            normalized["darf_code"],
+            normalized["loss_bucket"],
+            int(normalized["active"]),
+            int(normalized["monthly_darf_enabled"]),
+            parameter_id,
+        ),
+    )
+    return _tax_parameter_row(conn, parameter_id)
 
 
 def list_irrf_overrides(

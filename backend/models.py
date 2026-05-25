@@ -451,6 +451,58 @@ class IrrfOverrideResponse(BaseModel):
     updated_at: str
 
 
+class FiscalTaxParameterCreate(BaseModel):
+    regime: str = Field(..., min_length=1, max_length=80)
+    valid_from: str
+    valid_until: Optional[str] = None
+    tax_rate: str = "0"
+    withholding_rate: str = "0"
+    exemption_limit: Optional[str] = None
+    darf_code: Optional[str] = None
+    loss_bucket: Optional[str] = None
+    active: bool = True
+    monthly_darf_enabled: bool = True
+
+    @field_validator("regime", "darf_code", "loss_bucket")
+    @classmethod
+    def strip_text(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if v else v
+
+
+class FiscalTaxParameterUpdate(BaseModel):
+    regime: Optional[str] = Field(None, min_length=1, max_length=80)
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    tax_rate: Optional[str] = None
+    withholding_rate: Optional[str] = None
+    exemption_limit: Optional[str] = None
+    darf_code: Optional[str] = None
+    loss_bucket: Optional[str] = None
+    active: Optional[bool] = None
+    monthly_darf_enabled: Optional[bool] = None
+
+    @field_validator("regime", "darf_code", "loss_bucket")
+    @classmethod
+    def strip_update_text(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if v else v
+
+
+class FiscalTaxParameterResponse(BaseModel):
+    id: int
+    regime: str
+    valid_from: str
+    valid_until: Optional[str] = None
+    tax_rate: str
+    withholding_rate: str
+    exemption_limit: Optional[str] = None
+    darf_code: Optional[str] = None
+    loss_bucket: Optional[str] = None
+    active: bool
+    monthly_darf_enabled: bool
+    created_at: str
+    updated_at: str
+
+
 # ── Import ───────────────────────────────────────────────────
 
 class ImportResult(BaseModel):

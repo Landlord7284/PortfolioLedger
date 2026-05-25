@@ -425,3 +425,85 @@ def test_irrf_override_api_lifecycle_and_report_fallback(tmp_path, monkeypatch):
     row = _regime(fallback_response.json(), "2025-08", "B3_COMMON_15")
     assert row["irrf_override"] is None
     assert row["effective_irrf"] == "0.55"
+
+
+def test_fiscal_tax_parameter_api_lifecycle_and_overlap_validation(tmp_path, monkeypatch):
+    db_path, ctx, _conn, _ = _setup(tmp_path)
+    _close(ctx)
+
+    monkeypatch.setattr("backend.routers.tax.get_db", lambda: get_db(db_path))
+    client = TestClient(app)
+
+    list_response = client.get("/api/tax/parameters")
+    assert list_response.status_code == 200
+    parameters = list_response.json()
+    assert {item["regime"] for item in parameters} >= {
+        "B3_COMMON_15",
+        "B3_FII_FIAGRO_20",
+        "FI_INFRA_EXEMPT",
+        "CRYPTO_GCAP",
+    }
+    common_default = next(item for item in parameters if item["regime"] == "B3_COMMON_15")
+    assert common_default["valid_from"] == "1900-01-01"
+    assert common_default["active"] is True
+
+    close_default_response = client.patch(
+        f"/api/tax/parameters/{common_default['id']}",
+        json={"valid_until": "2025-06-30"},
+    )
+    assert close_default_response.status_code == 200
+    assert close_default_response.json()["valid_until"] == "2025-06-30"
+
+    create_response = client.post(
+        "/api/tax/parameters",
+        json={
+            "regime": "B3_COMMON_15",
+            "valid_from": "2025-07-01",
+            "tax_rate": "0.10",
+            "withholding_rate": "0.001",
+            "exemption_limit": "0",
+            "darf_code": "6015",
+            "loss_bucket": "B3_COMMON",
+            "active": True,
+            "monthly_darf_enabled": True,
+        },
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["tax_rate"] == "0.10"
+    assert created["active"] is True
+
+    overlap_response = client.post(
+        "/api/tax/parameters",
+        json={
+            "regime": "B3_COMMON_15",
+            "valid_from": "2025-05-01",
+            "valid_until": "2025-07-15",
+            "tax_rate": "0.12",
+            "withholding_rate": "0",
+            "active": True,
+        },
+    )
+    assert overlap_response.status_code == 400
+    assert "sobreposto" in overlap_response.json()["detail"]
+
+    inactive_overlap_response = client.post(
+        "/api/tax/parameters",
+        json={
+            "regime": "B3_COMMON_15",
+            "valid_from": "2025-05-01",
+            "valid_until": "2025-07-15",
+            "tax_rate": "0.12",
+            "withholding_rate": "0",
+            "active": False,
+        },
+    )
+    assert inactive_overlap_response.status_code == 200
+    assert inactive_overlap_response.json()["active"] is False
+
+    deactivate_response = client.patch(
+        f"/api/tax/parameters/{created['id']}",
+        json={"active": False},
+    )
+    assert deactivate_response.status_code == 200
+    assert deactivate_response.json()["active"] is False

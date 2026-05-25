@@ -193,6 +193,7 @@ CREATE TABLE IF NOT EXISTS fiscal_tax_parameters (
     exemption_limit       TEXT,
     darf_code             TEXT,
     loss_bucket           TEXT,
+    active                INTEGER NOT NULL DEFAULT 1,
     monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1,
     created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at            TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -364,6 +365,7 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
             exemption_limit       TEXT,
             darf_code             TEXT,
             loss_bucket           TEXT,
+            active                INTEGER NOT NULL DEFAULT 1,
             monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1,
             created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
             updated_at            TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -413,6 +415,7 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
                 """,
                 row,
             )
+    _add_column_if_missing(conn, "fiscal_tax_parameters", "active", "active INTEGER NOT NULL DEFAULT 1")
 
 
 def _ensure_b3_schema(conn: sqlite3.Connection) -> None:

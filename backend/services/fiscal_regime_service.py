@@ -43,6 +43,7 @@ def has_tax_parameter(conn: sqlite3.Connection, regime: str, fact_date: str) -> 
         WHERE regime = ?
           AND valid_from <= ?
           AND (valid_until IS NULL OR valid_until >= ?)
+          AND active = 1
         LIMIT 1
         """,
         (regime, fact_date, fact_date),

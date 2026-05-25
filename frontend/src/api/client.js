@@ -171,6 +171,11 @@ export const tax = {
     const params = new URLSearchParams({ date });
     return request(`/tax/ptax?${params.toString()}`);
   },
+  parameters: () => request('/tax/parameters'),
+  createParameter: (data) =>
+    request('/tax/parameters', { method: 'POST', body: JSON.stringify(data) }),
+  updateParameter: (id, data) =>
+    request(`/tax/parameters/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   irrfOverrides: ({ portfolioId, year }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId });
     if (year) params.set('year', year);

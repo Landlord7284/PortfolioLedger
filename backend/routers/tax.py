@@ -12,6 +12,9 @@ from backend.models import (
     TaxEventResponse,
     TaxIncomeCreate,
     TaxSaleApuracaoResponse,
+    FiscalTaxParameterCreate,
+    FiscalTaxParameterResponse,
+    FiscalTaxParameterUpdate,
     IrrfOverrideResponse,
     IrrfOverrideUpsert,
 )
@@ -83,6 +86,36 @@ def annual(
 ):
     with get_db() as conn:
         return tax_service.annual_summary(conn, portfolio_id=portfolio_id, year=year)
+
+
+@router.get("/parameters", response_model=list[FiscalTaxParameterResponse])
+def list_tax_parameters():
+    with get_db() as conn:
+        return tax_service.list_tax_parameters(conn)
+
+
+@router.post("/parameters", response_model=FiscalTaxParameterResponse)
+def create_tax_parameter(body: FiscalTaxParameterCreate):
+    with get_db() as conn:
+        try:
+            return tax_service.create_tax_parameter(conn, body.model_dump())
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+
+@router.patch("/parameters/{parameter_id}", response_model=FiscalTaxParameterResponse)
+def update_tax_parameter(parameter_id: int, body: FiscalTaxParameterUpdate):
+    with get_db() as conn:
+        try:
+            return tax_service.update_tax_parameter(
+                conn,
+                parameter_id,
+                body.model_dump(exclude_unset=True),
+            )
+        except ValueError as e:
+            message = str(e)
+            status = 404 if "nao encontrado" in message else 400
+            raise HTTPException(status, message)
 
 
 @router.get("/irrf-overrides", response_model=list[IrrfOverrideResponse])
