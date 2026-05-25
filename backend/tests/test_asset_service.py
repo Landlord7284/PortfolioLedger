@@ -2,10 +2,12 @@ import json
 from io import BytesIO
 
 import pytest
+from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
 from backend.database import get_db, init_db
 from backend.domain.enums import AssetClass
+from backend.main import app
 from backend.services import asset_service
 from backend.services.import_service import import_to_ledger
 from backend.services.portfolio_service import create_portfolio
@@ -26,6 +28,86 @@ def test_delete_merged_target_clears_merge_reference(tmp_path):
         unmerged_source = asset_service.get_asset(conn, source["id"])
         assert unmerged_source["merged_into_asset_id"] is None
         assert unmerged_source["merged_at"] is None
+
+
+def test_asset_service_persists_fiscal_fields_on_create_update_and_response(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        asset = asset_service.create_asset(
+            conn,
+            AssetClass.FI_INFRA.value,
+            "INFRA11",
+            market="BR",
+            fiscal_regime_override="FI_INFRA_EXEMPT",
+            fiscal_tax_treatment="EXEMPT_ZERO",
+        )
+        assert asset["fiscal_regime_override"] == "FI_INFRA_EXEMPT"
+        assert asset["fiscal_tax_treatment"] == "EXEMPT_ZERO"
+
+        updated = asset_service.update_asset_metadata(
+            conn,
+            asset["id"],
+            fiscal_regime_override="B3_COMMON_15",
+            fiscal_tax_treatment="TAXABLE",
+        )
+
+        assert updated["fiscal_regime_override"] == "B3_COMMON_15"
+        assert updated["fiscal_tax_treatment"] == "TAXABLE"
+        assert asset_service.get_asset(conn, asset["id"])["fiscal_tax_treatment"] == "TAXABLE"
+
+
+def test_asset_api_contract_exposes_fiscal_fields_on_create_get_and_patch(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    monkeypatch.setattr("backend.routers.assets.get_db", lambda: get_db(db_path))
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/api/assets",
+        json={
+            "asset_class": AssetClass.FI_INFRA.value,
+            "ticker": "INFRA11",
+            "market": "BR",
+            "fiscal_regime_override": "FI_INFRA_EXEMPT",
+            "fiscal_tax_treatment": "EXEMPT_ZERO",
+        },
+    )
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["fiscal_regime_override"] == "FI_INFRA_EXEMPT"
+    assert created["fiscal_tax_treatment"] == "EXEMPT_ZERO"
+
+    patch_response = client.patch(
+        f"/api/assets/{created['id']}",
+        json={
+            "fiscal_regime_override": "B3_COMMON_15",
+            "fiscal_tax_treatment": "TAXABLE",
+        },
+    )
+    assert patch_response.status_code == 200
+    patched = patch_response.json()
+    assert patched["fiscal_regime_override"] == "B3_COMMON_15"
+    assert patched["fiscal_tax_treatment"] == "TAXABLE"
+
+    get_response = client.get(f"/api/assets/{created['id']}")
+    assert get_response.status_code == 200
+    fetched = get_response.json()
+    assert fetched["fiscal_regime_override"] == "B3_COMMON_15"
+    assert fetched["fiscal_tax_treatment"] == "TAXABLE"
+
+    unsupported_response = client.post(
+        "/api/assets",
+        json={
+            "asset_class": AssetClass.ACAO.value,
+            "ticker": "FOREIGN3",
+            "market": "BR",
+            "fiscal_regime_override": "FOREIGN_14754",
+        },
+    )
+    assert unsupported_response.status_code == 400
 
 
 def test_probable_match_review_stores_operation_payload(tmp_path):
