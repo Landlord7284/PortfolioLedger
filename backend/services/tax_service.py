@@ -390,3 +390,77 @@ def annual_summary(
             ),
         )
     ]
+
+
+def _validate_year_month(year_month: str) -> None:
+    if len(year_month) != 7 or year_month[4] != "-":
+        raise ValueError("Mes deve estar no formato YYYY-MM.")
+    year, month = year_month.split("-")
+    if not (year.isdigit() and month.isdigit() and 1 <= int(month) <= 12):
+        raise ValueError("Mes deve estar no formato YYYY-MM.")
+
+
+def list_irrf_overrides(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    year: Optional[int] = None,
+) -> list[dict]:
+    params: list[Any] = [portfolio_id]
+    where = "portfolio_id = ?"
+    if year is not None:
+        where += " AND year_month BETWEEN ? AND ?"
+        params.extend([f"{year}-01", f"{year}-12"])
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM fiscal_irrf_overrides
+        WHERE {where}
+        ORDER BY year_month, regime
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def upsert_irrf_override(
+    conn: sqlite3.Connection,
+    *,
+    portfolio_id: int,
+    year_month: str,
+    regime: str,
+    effective_irrf: str | Decimal,
+    notes: Optional[str] = None,
+) -> dict:
+    _validate_year_month(year_month)
+    if not conn.execute("SELECT 1 FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone():
+        raise ValueError(f"Carteira {portfolio_id} nao encontrada.")
+    value = _d(effective_irrf)
+    if value < ZERO:
+        raise ValueError("IRRF efetivo nao pode ser negativo.")
+    conn.execute(
+        """
+        INSERT INTO fiscal_irrf_overrides (
+            portfolio_id, year_month, regime, effective_irrf, notes
+        )
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(portfolio_id, year_month, regime) DO UPDATE SET
+            effective_irrf = excluded.effective_irrf,
+            notes = excluded.notes,
+            updated_at = datetime('now')
+        """,
+        (portfolio_id, year_month, regime, str(value), notes),
+    )
+    row = conn.execute(
+        """
+        SELECT *
+        FROM fiscal_irrf_overrides
+        WHERE portfolio_id = ? AND year_month = ? AND regime = ?
+        """,
+        (portfolio_id, year_month, regime),
+    ).fetchone()
+    return dict(row)
+
+
+def delete_irrf_override(conn: sqlite3.Connection, override_id: int) -> bool:
+    cur = conn.execute("DELETE FROM fiscal_irrf_overrides WHERE id = ?", (override_id,))
+    return cur.rowcount > 0

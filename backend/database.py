@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS assets (
     sector          TEXT,
     subsector       TEXT,
     segment         TEXT,
+    fiscal_regime_override TEXT,
+    fiscal_tax_treatment   TEXT,
     merged_into_asset_id INTEGER REFERENCES assets(id),
     merged_at       TEXT,
     duplicate_flag  INTEGER NOT NULL DEFAULT 0,
@@ -180,6 +182,41 @@ CREATE INDEX IF NOT EXISTS idx_tax_event_credit_date
 CREATE INDEX IF NOT EXISTS idx_tax_event_portfolio_asset
     ON tax_event(portfolio_id, asset_id, tax_event_type);
 
+-- Fiscal parameters by effective period
+CREATE TABLE IF NOT EXISTS fiscal_tax_parameters (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    regime                TEXT    NOT NULL,
+    valid_from            TEXT    NOT NULL,
+    valid_until           TEXT,
+    tax_rate              TEXT    NOT NULL DEFAULT '0',
+    withholding_rate      TEXT    NOT NULL DEFAULT '0',
+    exemption_limit       TEXT,
+    darf_code             TEXT,
+    loss_bucket           TEXT,
+    monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1,
+    created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at            TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiscal_tax_parameters_lookup
+    ON fiscal_tax_parameters(regime, valid_from, valid_until);
+
+-- Manual fiscal IRRF overrides for reports
+CREATE TABLE IF NOT EXISTS fiscal_irrf_overrides (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id   INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+    year_month     TEXT    NOT NULL,
+    regime         TEXT    NOT NULL,
+    effective_irrf TEXT    NOT NULL,
+    notes          TEXT,
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(portfolio_id, year_month, regime)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiscal_irrf_overrides_lookup
+    ON fiscal_irrf_overrides(portfolio_id, year_month, regime);
+
 -- ────────────────────────────────────────────────────────────
 -- Materialised position cache  (derived from ledger)
 -- ────────────────────────────────────────────────────────────
@@ -243,6 +280,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "assets", "market", "market TEXT NOT NULL DEFAULT 'BR'")
     _add_column_if_missing(conn, "assets", "merged_into_asset_id", "merged_into_asset_id INTEGER REFERENCES assets(id)")
     _add_column_if_missing(conn, "assets", "merged_at", "merged_at TEXT")
+    _add_column_if_missing(conn, "assets", "fiscal_regime_override", "fiscal_regime_override TEXT")
+    _add_column_if_missing(conn, "assets", "fiscal_tax_treatment", "fiscal_tax_treatment TEXT")
     _add_column_if_missing(conn, "asset_match_reviews", "operation_payload", "operation_payload TEXT")
     _add_column_if_missing(conn, "events", "gross_value", "gross_value TEXT")
     _add_column_if_missing(conn, "events", "event_value_brl", "event_value_brl TEXT")
@@ -309,6 +348,71 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_asset_tickers_lookup ON asset_tickers(ticker, valid_from, valid_until)"
     )
+    _ensure_fiscal_schema(conn)
+
+
+def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS fiscal_tax_parameters (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            regime                TEXT    NOT NULL,
+            valid_from            TEXT    NOT NULL,
+            valid_until           TEXT,
+            tax_rate              TEXT    NOT NULL DEFAULT '0',
+            withholding_rate      TEXT    NOT NULL DEFAULT '0',
+            exemption_limit       TEXT,
+            darf_code             TEXT,
+            loss_bucket           TEXT,
+            monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1,
+            created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at            TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_fiscal_tax_parameters_lookup
+            ON fiscal_tax_parameters(regime, valid_from, valid_until);
+
+        CREATE TABLE IF NOT EXISTS fiscal_irrf_overrides (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id   INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            year_month     TEXT    NOT NULL,
+            regime         TEXT    NOT NULL,
+            effective_irrf TEXT    NOT NULL,
+            notes          TEXT,
+            created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(portfolio_id, year_month, regime)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_fiscal_irrf_overrides_lookup
+            ON fiscal_irrf_overrides(portfolio_id, year_month, regime);
+        """
+    )
+    defaults = [
+        ("B3_COMMON_15", "1900-01-01", None, "0.15", "0.00005", "20000", "6015", "B3_COMMON", 1),
+        ("B3_FII_FIAGRO_20", "1900-01-01", None, "0.20", "0.00005", None, "6015", "B3_FII_FIAGRO", 1),
+        ("FI_INFRA_EXEMPT", "1900-01-01", None, "0", "0", None, None, None, 0),
+        ("CRYPTO_GCAP", "1900-01-01", None, "0", "0", None, None, "CRYPTO_GCAP_INFO", 0),
+    ]
+    for row in defaults:
+        exists = conn.execute(
+            """
+            SELECT 1 FROM fiscal_tax_parameters
+            WHERE regime = ? AND valid_from = ? AND COALESCE(valid_until, '') = COALESCE(?, '')
+            """,
+            (row[0], row[1], row[2]),
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                """
+                INSERT INTO fiscal_tax_parameters (
+                    regime, valid_from, valid_until, tax_rate, withholding_rate,
+                    exemption_limit, darf_code, loss_bucket, monthly_darf_enabled
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                row,
+            )
 
 
 def _ensure_b3_schema(conn: sqlite3.Connection) -> None:

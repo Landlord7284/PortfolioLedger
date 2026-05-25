@@ -41,6 +41,8 @@ def create(body: AssetCreate):
                 sector=body.sector,
                 subsector=body.subsector,
                 segment=body.segment,
+                fiscal_regime_override=body.fiscal_regime_override,
+                fiscal_tax_treatment=body.fiscal_tax_treatment,
                 event_date=body.event_date,
                 portfolio_id=body.portfolio_id,
                 event_type=body.event_type,
@@ -134,6 +136,8 @@ def update_metadata(asset_id: int, body: AssetMetadataUpdate):
                 subsector=body.subsector,
                 segment=body.segment,
                 market=body.market,
+                fiscal_regime_override=body.fiscal_regime_override,
+                fiscal_tax_treatment=body.fiscal_tax_treatment,
             )
         except Exception as e:
             raise HTTPException(400, str(e))

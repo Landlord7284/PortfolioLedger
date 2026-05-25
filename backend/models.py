@@ -51,6 +51,8 @@ class AssetCreate(BaseModel):
     sector: Optional[str] = None
     subsector: Optional[str] = None
     segment: Optional[str] = None
+    fiscal_regime_override: Optional[str] = None
+    fiscal_tax_treatment: Optional[str] = None
     portfolio_id: Optional[int] = None
     event_type: Optional[str] = None
     quantity: Optional[str] = None
@@ -88,6 +90,8 @@ class AssetMetadataUpdate(BaseModel):
     subsector: Optional[str] = None
     segment: Optional[str] = None
     market: Optional[str] = None
+    fiscal_regime_override: Optional[str] = None
+    fiscal_tax_treatment: Optional[str] = None
 
     @field_validator("ticker")
     @classmethod
@@ -111,6 +115,8 @@ class AssetResponse(BaseModel):
     sector: Optional[str] = None
     subsector: Optional[str] = None
     segment: Optional[str] = None
+    fiscal_regime_override: Optional[str] = None
+    fiscal_tax_treatment: Optional[str] = None
     duplicate_flag: bool = False
     merged_into_asset_id: Optional[int] = None
     merged_at: Optional[str] = None
@@ -291,6 +297,53 @@ class IncomeReportResponse(BaseModel):
     tables: list[IncomeReportTable]
 
 
+class CapitalGainAssetRow(BaseModel):
+    asset_id: int
+    ticker: Optional[str] = None
+    asset_class: str
+    gross_sale: str
+    net_sale: str
+    costs: str
+    cost_basis: str
+    net_result: str
+    exempt_gain: str
+    taxable_result_before_compensation: str
+
+
+class CapitalGainRegimeRow(BaseModel):
+    regime: str
+    bucket: Optional[str] = None
+    gross_sale: str
+    net_sale: str
+    costs: str
+    cost_basis: str
+    net_result: str
+    exempt_gain: str
+    taxable_result_before_compensation: str
+    initial_loss: str
+    used_loss: str
+    taxable_base: str
+    tax_rate: str
+    tax_due: str
+    theoretical_irrf: str
+    irrf_override: Optional[str] = None
+    effective_irrf: str
+    darf_estimated: str
+    final_loss: str
+    assets: list[CapitalGainAssetRow]
+
+
+class CapitalGainMonthRow(BaseModel):
+    month: str
+    regimes: list[CapitalGainRegimeRow]
+
+
+class CapitalGainReportResponse(BaseModel):
+    portfolio_id: int
+    year: int
+    months: list[CapitalGainMonthRow]
+
+
 # ── Tax ──────────────────────────────────────────────────────
 
 class TaxEventResponse(BaseModel):
@@ -333,6 +386,25 @@ class TaxAnnualSummaryRow(BaseModel):
     total_ganho_brl: str
     total_amount_brl: str
     event_count: int
+
+
+class IrrfOverrideUpsert(BaseModel):
+    portfolio_id: int
+    year_month: str
+    regime: str
+    effective_irrf: str
+    notes: Optional[str] = None
+
+
+class IrrfOverrideResponse(BaseModel):
+    id: int
+    portfolio_id: int
+    year_month: str
+    regime: str
+    effective_irrf: str
+    notes: Optional[str] = None
+    created_at: str
+    updated_at: str
 
 
 # ── Import ───────────────────────────────────────────────────

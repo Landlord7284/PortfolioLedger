@@ -12,6 +12,8 @@ from backend.models import (
     TaxEventResponse,
     TaxIncomeCreate,
     TaxSaleApuracaoResponse,
+    IrrfOverrideResponse,
+    IrrfOverrideUpsert,
 )
 from backend.services import ptax_service, tax_service
 
@@ -81,3 +83,36 @@ def annual(
 ):
     with get_db() as conn:
         return tax_service.annual_summary(conn, portfolio_id=portfolio_id, year=year)
+
+
+@router.get("/irrf-overrides", response_model=list[IrrfOverrideResponse])
+def list_irrf_overrides(
+    portfolio_id: int = Query(...),
+    year: Optional[int] = Query(None),
+):
+    with get_db() as conn:
+        return tax_service.list_irrf_overrides(conn, portfolio_id=portfolio_id, year=year)
+
+
+@router.put("/irrf-overrides", response_model=IrrfOverrideResponse)
+def upsert_irrf_override(body: IrrfOverrideUpsert):
+    with get_db() as conn:
+        try:
+            return tax_service.upsert_irrf_override(
+                conn,
+                portfolio_id=body.portfolio_id,
+                year_month=body.year_month,
+                regime=body.regime,
+                effective_irrf=body.effective_irrf,
+                notes=body.notes,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+
+@router.delete("/irrf-overrides/{override_id}")
+def delete_irrf_override(override_id: int):
+    with get_db() as conn:
+        if not tax_service.delete_irrf_override(conn, override_id):
+            raise HTTPException(404, "Override de IRRF nao encontrado.")
+    return {"ok": True}

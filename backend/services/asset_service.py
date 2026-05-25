@@ -239,6 +239,8 @@ def create_asset(
     sector: Optional[str] = None,
     subsector: Optional[str] = None,
     segment: Optional[str] = None,
+    fiscal_regime_override: Optional[str] = None,
+    fiscal_tax_treatment: Optional[str] = None,
     event_date: Optional[str] = None,
     portfolio_id: Optional[int] = None,
     event_type: Optional[str] = None,
@@ -298,11 +300,13 @@ def create_asset(
     cur = conn.execute(
         """
         INSERT INTO assets (asset_class, market, currency, maturity_date, aux_id,
-                            name, cnpj, isin, sector, subsector, segment)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            name, cnpj, isin, sector, subsector, segment,
+                            fiscal_regime_override, fiscal_tax_treatment)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (ac.value, resolved_market, resolved_currency, maturity_date, aux_id,
-         name, cnpj, isin, sector, subsector, segment),
+         name, cnpj, isin, sector, subsector, segment,
+         fiscal_regime_override, fiscal_tax_treatment),
     )
     asset_id = cur.lastrowid
     conn.execute(
@@ -405,6 +409,8 @@ def update_asset_metadata(
     subsector: Optional[str] = None,
     segment: Optional[str] = None,
     market: Optional[str] = None,
+    fiscal_regime_override: Optional[str] = None,
+    fiscal_tax_treatment: Optional[str] = None,
 ) -> dict | None:
     current = get_asset(conn, asset_id)
     if not current:
@@ -431,6 +437,8 @@ def update_asset_metadata(
         ("sector", sector),
         ("subsector", subsector),
         ("segment", segment),
+        ("fiscal_regime_override", fiscal_regime_override),
+        ("fiscal_tax_treatment", fiscal_tax_treatment),
         ("market", next_market if market is not None or asset_class is not None else None),
         ("currency", currency_for_market(next_market).value if market is not None or asset_class is not None else None),
     ]:
