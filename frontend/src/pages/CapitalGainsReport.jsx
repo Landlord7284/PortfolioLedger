@@ -63,6 +63,7 @@ const TABLE_COLUMNS = {
     ['theoretical_irrf', 'IRRF teórico'],
     ['effective_irrf', 'IRRF efetivo'],
     ['used_irrf', 'IRRF usado'],
+    ['final_irrf_carryforward', 'IRRF final'],
     ['net_tax_payable', 'Imposto líquido'],
     ['final_loss_carryforward', 'Prejuízo final'],
   ],
@@ -77,6 +78,7 @@ const TABLE_COLUMNS = {
     ['theoretical_irrf', 'IRRF teórico'],
     ['effective_irrf', 'IRRF efetivo'],
     ['used_irrf', 'IRRF usado'],
+    ['final_irrf_carryforward', 'IRRF final'],
     ['net_tax_payable', 'Imposto líquido'],
     ['final_loss_carryforward', 'Prejuízo final'],
   ],
@@ -546,15 +548,26 @@ export default function CapitalGainsReport() {
     return [...latestByRegime.values()].reduce((total, row) => total + decimalToCents(row.final_loss_carryforward), 0n);
   }, [visibleRows]);
 
+  const finalIrrfBalance = useMemo(() => {
+    const latestByRegime = new Map();
+    visibleRows.forEach((row) => {
+      const current = latestByRegime.get(row.regime);
+      if (!current || row.year_month > current.year_month) {
+        latestByRegime.set(row.regime, row);
+      }
+    });
+    return [...latestByRegime.values()].reduce((total, row) => total + decimalToCents(row.final_irrf_carryforward), 0n);
+  }, [visibleRows]);
+
   const summary = useMemo(() => ({
     realizedResult: centsToMoneyString(addMoney(visibleRows, 'realized_result')),
     exemptGain: centsToMoneyString(addMoney(visibleRows, 'exempt_gain')),
     taxableBase: centsToMoneyString(addMoney(visibleRows, 'taxable_base')),
     taxDue: centsToMoneyString(addMoney(visibleRows, 'tax_due')),
-    effectiveIrrf: centsToMoneyString(addMoney(visibleRows, 'effective_irrf')),
+    finalIrrf: centsToMoneyString(finalIrrfBalance),
     darfEstimated: centsToMoneyString(addMoney(visibleDarfSuggestions, 'darf_estimated')),
     finalLoss: centsToMoneyString(finalLossBalance),
-  }), [finalLossBalance, visibleDarfSuggestions, visibleRows]);
+  }), [finalIrrfBalance, finalLossBalance, visibleDarfSuggestions, visibleRows]);
 
   const alerts = useMemo(() => {
     const result = [];
@@ -741,7 +754,7 @@ export default function CapitalGainsReport() {
         <SummaryCard title="Ganhos isentos" value={summary.exemptGain} hideValues={hideValues} />
         <SummaryCard title="Base tributável" value={summary.taxableBase} hideValues={hideValues} />
         <SummaryCard title="Imposto calculado" value={summary.taxDue} hideValues={hideValues} />
-        <SummaryCard title="IRRF efetivo considerado" value={summary.effectiveIrrf} hideValues={hideValues} />
+        <SummaryCard title="Saldo IRRF a compensar" value={summary.finalIrrf} hideValues={hideValues} />
         <SummaryCard title="DARF estimado" value={summary.darfEstimated} hideValues={hideValues} />
         <SummaryCard title="Prejuízo final a compensar" value={summary.finalLoss} hideValues={hideValues} />
       </div>
