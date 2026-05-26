@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from backend.database import get_db, init_db
 from backend.domain.enums import AssetClass, EventType
@@ -9,6 +10,15 @@ from backend.services import asset_service, capital_gain_report_service, event_s
 def _regime(report, month, regime):
     month_row = next(row for row in report["months"] if row["year_month"] == month)
     return next(row for row in month_row["regimes"] if row["regime"] == regime)
+
+
+def _month(report, month):
+    return next(row for row in report["months"] if row["year_month"] == month)
+
+
+def _darf_suggestion(report, month, darf_code):
+    month_row = _month(report, month)
+    return next(row for row in month_row["darf_suggestions"] if row["darf_code"] == darf_code)
 
 
 def _setup(tmp_path):
@@ -70,6 +80,7 @@ def test_action_profit_under_monthly_limit_is_exempt(tmp_path):
             "year_month": "2025-01",
             "month": 1,
             "regimes": report["months"][0]["regimes"],
+            "darf_suggestions": [],
         }
     ]
     assert row["gross_sale"] == "11000.00"
@@ -232,7 +243,7 @@ def test_fii_fi_infra_crypto_and_irrf_override_are_separate(tmp_path):
 
     assert fii_row["taxable_base"] == "2000.00"
     assert fii_row["tax_rate"] == "0.2"
-    assert fii_row["darf_estimated"] == "400.00"
+    assert _darf_suggestion(report, "2025-04", "6015")["darf_estimated"] == "400.00"
     assert common_row["final_loss_carryforward"] == "1000.00"
     assert fii_row["initial_loss_carryforward"] == "0.00"
     assert fii_row["used_loss"] == "0.00"
@@ -557,6 +568,197 @@ def test_minimum_darf_defers_until_threshold_and_crosses_year(tmp_path):
     assert december["final_darf_carryforward"] == "5.00"
     assert next_january["initial_darf_carryforward"] == "5.00"
     assert next_january["darf_estimated"] == "10.00"
+
+
+def test_minimum_darf_carryforward_is_shared_by_darf_code_after_regime_irrf(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.0006', withholding_rate = '0', exemption_limit = '0',
+                minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_COMMON_15'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.001', withholding_rate = '0',
+                minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_FII_FIAGRO_20'
+            """
+        )
+        common = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        fii = asset_service.create_asset(conn, AssetClass.FII.value, "FUND11", market="BR")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.VENDA.value, "2025-01-20", "100", "20000", gross_value="20000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2025-01-20", "100", "15000", gross_value="15000")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2025-01", regime="B3_COMMON_15", effective_irrf="0.50")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2025-01", regime="B3_FII_FIAGRO_20", effective_irrf="0.10")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    common_row = _regime(report, "2025-01", "B3_COMMON_15")
+    fii_row = _regime(report, "2025-01", "B3_FII_FIAGRO_20")
+    suggestion = _darf_suggestion(report, "2025-01", "6015")
+
+    assert common_row["tax_due"] == "6.00"
+    assert common_row["used_irrf"] == "0.50"
+    assert common_row["net_tax_payable"] == "5.50"
+    assert fii_row["tax_due"] == "5.00"
+    assert fii_row["used_irrf"] == "0.10"
+    assert fii_row["net_tax_payable"] == "4.90"
+    assert suggestion["current_month_net_tax"] == "10.40"
+    assert suggestion["darf_before_minimum"] == "10.40"
+    assert suggestion["darf_estimated"] == "10.40"
+    assert suggestion["final_darf_carryforward"] == "0.00"
+    assert set(suggestion["included_regimes"]) == {"B3_COMMON_15", "B3_FII_FIAGRO_20"}
+
+
+def test_minimum_darf_carryforward_is_shared_by_6015_across_regimes_and_months(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.001', withholding_rate = '0', minimum_darf_amount = '10.00',
+                darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_FII_FIAGRO_20'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.01', withholding_rate = '0', exemption_limit = '0',
+                minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_COMMON_15'
+            """
+        )
+        fii = asset_service.create_asset(conn, AssetClass.FII.value, "FUND11", market="BR")
+        common = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2025-01-20", "100", "15000", gross_value="15000")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.COMPRA.value, "2025-02-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.VENDA.value, "2025-02-20", "100", "20000", gross_value="20000")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    january = _darf_suggestion(report, "2025-01", "6015")
+    february = _darf_suggestion(report, "2025-02", "6015")
+    assert january["current_month_net_tax"] == "5.00"
+    assert january["darf_before_minimum"] == "5.00"
+    assert january["darf_estimated"] == "0.00"
+    assert january["final_darf_carryforward"] == "5.00"
+    assert february["initial_darf_carryforward"] == "5.00"
+    assert february["current_month_net_tax"] == "100.00"
+    assert february["darf_before_minimum"] == "105.00"
+    assert february["darf_estimated"] == "105.00"
+    assert february["final_darf_carryforward"] == "0.00"
+
+
+def test_irrf_carryforward_is_not_shared_between_common_and_fii_even_with_same_darf_code(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.0006', withholding_rate = '0', exemption_limit = '0',
+                minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_COMMON_15'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.001', withholding_rate = '0',
+                minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_FII_FIAGRO_20'
+            """
+        )
+        common = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        fii = asset_service.create_asset(conn, AssetClass.FII.value, "FUND11", market="BR")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.VENDA.value, "2025-01-20", "100", "20000", gross_value="20000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2025-01-20", "100", "15000", gross_value="15000")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2025-01", regime="B3_COMMON_15", effective_irrf="10.00")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2025-01", regime="B3_FII_FIAGRO_20", effective_irrf="0.00")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    common_row = _regime(report, "2025-01", "B3_COMMON_15")
+    fii_row = _regime(report, "2025-01", "B3_FII_FIAGRO_20")
+    suggestion = _darf_suggestion(report, "2025-01", "6015")
+
+    assert common_row["tax_due"] == "6.00"
+    assert common_row["used_irrf"] == "6.00"
+    assert common_row["final_irrf_carryforward"] == "4.00"
+    assert common_row["net_tax_payable"] == "0.00"
+    assert fii_row["tax_due"] == "5.00"
+    assert fii_row["used_irrf"] == "0.00"
+    assert fii_row["final_irrf_carryforward"] == "0.00"
+    assert fii_row["net_tax_payable"] == "5.00"
+    assert suggestion["current_month_net_tax"] == "5.00"
+    assert suggestion["darf_estimated"] == "0.00"
+    assert suggestion["final_darf_carryforward"] == "5.00"
+
+
+def test_irrf_carryforward_resets_at_year_end_but_darf_code_carryforward_crosses_year(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.0006', withholding_rate = '0', exemption_limit = '0',
+                minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_COMMON_15'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.001', withholding_rate = '0',
+                minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_FII_FIAGRO_20'
+            """
+        )
+        common = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        fii = asset_service.create_asset(conn, AssetClass.FII.value, "FUND11", market="BR")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.COMPRA.value, "2025-12-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.VENDA.value, "2025-12-20", "100", "20000", gross_value="20000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2025-12-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2025-12-20", "100", "15000", gross_value="15000")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.COMPRA.value, "2026-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.VENDA.value, "2026-01-20", "100", "20000", gross_value="20000")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2025-12", regime="B3_COMMON_15", effective_irrf="10.00")
+
+        report_2025 = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+        report_2026 = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2026)
+    finally:
+        _close(ctx)
+
+    december_common = _regime(report_2025, "2025-12", "B3_COMMON_15")
+    december_darf = _darf_suggestion(report_2025, "2025-12", "6015")
+    next_january_common = _regime(report_2026, "2026-01", "B3_COMMON_15")
+    next_january_darf = _darf_suggestion(report_2026, "2026-01", "6015")
+
+    assert december_common["final_irrf_carryforward"] == "4.00"
+    assert december_darf["final_darf_carryforward"] == "5.00"
+    assert next_january_common["initial_irrf_carryforward"] == "0.00"
+    assert next_january_darf["initial_darf_carryforward"] == "5.00"
+
+
+@pytest.mark.skip(reason="Nao ha segundo codigo de DARF mensal ativo no escopo atual alem do 6015.")
+def test_minimum_darf_carryforward_is_not_shared_across_different_darf_codes(tmp_path):
+    pass
 
 
 def test_fiscal_tax_parameter_api_lifecycle_and_overlap_validation(tmp_path, monkeypatch):

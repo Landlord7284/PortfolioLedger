@@ -246,6 +246,8 @@ def _empty_regime_row(regime: str, bucket: str | None, param: dict) -> dict:
     return {
         "regime": regime,
         "bucket": bucket,
+        "darf_code": param["darf_code"],
+        "monthly_darf_enabled": bool(param["monthly_darf_enabled"]),
         "gross_sale": ZERO,
         "net_sale": ZERO,
         "costs": ZERO,
@@ -268,6 +270,7 @@ def _empty_regime_row(regime: str, bucket: str | None, param: dict) -> dict:
         "final_darf_carryforward": ZERO,
         "initial_irrf_carryforward": ZERO,
         "used_irrf": ZERO,
+        "net_tax_payable": ZERO,
         "final_irrf_carryforward": ZERO,
         "final_loss_carryforward": ZERO,
         "assets": {},
@@ -318,6 +321,7 @@ def _format_regime_row(row: dict) -> dict:
     return {
         "regime": row["regime"],
         "bucket": row["bucket"],
+        "darf_code": row["darf_code"],
         "gross_sale": _money(row["gross_sale"]),
         "net_sale": _money(row["net_sale"]),
         "costs": _money(row["costs"]),
@@ -340,9 +344,23 @@ def _format_regime_row(row: dict) -> dict:
         "final_darf_carryforward": _money(row["final_darf_carryforward"]),
         "initial_irrf_carryforward": _money(row["initial_irrf_carryforward"]),
         "used_irrf": _money(row["used_irrf"]),
+        "net_tax_payable": _money(row["net_tax_payable"]),
         "final_irrf_carryforward": _money(row["final_irrf_carryforward"]),
         "final_loss_carryforward": _money(row["final_loss_carryforward"]),
         "assets": _asset_rows(row["assets"]),
+    }
+
+
+def _format_darf_suggestion(row: dict) -> dict:
+    return {
+        "darf_code": row["darf_code"],
+        "included_regimes": row["included_regimes"],
+        "initial_darf_carryforward": _money(row["initial_darf_carryforward"]),
+        "current_month_net_tax": _money(row["current_month_net_tax"]),
+        "darf_before_minimum": _money(row["darf_before_minimum"]),
+        "minimum_darf_amount": _money(row["minimum_darf_amount"]),
+        "darf_estimated": _money(row["darf_estimated"]),
+        "final_darf_carryforward": _money(row["final_darf_carryforward"]),
     }
 
 
@@ -369,8 +387,8 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
 
     overrides = _overrides(conn, portfolio_id, year)
     loss_carry: dict[str, Decimal] = defaultdict(Decimal)
-    darf_carry: dict[str, Decimal] = defaultdict(Decimal)
-    irrf_carry: dict[str, Decimal] = defaultdict(Decimal)
+    darf_carry_by_code: dict[str, Decimal] = defaultdict(Decimal)
+    irrf_carry_by_regime: dict[str, Decimal] = defaultdict(Decimal)
     months = []
     current_irrf_year: str | None = None
 
@@ -379,10 +397,10 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
     for month in year_months:
         month_year = month[:4]
         if current_irrf_year != month_year:
-            irrf_carry = defaultdict(Decimal)
+            irrf_carry_by_regime = defaultdict(Decimal)
             current_irrf_year = month_year
 
-        regime_rows = []
+        month_raw_rows = []
         month_regimes = sorted(
             {
                 regime
@@ -474,28 +492,68 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
                 row["effective_irrf"] = ZERO
 
             if param["monthly_darf_enabled"]:
-                row["initial_darf_carryforward"] = darf_carry[regime]
-                row["initial_irrf_carryforward"] = irrf_carry[regime]
+                row["initial_irrf_carryforward"] = irrf_carry_by_regime[regime]
                 available_irrf = row["initial_irrf_carryforward"] + row["effective_irrf"]
-                gross_darf = row["initial_darf_carryforward"] + row["tax_due"]
-                row["used_irrf"] = min(available_irrf, gross_darf)
+                row["used_irrf"] = min(available_irrf, row["tax_due"])
                 row["final_irrf_carryforward"] = available_irrf - row["used_irrf"]
-                row["darf_before_minimum"] = gross_darf - row["used_irrf"]
-                minimum_darf = row["minimum_darf_amount"]
-                if row["darf_before_minimum"] > ZERO and (minimum_darf <= ZERO or row["darf_before_minimum"] >= minimum_darf):
-                    row["darf_estimated"] = row["darf_before_minimum"]
-                    row["final_darf_carryforward"] = ZERO
-                else:
-                    row["darf_estimated"] = ZERO
-                    row["final_darf_carryforward"] = row["darf_before_minimum"]
-                darf_carry[regime] = row["final_darf_carryforward"]
-                irrf_carry[regime] = row["final_irrf_carryforward"]
+                row["net_tax_payable"] = row["tax_due"] - row["used_irrf"]
+                row["darf_before_minimum"] = row["net_tax_payable"]
+                irrf_carry_by_regime[regime] = row["final_irrf_carryforward"]
 
             _allocate_effective_irrf(row)
-            if month_year == str(year):
-                regime_rows.append(_format_regime_row(row))
+            month_raw_rows.append(row)
 
-        if regime_rows:
-            months.append({"year_month": month, "month": int(month[-2:]), "regimes": regime_rows})
+        darf_suggestions = []
+        rows_by_code: dict[str, list[dict]] = defaultdict(list)
+        for row in month_raw_rows:
+            darf_code = row["darf_code"]
+            if row["monthly_darf_enabled"] and darf_code:
+                rows_by_code[darf_code].append(row)
+
+        for darf_code in sorted(rows_by_code):
+            code_rows = rows_by_code[darf_code]
+            current_month_net_tax = sum((row["net_tax_payable"] for row in code_rows), ZERO)
+            initial_carry = darf_carry_by_code[darf_code]
+            darf_before_minimum = initial_carry + current_month_net_tax
+            minimum_darf = max((row["minimum_darf_amount"] for row in code_rows), default=ZERO)
+            if darf_before_minimum > ZERO and (minimum_darf <= ZERO or darf_before_minimum >= minimum_darf):
+                darf_estimated = darf_before_minimum
+                final_carry = ZERO
+            else:
+                darf_estimated = ZERO
+                final_carry = darf_before_minimum
+
+            darf_carry_by_code[darf_code] = final_carry
+            suggestion = {
+                "darf_code": darf_code,
+                "included_regimes": sorted({row["regime"] for row in code_rows}),
+                "initial_darf_carryforward": initial_carry,
+                "current_month_net_tax": current_month_net_tax,
+                "darf_before_minimum": darf_before_minimum,
+                "minimum_darf_amount": minimum_darf,
+                "darf_estimated": darf_estimated,
+                "final_darf_carryforward": final_carry,
+            }
+            if current_month_net_tax > ZERO or initial_carry > ZERO or final_carry > ZERO:
+                darf_suggestions.append(suggestion)
+
+            # Legacy per-regime DARF fields are meaningful only when the code has
+            # a single contributing regime in the month. The operational payable
+            # guide is exposed by darf_suggestions.
+            if len(code_rows) == 1:
+                code_rows[0]["initial_darf_carryforward"] = initial_carry
+                code_rows[0]["darf_before_minimum"] = darf_before_minimum
+                code_rows[0]["darf_estimated"] = darf_estimated
+                code_rows[0]["final_darf_carryforward"] = final_carry
+
+        if month_year == str(year) and month_raw_rows:
+            months.append(
+                {
+                    "year_month": month,
+                    "month": int(month[-2:]),
+                    "regimes": [_format_regime_row(row) for row in month_raw_rows],
+                    "darf_suggestions": [_format_darf_suggestion(row) for row in darf_suggestions],
+                }
+            )
 
     return {"portfolio_id": portfolio_id, "year": year, "months": months}

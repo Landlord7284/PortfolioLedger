@@ -316,6 +316,7 @@ class CapitalGainAssetRow(BaseModel):
 class CapitalGainRegimeRow(BaseModel):
     regime: str
     bucket: Optional[str] = None
+    darf_code: Optional[str] = None
     gross_sale: str
     net_sale: str
     costs: str
@@ -338,15 +339,28 @@ class CapitalGainRegimeRow(BaseModel):
     final_darf_carryforward: str
     initial_irrf_carryforward: str
     used_irrf: str
+    net_tax_payable: str
     final_irrf_carryforward: str
     final_loss_carryforward: str
     assets: list[CapitalGainAssetRow]
+
+
+class CapitalGainDarfSuggestion(BaseModel):
+    darf_code: str
+    included_regimes: list[str]
+    initial_darf_carryforward: str
+    current_month_net_tax: str
+    darf_before_minimum: str
+    minimum_darf_amount: str
+    darf_estimated: str
+    final_darf_carryforward: str
 
 
 class CapitalGainMonthRow(BaseModel):
     year_month: str
     month: int
     regimes: list[CapitalGainRegimeRow]
+    darf_suggestions: list[CapitalGainDarfSuggestion] = Field(default_factory=list)
 
 
 class CapitalGainReportResponse(BaseModel):

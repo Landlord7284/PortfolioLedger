@@ -54,7 +54,7 @@ const TABLE_COLUMNS = {
     ['gross_sale', 'Venda bruta'],
     ['realized_result', 'Resultado líquido'],
     ['exempt_gain', 'Ganho isento'],
-    ['taxable_result_before_compensation', 'Resultado tributável antes de compensação'],
+    ['taxable_result_before_compensation', 'Resultado Tributável'],
     ['initial_loss_carryforward', 'Prejuízo inicial'],
     ['used_loss', 'Prejuízo usado'],
     ['taxable_base', 'Base tributável'],
@@ -62,7 +62,8 @@ const TABLE_COLUMNS = {
     ['tax_due', 'Imposto'],
     ['theoretical_irrf', 'IRRF teórico'],
     ['effective_irrf', 'IRRF efetivo'],
-    ['darf_estimated', 'DARF estimado'],
+    ['used_irrf', 'IRRF usado'],
+    ['net_tax_payable', 'Imposto líquido'],
     ['final_loss_carryforward', 'Prejuízo final'],
   ],
   B3_FII_FIAGRO_20: [
@@ -75,7 +76,8 @@ const TABLE_COLUMNS = {
     ['tax_due', 'Imposto'],
     ['theoretical_irrf', 'IRRF teórico'],
     ['effective_irrf', 'IRRF efetivo'],
-    ['darf_estimated', 'DARF estimado'],
+    ['used_irrf', 'IRRF usado'],
+    ['net_tax_payable', 'Imposto líquido'],
     ['final_loss_carryforward', 'Prejuízo final'],
   ],
   FI_INFRA_EXEMPT: [
@@ -83,14 +85,12 @@ const TABLE_COLUMNS = {
     ['realized_result', 'Resultado econômico'],
     ['exempt_gain', 'Ganho isento'],
     ['effective_irrf', 'IRRF efetivo'],
-    ['darf_estimated', 'DARF estimado'],
     ['final_loss_carryforward', 'Prejuízo final'],
   ],
   CRYPTO_GCAP: [
     ['gross_sale', 'Venda bruta'],
     ['realized_result', 'Resultado líquido'],
     ['final_loss_carryforward', 'Prejuízo acumulado informativo'],
-    ['darf_estimated', 'DARF estimado'],
   ],
 };
 
@@ -338,6 +338,69 @@ function RegimeTable({
   );
 }
 
+function DarfSuggestionsTable({ suggestions, hideValues }) {
+  if (suggestions.length === 0) return null;
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="border-b">
+        <CardTitle className="text-base">DARF operacional por código</CardTitle>
+        <CardDescription>
+          Guia estimada após cada regime aplicar prejuízo e IRRF próprios. O piso mínimo é consolidado por código de receita.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mês</TableHead>
+                <TableHead>Código</TableHead>
+                <TableHead>Regimes incluídos</TableHead>
+                <TableHead className="text-right">Carry inicial</TableHead>
+                <TableHead className="text-right">Imposto líquido do mês</TableHead>
+                <TableHead className="text-right">Antes do mínimo</TableHead>
+                <TableHead className="text-right">DARF estimado</TableHead>
+                <TableHead className="text-right">Carry final</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {suggestions.map((suggestion) => (
+                <TableRow key={`${suggestion.year_month}|${suggestion.darf_code}`}>
+                  <TableCell className="whitespace-nowrap font-medium">
+                    {monthLabel(suggestion.month)} / {suggestion.year_month.slice(0, 4)}
+                  </TableCell>
+                  <TableCell className="font-mono text-sm">{suggestion.darf_code}</TableCell>
+                  <TableCell className="min-w-[260px] text-sm">
+                    {(suggestion.included_regimes || [])
+                      .map((regime) => REGIME_LABELS[regime] || regime)
+                      .join(', ')}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    R$ {formatMoney(suggestion.initial_darf_carryforward, hideValues)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    R$ {formatMoney(suggestion.current_month_net_tax, hideValues)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    R$ {formatMoney(suggestion.darf_before_minimum, hideValues)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    R$ {formatMoney(suggestion.darf_estimated, hideValues)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    R$ {formatMoney(suggestion.final_darf_carryforward, hideValues)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function CapitalGainsReport() {
   const { activePortfolioId, portfolioList, hideValues } = useContext(AppContext);
   const [year, setYear] = useState(String(currentYear));
@@ -403,6 +466,16 @@ export default function CapitalGainsReport() {
     });
   }, [report]);
 
+  const darfSuggestions = useMemo(() => {
+    return (report?.months || []).flatMap((month) => {
+      return (month.darf_suggestions || []).map((suggestion) => ({
+        ...suggestion,
+        year_month: month.year_month,
+        month: month.month,
+      }));
+    });
+  }, [report]);
+
   const classOptions = useMemo(() => {
     return [...new Set(rows.flatMap((row) => row.assets.map((asset) => asset.asset_class)).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
@@ -452,6 +525,16 @@ export default function CapitalGainsReport() {
     })).filter((group) => group.rows.length > 0);
   }, [visibleRows]);
 
+  const visibleMonthKeys = useMemo(() => new Set(visibleRows.map((row) => row.year_month)), [visibleRows]);
+
+  const visibleDarfSuggestions = useMemo(() => {
+    return darfSuggestions
+      .filter((suggestion) => monthFilter === ALL || String(suggestion.month) === monthFilter)
+      .filter((suggestion) => visibleMonthKeys.has(suggestion.year_month))
+      .filter((suggestion) => regimeFilter === ALL || (suggestion.included_regimes || []).includes(regimeFilter))
+      .sort((a, b) => a.year_month.localeCompare(b.year_month) || a.darf_code.localeCompare(b.darf_code));
+  }, [darfSuggestions, monthFilter, regimeFilter, visibleMonthKeys]);
+
   const finalLossBalance = useMemo(() => {
     const latestByRegime = new Map();
     visibleRows.forEach((row) => {
@@ -469,20 +552,21 @@ export default function CapitalGainsReport() {
     taxableBase: centsToMoneyString(addMoney(visibleRows, 'taxable_base')),
     taxDue: centsToMoneyString(addMoney(visibleRows, 'tax_due')),
     effectiveIrrf: centsToMoneyString(addMoney(visibleRows, 'effective_irrf')),
-    darfEstimated: centsToMoneyString(addMoney(visibleRows, 'darf_estimated')),
+    darfEstimated: centsToMoneyString(addMoney(visibleDarfSuggestions, 'darf_estimated')),
     finalLoss: centsToMoneyString(finalLossBalance),
-  }), [finalLossBalance, visibleRows]);
+  }), [finalLossBalance, visibleDarfSuggestions, visibleRows]);
 
   const alerts = useMemo(() => {
     const result = [];
     const hasIrrfOverride = visibleRows.some((row) => getReportOverride(row) !== null || overridesByKey.has(overrideKey(row.year_month, row.regime)));
     const hasIrrfDiff = visibleRows.some((row) => !moneyEquals(row.theoretical_irrf, row.effective_irrf));
     if (hasIrrfOverride || hasIrrfDiff) result.push('IRRF efetivo diferente do teórico em pelo menos uma competência.');
-    if (visibleRows.some((row) => moneyGreaterThanZero(row.darf_estimated))) result.push('Há DARF estimado maior que zero no período filtrado.');
+    if (visibleDarfSuggestions.some((suggestion) => moneyGreaterThanZero(suggestion.darf_estimated))) result.push('Há DARF operacional estimado maior que zero no período filtrado.');
+    if (visibleDarfSuggestions.length > 0) result.push('DARF operacional é consolidado por código de receita depois do IRRF próprio de cada regime.');
     if (visibleRows.some((row) => row.regime === 'FI_INFRA_EXEMPT')) result.push('FI-Infra exibido como informativo/isento.');
     if (visibleRows.some((row) => row.regime === 'CRYPTO_GCAP')) result.push('Cripto exibido apenas como apuração informativa nesta fase.');
     return result;
-  }, [overridesByKey, visibleRows]);
+  }, [overridesByKey, visibleDarfSuggestions, visibleRows]);
 
   const toggleExpanded = (key) => {
     setExpanded((current) => {
@@ -661,6 +745,8 @@ export default function CapitalGainsReport() {
         <SummaryCard title="DARF estimado" value={summary.darfEstimated} hideValues={hideValues} />
         <SummaryCard title="Prejuízo final a compensar" value={summary.finalLoss} hideValues={hideValues} />
       </div>
+
+      <DarfSuggestionsTable suggestions={visibleDarfSuggestions} hideValues={hideValues} />
 
       {loading ? (
         <Card>
