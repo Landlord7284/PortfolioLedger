@@ -54,31 +54,20 @@ const TABLE_COLUMNS = {
     ['gross_sale', 'Venda bruta'],
     ['realized_result', 'Resultado líquido'],
     ['exempt_gain', 'Ganho isento'],
-    ['taxable_result_before_compensation', 'Resultado Tributável'],
-    ['initial_loss_carryforward', 'Prejuízo inicial'],
-    ['used_loss', 'Prejuízo usado'],
     ['taxable_base', 'Base tributável'],
-    ['tax_rate', 'Alíquota', 'rate'],
-    ['tax_due', 'Imposto'],
     ['theoretical_irrf', 'IRRF teórico'],
     ['effective_irrf', 'IRRF efetivo'],
     ['used_irrf', 'IRRF usado'],
-    ['final_irrf_carryforward', 'IRRF final'],
     ['net_tax_payable', 'Imposto líquido'],
     ['final_loss_carryforward', 'Prejuízo final'],
   ],
   B3_FII_FIAGRO_20: [
     ['gross_sale', 'Venda bruta'],
     ['realized_result', 'Resultado líquido'],
-    ['initial_loss_carryforward', 'Prejuízo inicial'],
-    ['used_loss', 'Prejuízo usado'],
     ['taxable_base', 'Base tributável'],
-    ['tax_rate', 'Alíquota', 'rate'],
-    ['tax_due', 'Imposto'],
     ['theoretical_irrf', 'IRRF teórico'],
     ['effective_irrf', 'IRRF efetivo'],
     ['used_irrf', 'IRRF usado'],
-    ['final_irrf_carryforward', 'IRRF final'],
     ['net_tax_payable', 'Imposto líquido'],
     ['final_loss_carryforward', 'Prejuízo final'],
   ],
@@ -103,10 +92,17 @@ const ASSET_COLUMNS = [
   ['gross_sale', 'Venda bruta'],
   ['realized_result', 'Resultado líquido'],
   ['exempt_gain', 'Ganho isento'],
-  ['taxable_result_before_compensation', 'Resultado tributável antes de compensação'],
   ['theoretical_irrf', 'IRRF teórico'],
   ['effective_irrf', 'IRRF efetivo'],
 ];
+
+const ASSET_COLUMNS_BY_REGIME = {
+  B3_FII_FIAGRO_20: ASSET_COLUMNS.filter(([field]) => field !== 'exempt_gain'),
+};
+
+function getAssetColumns(regime) {
+  return ASSET_COLUMNS_BY_REGIME[regime] || ASSET_COLUMNS;
+}
 
 function overrideKey(yearMonth, regime) {
   return `${yearMonth}|${regime}`;
@@ -203,7 +199,9 @@ function SummaryCard({ title, value, hideValues }) {
   );
 }
 
-function AssetRows({ assets, hideValues, colSpan }) {
+function AssetRows({ assets, hideValues, colSpan, regime }) {
+  const columns = getAssetColumns(regime);
+
   return (
     <TableRow className="bg-muted/25 hover:bg-muted/25">
       <TableCell colSpan={colSpan} className="p-0">
@@ -211,7 +209,7 @@ function AssetRows({ assets, hideValues, colSpan }) {
           <Table>
             <TableHeader>
               <TableRow>
-                {ASSET_COLUMNS.map((column) => (
+                {columns.map((column) => (
                   <TableHead key={column[0]} className={column[2] ? '' : 'text-right'}>
                     {column[1]}
                   </TableHead>
@@ -221,14 +219,14 @@ function AssetRows({ assets, hideValues, colSpan }) {
             <TableBody>
               {assets.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={ASSET_COLUMNS.length} className="h-16 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={columns.length} className="h-16 text-center text-sm text-muted-foreground">
                     Nenhum ativo encontrado para os filtros atuais.
                   </TableCell>
                 </TableRow>
               ) : (
                 assets.map((asset) => (
                   <TableRow key={asset.asset_id}>
-                    {ASSET_COLUMNS.map((column) => (
+                    {columns.map((column) => (
                       <TableCell key={column[0]} className={column[2] ? 'whitespace-nowrap' : 'text-right font-mono text-sm'}>
                         {formatCellValue(asset, column, hideValues)}
                       </TableCell>
@@ -327,7 +325,7 @@ function RegimeTable({
                       )}
                     </TableRow>
                     {isExpanded && (
-                      <AssetRows assets={row.assets || []} hideValues={hideValues} colSpan={expandedColSpan} />
+                      <AssetRows assets={row.assets || []} hideValues={hideValues} colSpan={expandedColSpan} regime={regime} />
                     )}
                   </Fragment>
                 );
@@ -342,6 +340,7 @@ function RegimeTable({
 
 function DarfSuggestionsTable({ suggestions, hideValues }) {
   if (suggestions.length === 0) return null;
+  const hasAccumulatedDarf = suggestions.some((suggestion) => moneyGreaterThanZero(suggestion.final_darf_carryforward));
 
   return (
     <Card className="overflow-hidden">
@@ -359,11 +358,8 @@ function DarfSuggestionsTable({ suggestions, hideValues }) {
                 <TableHead>Mês</TableHead>
                 <TableHead>Código</TableHead>
                 <TableHead>Regimes incluídos</TableHead>
-                <TableHead className="text-right">Carry inicial</TableHead>
-                <TableHead className="text-right">Imposto líquido do mês</TableHead>
-                <TableHead className="text-right">Antes do mínimo</TableHead>
-                <TableHead className="text-right">DARF estimado</TableHead>
-                <TableHead className="text-right">Carry final</TableHead>
+                <TableHead className="text-right">DARF</TableHead>
+                {hasAccumulatedDarf && <TableHead className="text-right">DARF Acumulado</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -379,20 +375,13 @@ function DarfSuggestionsTable({ suggestions, hideValues }) {
                       .join(', ')}
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm">
-                    R$ {formatMoney(suggestion.initial_darf_carryforward, hideValues)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm">
-                    R$ {formatMoney(suggestion.current_month_net_tax, hideValues)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm">
-                    R$ {formatMoney(suggestion.darf_before_minimum, hideValues)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm">
                     R$ {formatMoney(suggestion.darf_estimated, hideValues)}
                   </TableCell>
-                  <TableCell className="text-right font-mono text-sm">
-                    R$ {formatMoney(suggestion.final_darf_carryforward, hideValues)}
-                  </TableCell>
+                  {hasAccumulatedDarf && (
+                    <TableCell className="text-right font-mono text-sm">
+                      R$ {formatMoney(suggestion.final_darf_carryforward, hideValues)}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -571,15 +560,10 @@ export default function CapitalGainsReport() {
 
   const alerts = useMemo(() => {
     const result = [];
-    const hasIrrfOverride = visibleRows.some((row) => getReportOverride(row) !== null || overridesByKey.has(overrideKey(row.year_month, row.regime)));
-    const hasIrrfDiff = visibleRows.some((row) => !moneyEquals(row.theoretical_irrf, row.effective_irrf));
-    if (hasIrrfOverride || hasIrrfDiff) result.push('IRRF efetivo diferente do teórico em pelo menos uma competência.');
-    if (visibleDarfSuggestions.some((suggestion) => moneyGreaterThanZero(suggestion.darf_estimated))) result.push('Há DARF operacional estimado maior que zero no período filtrado.');
-    if (visibleDarfSuggestions.length > 0) result.push('DARF operacional é consolidado por código de receita depois do IRRF próprio de cada regime.');
     if (visibleRows.some((row) => row.regime === 'FI_INFRA_EXEMPT')) result.push('FI-Infra exibido como informativo/isento.');
     if (visibleRows.some((row) => row.regime === 'CRYPTO_GCAP')) result.push('Cripto exibido apenas como apuração informativa nesta fase.');
     return result;
-  }, [overridesByKey, visibleDarfSuggestions, visibleRows]);
+  }, [visibleRows]);
 
   const toggleExpanded = (key) => {
     setExpanded((current) => {
@@ -755,7 +739,7 @@ export default function CapitalGainsReport() {
         <SummaryCard title="Base tributável" value={summary.taxableBase} hideValues={hideValues} />
         <SummaryCard title="Imposto calculado" value={summary.taxDue} hideValues={hideValues} />
         <SummaryCard title="Saldo IRRF a compensar" value={summary.finalIrrf} hideValues={hideValues} />
-        <SummaryCard title="DARF estimado" value={summary.darfEstimated} hideValues={hideValues} />
+        <SummaryCard title="DARF" value={summary.darfEstimated} hideValues={hideValues} />
         <SummaryCard title="Prejuízo final a compensar" value={summary.finalLoss} hideValues={hideValues} />
       </div>
 
