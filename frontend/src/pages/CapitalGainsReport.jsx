@@ -53,9 +53,9 @@ const TABLE_COLUMNS = {
   B3_COMMON_15: [
     ['gross_sale', 'Venda'],
     ['realized_result', 'Resultado'],
-    ['exempt_gain', 'Rend. Isento'],
+    ['exempt_gain', 'Ganho Isento'],
     ['taxable_base', 'Base Tributável'],
-    ['theoretical_irrf', 'IRRF Teórico'],
+    ['theoretical_irrf', 'IRRF Nota'],
     ['effective_irrf', 'IRRF Efetivo'],
     ['used_irrf', 'IRRF Usado'],
     ['net_tax_payable', 'Imposto'],
@@ -65,7 +65,7 @@ const TABLE_COLUMNS = {
     ['gross_sale', 'Venda'],
     ['realized_result', 'Resultado'],
     ['taxable_base', 'Base Tributável'],
-    ['theoretical_irrf', 'IRRF Teórico'],
+    ['theoretical_irrf', 'IRRF Nota'],
     ['effective_irrf', 'IRRF Efetivo'],
     ['used_irrf', 'IRRF Usado'],
     ['net_tax_payable', 'Imposto'],
@@ -74,7 +74,7 @@ const TABLE_COLUMNS = {
   FI_INFRA_EXEMPT: [
     ['gross_sale', 'Venda'],
     ['realized_result', 'Resultado'],
-    ['exempt_gain', 'Rend. Isento'],
+    ['exempt_gain', 'Ganho Isento'],
     ['effective_irrf', 'IRRF Efetivo'],
     ['final_loss_carryforward', 'Prejuízo Ac.'],
   ],
@@ -88,12 +88,12 @@ const TABLE_COLUMNS = {
 const ASSET_COLUMNS = [
   ['ticker', 'Ativo', 'text'],
   ['asset_class', 'Classe', 'text'],
-  ['fiscal_regime', 'Regime fiscal', 'regime'],
-  ['gross_sale', 'Venda bruta'],
-  ['realized_result', 'Resultado líquido'],
-  ['exempt_gain', 'Ganho isento'],
-  ['theoretical_irrf', 'IRRF teórico'],
-  ['effective_irrf', 'IRRF efetivo'],
+  ['fiscal_regime', 'Regime Fiscal', 'regime'],
+  ['gross_sale', 'Venda Bruta'],
+  ['realized_result', 'Resultado Líquido'],
+  ['exempt_gain', 'Ganho Isento'],
+  ['theoretical_irrf', 'IRRF Teórico'],
+  ['effective_irrf', 'IRRF Efetivo'],
 ];
 
 const ASSET_COLUMNS_BY_REGIME = {
@@ -551,8 +551,6 @@ export default function CapitalGainsReport() {
   const summary = useMemo(() => ({
     realizedResult: centsToMoneyString(addMoney(visibleRows, 'realized_result')),
     exemptGain: centsToMoneyString(addMoney(visibleRows, 'exempt_gain')),
-    taxableBase: centsToMoneyString(addMoney(visibleRows, 'taxable_base')),
-    taxDue: centsToMoneyString(addMoney(visibleRows, 'tax_due')),
     finalIrrf: centsToMoneyString(finalIrrfBalance),
     darfEstimated: centsToMoneyString(addMoney(visibleDarfSuggestions, 'darf_estimated')),
     finalLoss: centsToMoneyString(finalLossBalance),
@@ -733,14 +731,12 @@ export default function CapitalGainsReport() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard title="Resultado líquido realizado" value={summary.realizedResult} hideValues={hideValues} />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+        <SummaryCard title="Resultado líquido" value={summary.realizedResult} hideValues={hideValues} />
         <SummaryCard title="Ganhos isentos" value={summary.exemptGain} hideValues={hideValues} />
-        <SummaryCard title="Base tributável" value={summary.taxableBase} hideValues={hideValues} />
-        <SummaryCard title="Imposto calculado" value={summary.taxDue} hideValues={hideValues} />
         <SummaryCard title="Saldo IRRF a compensar" value={summary.finalIrrf} hideValues={hideValues} />
-        <SummaryCard title="DARF" value={summary.darfEstimated} hideValues={hideValues} />
-        <SummaryCard title="Prejuízo final a compensar" value={summary.finalLoss} hideValues={hideValues} />
+        <SummaryCard title="DARF Total" value={summary.darfEstimated} hideValues={hideValues} />
+        <SummaryCard title="Prejuízo final" value={summary.finalLoss} hideValues={hideValues} />
       </div>
 
       <DarfSuggestionsTable suggestions={visibleDarfSuggestions} hideValues={hideValues} />
