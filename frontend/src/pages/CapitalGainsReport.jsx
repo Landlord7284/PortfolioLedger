@@ -36,51 +36,51 @@ const MONTHS = [
 const REGIME_ORDER = ['B3_COMMON_15', 'B3_FII_FIAGRO_20', 'FI_INFRA_EXEMPT', 'CRYPTO_GCAP'];
 
 const REGIME_LABELS = {
-  B3_COMMON_15: 'B3 - Operações comuns 15%',
-  B3_FII_FIAGRO_20: 'B3 - FII / Fiagro 20%',
+  B3_COMMON_15: 'B3 - Operações Comuns',
+  B3_FII_FIAGRO_20: 'B3 - FII / Fiagro',
   FI_INFRA_EXEMPT: 'FI-Infra / Isentos',
   CRYPTO_GCAP: 'Criptoativos',
 };
 
 const REGIME_DESCRIPTIONS = {
-  B3_COMMON_15: 'A isenção de R$ 20.000 para Ação BR é exibida apenas quando apurada pelo backend.',
-  B3_FII_FIAGRO_20: 'Apuração separada de FII e Fiagro, sem mistura com operações comuns.',
+  B3_COMMON_15: 'Apuração de Ações, BDR e ETF. Alíquota de 15%.',
+  B3_FII_FIAGRO_20: 'Apuração de FII e Fiagro. Alíquota de 20%.',
   FI_INFRA_EXEMPT: 'Bloco informativo/isento nesta fase.',
   CRYPTO_GCAP: 'Apuração informativa nesta fase.',
 };
 
 const TABLE_COLUMNS = {
   B3_COMMON_15: [
-    ['gross_sale', 'Venda bruta'],
-    ['realized_result', 'Resultado líquido'],
-    ['exempt_gain', 'Ganho isento'],
-    ['taxable_base', 'Base tributável'],
-    ['theoretical_irrf', 'IRRF teórico'],
-    ['effective_irrf', 'IRRF efetivo'],
-    ['used_irrf', 'IRRF usado'],
-    ['net_tax_payable', 'Imposto líquido'],
-    ['final_loss_carryforward', 'Prejuízo final'],
+    ['gross_sale', 'Venda'],
+    ['realized_result', 'Resultado'],
+    ['exempt_gain', 'Rend. Isento'],
+    ['taxable_base', 'Base Tributável'],
+    ['theoretical_irrf', 'IRRF Teórico'],
+    ['effective_irrf', 'IRRF Efetivo'],
+    ['used_irrf', 'IRRF Usado'],
+    ['net_tax_payable', 'Imposto'],
+    ['final_loss_carryforward', 'Prejuízo Ac.'],
   ],
   B3_FII_FIAGRO_20: [
-    ['gross_sale', 'Venda bruta'],
-    ['realized_result', 'Resultado líquido'],
-    ['taxable_base', 'Base tributável'],
-    ['theoretical_irrf', 'IRRF teórico'],
-    ['effective_irrf', 'IRRF efetivo'],
-    ['used_irrf', 'IRRF usado'],
-    ['net_tax_payable', 'Imposto líquido'],
-    ['final_loss_carryforward', 'Prejuízo final'],
+    ['gross_sale', 'Venda'],
+    ['realized_result', 'Resultado'],
+    ['taxable_base', 'Base Tributável'],
+    ['theoretical_irrf', 'IRRF Teórico'],
+    ['effective_irrf', 'IRRF Efetivo'],
+    ['used_irrf', 'IRRF Usado'],
+    ['net_tax_payable', 'Imposto'],
+    ['final_loss_carryforward', 'Prejuízo Ac.'],
   ],
   FI_INFRA_EXEMPT: [
-    ['gross_sale', 'Venda bruta'],
-    ['realized_result', 'Resultado econômico'],
-    ['exempt_gain', 'Ganho isento'],
-    ['effective_irrf', 'IRRF efetivo'],
-    ['final_loss_carryforward', 'Prejuízo final'],
+    ['gross_sale', 'Venda'],
+    ['realized_result', 'Resultado'],
+    ['exempt_gain', 'Rend. Isento'],
+    ['effective_irrf', 'IRRF Efetivo'],
+    ['final_loss_carryforward', 'Prejuízo Ac.'],
   ],
   CRYPTO_GCAP: [
-    ['gross_sale', 'Venda bruta'],
-    ['realized_result', 'Resultado líquido'],
+    ['gross_sale', 'Venda'],
+    ['realized_result', 'Resultado'],
     ['final_loss_carryforward', 'Prejuízo acumulado informativo'],
   ],
 };
@@ -345,7 +345,7 @@ function DarfSuggestionsTable({ suggestions, hideValues }) {
   return (
     <Card className="overflow-hidden">
       <CardHeader className="border-b">
-        <CardTitle className="text-base">DARF operacional por código</CardTitle>
+        <CardTitle className="text-base">Apuração consolidada de DARF por código</CardTitle>
         <CardDescription>
           Guia estimada após cada regime aplicar prejuízo e IRRF próprios. O piso mínimo é consolidado por código de receita.
         </CardDescription>
