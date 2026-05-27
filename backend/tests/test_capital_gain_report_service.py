@@ -460,6 +460,89 @@ def test_irrf_override_api_lifecycle_and_report_fallback(tmp_path, monkeypatch):
     assert row["effective_irrf"] == "0.00"
 
 
+def test_manual_tax_paid_override_replaces_only_payable_tax_and_zero_falls_back(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.01', withholding_rate = '0', exemption_limit = '0', minimum_darf_amount = '10.00'
+            WHERE regime = 'B3_COMMON_15'
+            """
+        )
+        asset = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-01-20", "100", "20000", gross_value="20000")
+        tax_service.upsert_capital_gain_tax_paid_override(
+            conn,
+            portfolio_id=portfolio["id"],
+            year_month="2025-01",
+            regime="B3_COMMON_15",
+            manual_tax_paid="80",
+        )
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+        tax_service.upsert_capital_gain_tax_paid_override(
+            conn,
+            portfolio_id=portfolio["id"],
+            year_month="2025-01",
+            regime="B3_COMMON_15",
+            manual_tax_paid="0",
+        )
+        fallback_report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    row = _regime(report, "2025-01", "B3_COMMON_15")
+    suggestion = _darf_suggestion(report, "2025-01", "6015")
+    assert row["tax_due"] == "100.00"
+    assert row["calculated_net_tax_payable"] == "100.00"
+    assert row["manual_tax_paid"] == "80.00"
+    assert row["net_tax_payable"] == "80.00"
+    assert suggestion["current_month_net_tax"] == "80.00"
+    assert suggestion["darf_estimated"] == "80.00"
+
+    fallback_row = _regime(fallback_report, "2025-01", "B3_COMMON_15")
+    fallback_suggestion = _darf_suggestion(fallback_report, "2025-01", "6015")
+    assert fallback_row["manual_tax_paid"] is None
+    assert fallback_row["net_tax_payable"] == "100.00"
+    assert fallback_suggestion["darf_estimated"] == "100.00"
+
+
+def test_manual_capital_gain_event_enters_report_without_ledger_event(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        manual = tax_service.create_capital_gain_manual_event(
+            conn,
+            {
+                "portfolio_id": portfolio["id"],
+                "year_month": "2025-05",
+                "regime": "B3_COMMON_15",
+                "ticker": "DIREITO XPTO",
+                "gross_sale": "500",
+                "realized_result": "200",
+            },
+        )
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+        ledger_count = conn.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
+    finally:
+        _close(ctx)
+
+    row = _regime(report, "2025-05", "B3_COMMON_15")
+    asset = row["assets"][0]
+    assert ledger_count == 0
+    assert row["gross_sale"] == "500.00"
+    assert row["realized_result"] == "200.00"
+    assert row["taxable_result_before_compensation"] == "200.00"
+    assert row["taxable_base"] == "200.00"
+    assert row["tax_due"] == "30.00"
+    assert asset["manual_event_id"] == manual["id"]
+    assert asset["is_manual"] is True
+    assert asset["ticker"] == "DIREITO XPTO"
+    assert asset["asset_id"] == -manual["id"]
+
+
 def test_loss_carryforward_crosses_year_by_bucket(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:

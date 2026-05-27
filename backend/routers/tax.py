@@ -15,6 +15,11 @@ from backend.models import (
     FiscalTaxParameterCreate,
     FiscalTaxParameterResponse,
     FiscalTaxParameterUpdate,
+    CapitalGainManualEventCreate,
+    CapitalGainManualEventResponse,
+    CapitalGainManualEventUpdate,
+    CapitalGainTaxPaidOverrideResponse,
+    CapitalGainTaxPaidOverrideUpsert,
     IrrfOverrideResponse,
     IrrfOverrideUpsert,
 )
@@ -148,4 +153,77 @@ def delete_irrf_override(override_id: int):
     with get_db() as conn:
         if not tax_service.delete_irrf_override(conn, override_id):
             raise HTTPException(404, "Override de IRRF nao encontrado.")
+    return {"ok": True}
+
+
+@router.get("/capital-gains/tax-paid-overrides", response_model=list[CapitalGainTaxPaidOverrideResponse])
+def list_capital_gain_tax_paid_overrides(
+    portfolio_id: int = Query(...),
+    year: Optional[int] = Query(None),
+):
+    with get_db() as conn:
+        return tax_service.list_capital_gain_tax_paid_overrides(conn, portfolio_id=portfolio_id, year=year)
+
+
+@router.put("/capital-gains/tax-paid-overrides", response_model=CapitalGainTaxPaidOverrideResponse)
+def upsert_capital_gain_tax_paid_override(body: CapitalGainTaxPaidOverrideUpsert):
+    with get_db() as conn:
+        try:
+            return tax_service.upsert_capital_gain_tax_paid_override(
+                conn,
+                portfolio_id=body.portfolio_id,
+                year_month=body.year_month,
+                regime=body.regime,
+                manual_tax_paid=body.manual_tax_paid,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+
+@router.delete("/capital-gains/tax-paid-overrides/{override_id}")
+def delete_capital_gain_tax_paid_override(override_id: int):
+    with get_db() as conn:
+        if not tax_service.delete_capital_gain_tax_paid_override(conn, override_id):
+            raise HTTPException(404, "Ajuste de imposto pago nao encontrado.")
+    return {"ok": True}
+
+
+@router.get("/capital-gains/manual-events", response_model=list[CapitalGainManualEventResponse])
+def list_capital_gain_manual_events(
+    portfolio_id: int = Query(...),
+    year: Optional[int] = Query(None),
+):
+    with get_db() as conn:
+        return tax_service.list_capital_gain_manual_events(conn, portfolio_id=portfolio_id, year=year)
+
+
+@router.post("/capital-gains/manual-events", response_model=CapitalGainManualEventResponse)
+def create_capital_gain_manual_event(body: CapitalGainManualEventCreate):
+    with get_db() as conn:
+        try:
+            return tax_service.create_capital_gain_manual_event(conn, body.model_dump())
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+
+@router.patch("/capital-gains/manual-events/{event_id}", response_model=CapitalGainManualEventResponse)
+def update_capital_gain_manual_event(event_id: int, body: CapitalGainManualEventUpdate):
+    with get_db() as conn:
+        try:
+            return tax_service.update_capital_gain_manual_event(
+                conn,
+                event_id,
+                body.model_dump(exclude_unset=True),
+            )
+        except ValueError as e:
+            message = str(e)
+            status = 404 if "nao encontrado" in message else 400
+            raise HTTPException(status, message)
+
+
+@router.delete("/capital-gains/manual-events/{event_id}")
+def delete_capital_gain_manual_event(event_id: int):
+    with get_db() as conn:
+        if not tax_service.delete_capital_gain_manual_event(conn, event_id):
+            raise HTTPException(404, "Evento manual de ganho de capital nao encontrado.")
     return {"ok": True}

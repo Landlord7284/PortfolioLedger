@@ -185,6 +185,26 @@ export const tax = {
     request('/tax/irrf-overrides', { method: 'PUT', body: JSON.stringify(data) }),
   deleteIrrfOverride: (id) =>
     request(`/tax/irrf-overrides/${id}`, { method: 'DELETE' }),
+  capitalGainTaxPaidOverrides: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId });
+    if (year) params.set('year', year);
+    return request(`/tax/capital-gains/tax-paid-overrides?${params.toString()}`);
+  },
+  upsertCapitalGainTaxPaidOverride: (data) =>
+    request('/tax/capital-gains/tax-paid-overrides', { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCapitalGainTaxPaidOverride: (id) =>
+    request(`/tax/capital-gains/tax-paid-overrides/${id}`, { method: 'DELETE' }),
+  capitalGainManualEvents: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId });
+    if (year) params.set('year', year);
+    return request(`/tax/capital-gains/manual-events?${params.toString()}`);
+  },
+  createCapitalGainManualEvent: (data) =>
+    request('/tax/capital-gains/manual-events', { method: 'POST', body: JSON.stringify(data) }),
+  updateCapitalGainManualEvent: (id, data) =>
+    request(`/tax/capital-gains/manual-events/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteCapitalGainManualEvent: (id) =>
+    request(`/tax/capital-gains/manual-events/${id}`, { method: 'DELETE' }),
 };
 
 // ── Import ──────────────────────────────────────────────────

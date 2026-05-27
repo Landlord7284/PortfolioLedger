@@ -33,6 +33,8 @@ TREATMENT_EXEMPT_ZERO = "EXEMPT_ZERO"
 class SaleItem:
     event_id: int
     asset_id: int
+    manual_event_id: int | None
+    is_manual: bool
     ticker: str | None
     asset_class: str
     market: str
@@ -49,6 +51,8 @@ class SaleItem:
 @dataclass
 class AssetAggregate:
     asset_id: int
+    manual_event_id: int | None
+    is_manual: bool
     ticker: str | None
     asset_class: str
     fiscal_regime: str
@@ -95,7 +99,7 @@ def _month_key(value: str) -> str:
 
 
 def _is_action_br(item: SaleItem) -> bool:
-    return item.asset_class == AssetClass.ACAO.value and item.market == "BR"
+    return not item.is_manual and item.asset_class == AssetClass.ACAO.value and item.market == "BR"
 
 
 def _resolve_regime(row: sqlite3.Row) -> str | None:
@@ -194,6 +198,8 @@ def _fetch_sales(conn: sqlite3.Connection, portfolio_id: int, year: int) -> list
                 SaleItem(
                     event_id=row["id"],
                     asset_id=row["asset_id"],
+                    manual_event_id=None,
+                    is_manual=False,
                     ticker=row["current_ticker"],
                     asset_class=row["asset_class"],
                     market=row["market"],
@@ -208,6 +214,43 @@ def _fetch_sales(conn: sqlite3.Connection, portfolio_id: int, year: int) -> list
                 )
             )
     return sales
+
+
+def _fetch_manual_events(conn: sqlite3.Connection, portfolio_id: int, year: int) -> list[SaleItem]:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM fiscal_capital_gain_manual_events
+        WHERE portfolio_id = ?
+          AND year_month <= ?
+        ORDER BY year_month, regime, id
+        """,
+        (portfolio_id, f"{year}-12"),
+    ).fetchall()
+    result: list[SaleItem] = []
+    for row in rows:
+        gross_sale = _d(row["gross_sale"])
+        realized_result = _d(row["realized_result"])
+        result.append(
+            SaleItem(
+                event_id=-row["id"],
+                asset_id=-row["id"],
+                manual_event_id=row["id"],
+                is_manual=True,
+                ticker=row["ticker"],
+                asset_class="Manual",
+                market="BR",
+                currency="BRL",
+                event_date=f"{row['year_month']}-01",
+                regime=row["regime"],
+                gross_sale=gross_sale,
+                net_sale=gross_sale,
+                costs=ZERO,
+                cost_basis=gross_sale - realized_result,
+                net_result=realized_result,
+            )
+        )
+    return result
 
 
 def _tax_parameter(conn: sqlite3.Connection, regime: str, event_date: str) -> dict:
@@ -234,6 +277,19 @@ def _overrides(conn: sqlite3.Connection, portfolio_id: int, year: int) -> dict[t
         """
         SELECT *
         FROM fiscal_irrf_overrides
+        WHERE portfolio_id = ?
+          AND year_month <= ?
+        """,
+        (portfolio_id, f"{year}-12"),
+    ).fetchall()
+    return {(row["year_month"], row["regime"]): dict(row) for row in rows}
+
+
+def _tax_paid_overrides(conn: sqlite3.Connection, portfolio_id: int, year: int) -> dict[tuple[str, str], dict]:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM fiscal_capital_gain_tax_overrides
         WHERE portfolio_id = ?
           AND year_month <= ?
         """,
@@ -271,6 +327,8 @@ def _empty_regime_row(regime: str, bucket: str | None, param: dict) -> dict:
         "initial_irrf_carryforward": ZERO,
         "used_irrf": ZERO,
         "net_tax_payable": ZERO,
+        "calculated_net_tax_payable": ZERO,
+        "manual_tax_paid": None,
         "final_irrf_carryforward": ZERO,
         "final_loss_carryforward": ZERO,
         "assets": {},
@@ -283,6 +341,8 @@ def _asset_rows(assets: dict[int, AssetAggregate]) -> list[dict]:
         result.append(
             {
                 "asset_id": aggregate.asset_id,
+                "manual_event_id": aggregate.manual_event_id,
+                "is_manual": aggregate.is_manual,
                 "ticker": aggregate.ticker,
                 "asset_class": aggregate.asset_class,
                 "fiscal_regime": aggregate.fiscal_regime,
@@ -337,6 +397,8 @@ def _format_regime_row(row: dict) -> dict:
         "theoretical_irrf": _money(row["theoretical_irrf"]),
         "irrf_override": _money(row["irrf_override"]) if row["irrf_override"] is not None else None,
         "effective_irrf": _money(row["effective_irrf"]),
+        "calculated_net_tax_payable": _money(row["calculated_net_tax_payable"]),
+        "manual_tax_paid": _money(row["manual_tax_paid"]) if row["manual_tax_paid"] is not None else None,
         "minimum_darf_amount": _money(row["minimum_darf_amount"]),
         "initial_darf_carryforward": _money(row["initial_darf_carryforward"]),
         "darf_before_minimum": _money(row["darf_before_minimum"]),
@@ -382,17 +444,22 @@ def _allocate_effective_irrf(row: dict) -> None:
 
 def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -> dict:
     sales_by_month_regime: dict[tuple[str, str], list[SaleItem]] = defaultdict(list)
-    for item in _fetch_sales(conn, portfolio_id, year):
+    for item in [*_fetch_sales(conn, portfolio_id, year), *_fetch_manual_events(conn, portfolio_id, year)]:
         sales_by_month_regime[(_month_key(item.event_date), item.regime)].append(item)
 
     overrides = _overrides(conn, portfolio_id, year)
+    tax_paid_overrides = _tax_paid_overrides(conn, portfolio_id, year)
     loss_carry: dict[str, Decimal] = defaultdict(Decimal)
     darf_carry_by_code: dict[str, Decimal] = defaultdict(Decimal)
     irrf_carry_by_regime: dict[str, Decimal] = defaultdict(Decimal)
     months = []
     current_irrf_year: str | None = None
 
-    year_months = sorted({month for month, _ in sales_by_month_regime} | {month for month, _ in overrides})
+    year_months = sorted(
+        {month for month, _ in sales_by_month_regime}
+        | {month for month, _ in overrides}
+        | {month for month, _ in tax_paid_overrides}
+    )
 
     for month in year_months:
         month_year = month[:4]
@@ -407,11 +474,16 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
                 for key_month, regime in sales_by_month_regime
                 if key_month == month
             }
-            | {
-                regime
-                for key_month, regime in overrides
-                if key_month == month and is_supported_capital_gain_regime(regime)
-            }
+             | {
+                 regime
+                 for key_month, regime in overrides
+                 if key_month == month and is_supported_capital_gain_regime(regime)
+             }
+             | {
+                 regime
+                 for key_month, regime in tax_paid_overrides
+                 if key_month == month and is_supported_capital_gain_regime(regime)
+             }
         )
 
         for regime in month_regimes:
@@ -443,7 +515,7 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
 
                 aggregate = assets.setdefault(
                     item.asset_id,
-                    AssetAggregate(item.asset_id, item.ticker, item.asset_class, item.regime),
+                    AssetAggregate(item.asset_id, item.manual_event_id, item.is_manual, item.ticker, item.asset_class, item.regime),
                 )
                 aggregate.add(item)
                 aggregate.theoretical_irrf += item_theoretical_irrf
@@ -497,6 +569,14 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
                 row["used_irrf"] = min(available_irrf, row["tax_due"])
                 row["final_irrf_carryforward"] = available_irrf - row["used_irrf"]
                 row["net_tax_payable"] = row["tax_due"] - row["used_irrf"]
+                row["calculated_net_tax_payable"] = row["net_tax_payable"]
+
+                tax_paid_override = tax_paid_overrides.get((month, regime))
+                if tax_paid_override:
+                    manual_tax_paid = _d(tax_paid_override["manual_tax_paid"])
+                    if manual_tax_paid > ZERO:
+                        row["manual_tax_paid"] = manual_tax_paid
+                        row["net_tax_payable"] = manual_tax_paid
                 row["darf_before_minimum"] = row["net_tax_payable"]
                 irrf_carry_by_regime[regime] = row["final_irrf_carryforward"]
 

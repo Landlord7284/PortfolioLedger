@@ -299,6 +299,8 @@ class IncomeReportResponse(BaseModel):
 
 class CapitalGainAssetRow(BaseModel):
     asset_id: int
+    manual_event_id: Optional[int] = None
+    is_manual: bool = False
     ticker: Optional[str] = None
     asset_class: str
     fiscal_regime: str
@@ -332,6 +334,8 @@ class CapitalGainRegimeRow(BaseModel):
     theoretical_irrf: str
     irrf_override: Optional[str] = None
     effective_irrf: str
+    calculated_net_tax_payable: str
+    manual_tax_paid: Optional[str] = None
     minimum_darf_amount: str
     initial_darf_carryforward: str
     darf_before_minimum: str
@@ -468,6 +472,60 @@ class IrrfOverrideResponse(BaseModel):
     regime: str
     effective_irrf: str
     notes: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class CapitalGainTaxPaidOverrideUpsert(BaseModel):
+    portfolio_id: int
+    year_month: str
+    regime: str
+    manual_tax_paid: str
+
+
+class CapitalGainTaxPaidOverrideResponse(BaseModel):
+    id: int
+    portfolio_id: int
+    year_month: str
+    regime: str
+    manual_tax_paid: str
+    created_at: str
+    updated_at: str
+
+
+class CapitalGainManualEventCreate(BaseModel):
+    portfolio_id: int
+    year_month: str
+    regime: str
+    ticker: str = Field(..., min_length=1, max_length=60)
+    gross_sale: str
+    realized_result: str
+
+    @field_validator("ticker")
+    @classmethod
+    def manual_event_ticker_upper(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class CapitalGainManualEventUpdate(BaseModel):
+    ticker: Optional[str] = Field(None, min_length=1, max_length=60)
+    gross_sale: Optional[str] = None
+    realized_result: Optional[str] = None
+
+    @field_validator("ticker")
+    @classmethod
+    def manual_event_ticker_update_upper(cls, v: str | None) -> str | None:
+        return v.strip().upper() if v is not None else None
+
+
+class CapitalGainManualEventResponse(BaseModel):
+    id: int
+    portfolio_id: int
+    year_month: str
+    regime: str
+    ticker: str
+    gross_sale: str
+    realized_result: str
     created_at: str
     updated_at: str
 

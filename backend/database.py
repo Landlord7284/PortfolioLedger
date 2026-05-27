@@ -219,6 +219,37 @@ CREATE TABLE IF NOT EXISTS fiscal_irrf_overrides (
 CREATE INDEX IF NOT EXISTS idx_fiscal_irrf_overrides_lookup
     ON fiscal_irrf_overrides(portfolio_id, year_month, regime);
 
+-- Manual DARF paid values for capital gains reports
+CREATE TABLE IF NOT EXISTS fiscal_capital_gain_tax_overrides (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id    INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+    year_month      TEXT    NOT NULL,
+    regime          TEXT    NOT NULL,
+    manual_tax_paid TEXT    NOT NULL,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(portfolio_id, year_month, regime)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiscal_capital_gain_tax_overrides_lookup
+    ON fiscal_capital_gain_tax_overrides(portfolio_id, year_month, regime);
+
+-- Manual capital gain events that do not belong in the ledger
+CREATE TABLE IF NOT EXISTS fiscal_capital_gain_manual_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id    INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+    year_month      TEXT    NOT NULL,
+    regime          TEXT    NOT NULL,
+    ticker          TEXT    NOT NULL,
+    gross_sale      TEXT    NOT NULL,
+    realized_result TEXT    NOT NULL,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiscal_capital_gain_manual_events_lookup
+    ON fiscal_capital_gain_manual_events(portfolio_id, year_month, regime);
+
 -- ────────────────────────────────────────────────────────────
 -- Materialised position cache  (derived from ledger)
 -- ────────────────────────────────────────────────────────────
@@ -390,6 +421,35 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_fiscal_irrf_overrides_lookup
             ON fiscal_irrf_overrides(portfolio_id, year_month, regime);
+
+        CREATE TABLE IF NOT EXISTS fiscal_capital_gain_tax_overrides (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id    INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            year_month      TEXT    NOT NULL,
+            regime          TEXT    NOT NULL,
+            manual_tax_paid TEXT    NOT NULL,
+            created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(portfolio_id, year_month, regime)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_fiscal_capital_gain_tax_overrides_lookup
+            ON fiscal_capital_gain_tax_overrides(portfolio_id, year_month, regime);
+
+        CREATE TABLE IF NOT EXISTS fiscal_capital_gain_manual_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id    INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            year_month      TEXT    NOT NULL,
+            regime          TEXT    NOT NULL,
+            ticker          TEXT    NOT NULL,
+            gross_sale      TEXT    NOT NULL,
+            realized_result TEXT    NOT NULL,
+            created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_fiscal_capital_gain_manual_events_lookup
+            ON fiscal_capital_gain_manual_events(portfolio_id, year_month, regime);
         """
     )
     _add_column_if_missing(

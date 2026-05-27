@@ -430,6 +430,14 @@ def _decimal_text(value: Any, field_name: str) -> str:
     return str(parsed)
 
 
+def _signed_decimal_text(value: Any, field_name: str) -> str:
+    try:
+        parsed = _d(value)
+    except Exception:
+        raise ValueError(f"{field_name} deve ser numerico.")
+    return str(parsed)
+
+
 def _nullable_decimal_text(value: Any, field_name: str) -> str | None:
     if value in (None, ""):
         return None
@@ -667,3 +675,157 @@ def upsert_irrf_override(
 def delete_irrf_override(conn: sqlite3.Connection, override_id: int) -> bool:
     cur = conn.execute("DELETE FROM fiscal_irrf_overrides WHERE id = ?", (override_id,))
     return cur.rowcount > 0
+
+
+def list_capital_gain_tax_paid_overrides(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    year: Optional[int] = None,
+) -> list[dict]:
+    params: list[Any] = [portfolio_id]
+    where = "portfolio_id = ?"
+    if year is not None:
+        where += " AND year_month BETWEEN ? AND ?"
+        params.extend([f"{year}-01", f"{year}-12"])
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM fiscal_capital_gain_tax_overrides
+        WHERE {where}
+        ORDER BY year_month, regime
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def upsert_capital_gain_tax_paid_override(
+    conn: sqlite3.Connection,
+    *,
+    portfolio_id: int,
+    year_month: str,
+    regime: str,
+    manual_tax_paid: str | Decimal,
+) -> dict:
+    _validate_year_month(year_month)
+    require_supported_capital_gain_regime(regime)
+    if not conn.execute("SELECT 1 FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone():
+        raise ValueError(f"Carteira {portfolio_id} nao encontrada.")
+    if not has_tax_parameter(conn, regime, f"{year_month}-01"):
+        raise ValueError(f"Parametro fiscal nao encontrado para {regime} em {year_month}.")
+    value = _d(manual_tax_paid)
+    if value < ZERO:
+        raise ValueError("Imposto pago nao pode ser negativo.")
+    conn.execute(
+        """
+        INSERT INTO fiscal_capital_gain_tax_overrides (
+            portfolio_id, year_month, regime, manual_tax_paid
+        )
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(portfolio_id, year_month, regime) DO UPDATE SET
+            manual_tax_paid = excluded.manual_tax_paid,
+            updated_at = datetime('now')
+        """,
+        (portfolio_id, year_month, regime, str(value)),
+    )
+    row = conn.execute(
+        """
+        SELECT *
+        FROM fiscal_capital_gain_tax_overrides
+        WHERE portfolio_id = ? AND year_month = ? AND regime = ?
+        """,
+        (portfolio_id, year_month, regime),
+    ).fetchone()
+    return dict(row)
+
+
+def delete_capital_gain_tax_paid_override(conn: sqlite3.Connection, override_id: int) -> bool:
+    cur = conn.execute("DELETE FROM fiscal_capital_gain_tax_overrides WHERE id = ?", (override_id,))
+    return cur.rowcount > 0
+
+
+def list_capital_gain_manual_events(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    year: Optional[int] = None,
+) -> list[dict]:
+    params: list[Any] = [portfolio_id]
+    where = "portfolio_id = ?"
+    if year is not None:
+        where += " AND year_month BETWEEN ? AND ?"
+        params.extend([f"{year}-01", f"{year}-12"])
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM fiscal_capital_gain_manual_events
+        WHERE {where}
+        ORDER BY year_month, regime, ticker, id
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_capital_gain_manual_event(conn: sqlite3.Connection, values: dict[str, Any]) -> dict:
+    portfolio_id = int(values["portfolio_id"])
+    year_month = values["year_month"]
+    regime = values["regime"]
+    _validate_year_month(year_month)
+    require_supported_capital_gain_regime(regime)
+    ticker = _nullable_text(values.get("ticker"))
+    if not ticker:
+        raise ValueError("Ativo e obrigatorio.")
+    if not conn.execute("SELECT 1 FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone():
+        raise ValueError(f"Carteira {portfolio_id} nao encontrada.")
+    if not has_tax_parameter(conn, regime, f"{year_month}-01"):
+        raise ValueError(f"Parametro fiscal nao encontrado para {regime} em {year_month}.")
+    gross_sale = _decimal_text(values.get("gross_sale", "0"), "Venda bruta")
+    realized_result = _signed_decimal_text(values.get("realized_result", "0"), "Resultado liquido")
+    cur = conn.execute(
+        """
+        INSERT INTO fiscal_capital_gain_manual_events (
+            portfolio_id, year_month, regime, ticker, gross_sale, realized_result
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (portfolio_id, year_month, regime, ticker.upper(), gross_sale, realized_result),
+    )
+    return _capital_gain_manual_event_row(conn, cur.lastrowid)
+
+
+def update_capital_gain_manual_event(conn: sqlite3.Connection, event_id: int, updates: dict[str, Any]) -> dict:
+    current = _capital_gain_manual_event_row(conn, event_id)
+    if not updates:
+        return current
+    ticker = _nullable_text(updates.get("ticker", current["ticker"]))
+    if not ticker:
+        raise ValueError("Ativo e obrigatorio.")
+    gross_sale = _decimal_text(updates.get("gross_sale", current["gross_sale"]), "Venda bruta")
+    realized_result = _signed_decimal_text(
+        updates.get("realized_result", current["realized_result"]),
+        "Resultado liquido",
+    )
+    conn.execute(
+        """
+        UPDATE fiscal_capital_gain_manual_events
+        SET ticker = ?, gross_sale = ?, realized_result = ?, updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (ticker.upper(), gross_sale, realized_result, event_id),
+    )
+    return _capital_gain_manual_event_row(conn, event_id)
+
+
+def delete_capital_gain_manual_event(conn: sqlite3.Connection, event_id: int) -> bool:
+    cur = conn.execute("DELETE FROM fiscal_capital_gain_manual_events WHERE id = ?", (event_id,))
+    return cur.rowcount > 0
+
+
+def _capital_gain_manual_event_row(conn: sqlite3.Connection, event_id: int) -> dict:
+    row = conn.execute(
+        "SELECT * FROM fiscal_capital_gain_manual_events WHERE id = ?",
+        (event_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError("Evento manual de ganho de capital nao encontrado.")
+    return dict(row)

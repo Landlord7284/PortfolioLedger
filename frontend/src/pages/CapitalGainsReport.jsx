@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ChevronDown, ChevronRight, Edit2, Loader2, RotateCcw, Trash2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronRight, Edit2, Loader2, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppContext } from '../App';
 import { reports as reportsApi, tax as taxApi } from '../api/client';
@@ -157,7 +157,7 @@ function formatRate(value) {
 function formatCellValue(row, column, hideValues) {
   const [field, , type] = column;
   if (type === 'rate') return formatRate(row[field]);
-  if (type === 'text') return row[field] || '-';
+  if (type === 'text') return row.is_manual && field === 'ticker' ? `${row[field] || '-'} (manual)` : row[field] || '-';
   if (type === 'regime') return REGIME_LABELS[row[field]] || row[field] || '-';
   return `R$ ${formatMoney(row[field], hideValues)}`;
 }
@@ -169,6 +169,30 @@ function backendMoneyToInput(value) {
   const whole = abs / 100n;
   const fraction = String(abs % 100n).padStart(2, '0');
   return `${sign}${whole.toLocaleString('pt-BR')},${fraction}`;
+}
+
+function applySignedCurrencyMask(value) {
+  const isNegative = String(value).includes('-');
+  const masked = applyCurrencyMask(String(value).replace(/-/g, ''));
+  if (!masked || decimalToCents(currencyToBackend(masked)) === 0n) return masked;
+  return isNegative ? `-${masked}` : masked;
+}
+
+function newManualEventDraft() {
+  return {
+    clientId: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: null,
+    ticker: '',
+    gross_sale: '0,00',
+    realized_result: '0,00',
+    _deleted: false,
+  };
+}
+
+function isBlankManualEventDraft(event) {
+  return !String(event.ticker || '').trim()
+    && decimalToCents(currencyToBackend(event.gross_sale)) === 0n
+    && decimalToCents(currencyToBackend(event.realized_result)) === 0n;
 }
 
 function getReportOverride(row) {
@@ -248,6 +272,8 @@ function RegimeTable({
   expanded,
   hideValues,
   overridesByKey,
+  taxPaidOverridesByKey,
+  manualEventsByKey,
   onToggle,
   onEditIrrf,
 }) {
@@ -287,8 +313,11 @@ function RegimeTable({
                 const key = overrideKey(row.year_month, row.regime);
                 const isExpanded = expanded.has(key);
                 const overrideRecord = overridesByKey.get(key);
+                const taxPaidOverride = taxPaidOverridesByKey.get(key);
+                const manualEventRecords = manualEventsByKey.get(key) || [];
                 const reportOverride = getReportOverride(row);
-                const hasOverride = reportOverride !== null || !!overrideRecord;
+                const hasManualTax = row.manual_tax_paid !== null && row.manual_tax_paid !== undefined;
+                const hasOverride = reportOverride !== null || !!overrideRecord || hasManualTax || manualEventRecords.length > 0;
                 const hasIrrfDiff = !moneyEquals(row.theoretical_irrf, row.effective_irrf);
                 const hasExemptGain = moneyGreaterThanZero(row.exempt_gain);
 
@@ -316,9 +345,9 @@ function RegimeTable({
                           <div className="flex justify-end gap-1">
                             {hasOverride && <Badge variant="secondary">Ajustado</Badge>}
                             {!hasOverride && hasIrrfDiff && <Badge variant="outline">Difere</Badge>}
-                            <Button variant="ghost" size="icon-sm" onClick={() => onEditIrrf(row, overrideRecord)}>
+                            <Button variant="ghost" size="icon-sm" onClick={() => onEditIrrf(row, overrideRecord, taxPaidOverride, manualEventRecords)}>
                               <Edit2 />
-                              <span className="sr-only">Editar IRRF efetivo</span>
+                              <span className="sr-only">Editar ajuste de apuração</span>
                             </Button>
                           </div>
                         </TableCell>
@@ -397,6 +426,8 @@ export default function CapitalGainsReport() {
   const [year, setYear] = useState(String(currentYear));
   const [report, setReport] = useState(null);
   const [overrides, setOverrides] = useState([]);
+  const [taxPaidOverrides, setTaxPaidOverrides] = useState([]);
+  const [manualEvents, setManualEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [monthFilter, setMonthFilter] = useState(ALL);
   const [regimeFilter, setRegimeFilter] = useState(ALL);
@@ -413,20 +444,28 @@ export default function CapitalGainsReport() {
     if (!activePortfolioId) {
       setReport(null);
       setOverrides([]);
+      setTaxPaidOverrides([]);
+      setManualEvents([]);
       return;
     }
 
     setLoading(true);
     try {
-      const [reportData, overrideData] = await Promise.all([
+      const [reportData, overrideData, taxPaidOverrideData, manualEventData] = await Promise.all([
         reportsApi.capitalGains({ portfolioId: activePortfolioId, year }),
         taxApi.irrfOverrides({ portfolioId: activePortfolioId, year }),
+        taxApi.capitalGainTaxPaidOverrides({ portfolioId: activePortfolioId, year }),
+        taxApi.capitalGainManualEvents({ portfolioId: activePortfolioId, year }),
       ]);
       setReport(reportData);
       setOverrides(overrideData);
+      setTaxPaidOverrides(taxPaidOverrideData);
+      setManualEvents(manualEventData);
     } catch (err) {
       setReport(null);
       setOverrides([]);
+      setTaxPaidOverrides([]);
+      setManualEvents([]);
       toast.error(err.message || 'Falha ao carregar Ganho de Capital.');
     } finally {
       setLoading(false);
@@ -443,6 +482,21 @@ export default function CapitalGainsReport() {
   const overridesByKey = useMemo(() => {
     return new Map(overrides.map((override) => [overrideKey(override.year_month, override.regime), override]));
   }, [overrides]);
+
+  const taxPaidOverridesByKey = useMemo(() => {
+    return new Map(taxPaidOverrides.map((override) => [overrideKey(override.year_month, override.regime), override]));
+  }, [taxPaidOverrides]);
+
+  const manualEventsByKey = useMemo(() => {
+    const byKey = new Map();
+    manualEvents.forEach((event) => {
+      const key = overrideKey(event.year_month, event.regime);
+      const list = byKey.get(key) || [];
+      list.push(event);
+      byKey.set(key, list);
+    });
+    return byKey;
+  }, [manualEvents]);
 
   const rows = useMemo(() => {
     return (report?.months || []).flatMap((month) => {
@@ -582,31 +636,110 @@ export default function CapitalGainsReport() {
     setAssetFilter(ALL);
   };
 
-  const openIrrfDialog = (row, overrideRecord) => {
+  const openIrrfDialog = (row, overrideRecord, taxPaidOverride, manualEventRecords) => {
     setIrrfDialog({
       row,
       override: overrideRecord || null,
+      taxPaidOverride: taxPaidOverride || null,
       value: backendMoneyToInput(row.effective_irrf),
+      taxPaidValue: backendMoneyToInput(taxPaidOverride?.manual_tax_paid || row.manual_tax_paid || '0'),
       notes: overrideRecord?.notes || '',
+      manualEvents: (manualEventRecords || []).map((event) => ({
+        clientId: `event-${event.id}`,
+        id: event.id,
+        ticker: event.ticker || '',
+        gross_sale: backendMoneyToInput(event.gross_sale),
+        realized_result: backendMoneyToInput(event.realized_result),
+        _deleted: false,
+      })),
     });
+  };
+
+  const updateManualEventDraft = (clientId, updates) => {
+    setIrrfDialog((current) => ({
+      ...current,
+      manualEvents: current.manualEvents.map((event) => (
+        event.clientId === clientId ? { ...event, ...updates } : event
+      )),
+    }));
+  };
+
+  const addManualEventDraft = () => {
+    setIrrfDialog((current) => ({
+      ...current,
+      manualEvents: [...current.manualEvents, newManualEventDraft()],
+    }));
+  };
+
+  const removeManualEventDraft = (clientId) => {
+    setIrrfDialog((current) => ({
+      ...current,
+      manualEvents: current.manualEvents
+        .map((event) => (event.clientId === clientId && event.id ? { ...event, _deleted: true } : event))
+        .filter((event) => event.id || event.clientId !== clientId),
+    }));
   };
 
   const saveIrrfOverride = async () => {
     if (!irrfDialog || !activePortfolioId) return;
+    const manualEventsToSave = irrfDialog.manualEvents.filter((event) => !event._deleted && !isBlankManualEventDraft(event));
+    if (manualEventsToSave.some((event) => !event.ticker.trim())) {
+      toast.error('Informe o ativo dos eventos manuais.');
+      return;
+    }
     setSavingIrrf(true);
     try {
-      await taxApi.upsertIrrfOverride({
-        portfolio_id: activePortfolioId,
-        year_month: irrfDialog.row.year_month,
-        regime: irrfDialog.row.regime,
-        effective_irrf: currencyToBackend(irrfDialog.value),
-        notes: irrfDialog.notes || null,
+      const operations = [];
+      const irrfChanged = irrfDialog.override?.id || !moneyEquals(currencyToBackend(irrfDialog.value), irrfDialog.row.effective_irrf) || (irrfDialog.notes || '').trim();
+      if (irrfChanged) {
+        operations.push(taxApi.upsertIrrfOverride({
+          portfolio_id: activePortfolioId,
+          year_month: irrfDialog.row.year_month,
+          regime: irrfDialog.row.regime,
+          effective_irrf: currencyToBackend(irrfDialog.value),
+          notes: irrfDialog.notes || null,
+        }));
+      }
+
+      const taxPaid = currencyToBackend(irrfDialog.taxPaidValue);
+      if (decimalToCents(taxPaid) > 0n) {
+        operations.push(taxApi.upsertCapitalGainTaxPaidOverride({
+          portfolio_id: activePortfolioId,
+          year_month: irrfDialog.row.year_month,
+          regime: irrfDialog.row.regime,
+          manual_tax_paid: taxPaid,
+        }));
+      } else if (irrfDialog.taxPaidOverride?.id) {
+        operations.push(taxApi.deleteCapitalGainTaxPaidOverride(irrfDialog.taxPaidOverride.id));
+      }
+
+      irrfDialog.manualEvents.forEach((event) => {
+        if (event._deleted && event.id) {
+          operations.push(taxApi.deleteCapitalGainManualEvent(event.id));
+          return;
+        }
+        if (isBlankManualEventDraft(event)) return;
+        const payload = {
+          portfolio_id: activePortfolioId,
+          year_month: irrfDialog.row.year_month,
+          regime: irrfDialog.row.regime,
+          ticker: event.ticker.trim().toUpperCase(),
+          gross_sale: currencyToBackend(event.gross_sale),
+          realized_result: currencyToBackend(event.realized_result),
+        };
+        if (event.id) {
+          operations.push(taxApi.updateCapitalGainManualEvent(event.id, payload));
+        } else {
+          operations.push(taxApi.createCapitalGainManualEvent(payload));
+        }
       });
-      toast.success('IRRF efetivo ajustado.');
+
+      await Promise.all(operations);
+      toast.success('Ajuste de apuração salvo.');
       setIrrfDialog(null);
       await loadReport();
     } catch (err) {
-      toast.error(err.message || 'Falha ao salvar ajuste de IRRF.');
+      toast.error(err.message || 'Falha ao salvar ajuste de apuração.');
     } finally {
       setSavingIrrf(false);
     }
@@ -622,6 +755,21 @@ export default function CapitalGainsReport() {
       await loadReport();
     } catch (err) {
       toast.error(err.message || 'Falha ao remover ajuste de IRRF.');
+    } finally {
+      setSavingIrrf(false);
+    }
+  };
+
+  const deleteTaxPaidOverride = async () => {
+    if (!irrfDialog?.taxPaidOverride?.id) return;
+    setSavingIrrf(true);
+    try {
+      await taxApi.deleteCapitalGainTaxPaidOverride(irrfDialog.taxPaidOverride.id);
+      toast.success('Ajuste de imposto pago removido.');
+      setIrrfDialog(null);
+      await loadReport();
+    } catch (err) {
+      toast.error(err.message || 'Falha ao remover ajuste de imposto pago.');
     } finally {
       setSavingIrrf(false);
     }
@@ -763,6 +911,8 @@ export default function CapitalGainsReport() {
             expanded={expanded}
             hideValues={hideValues}
             overridesByKey={overridesByKey}
+            taxPaidOverridesByKey={taxPaidOverridesByKey}
+            manualEventsByKey={manualEventsByKey}
             onToggle={toggleExpanded}
             onEditIrrf={openIrrfDialog}
           />
@@ -770,9 +920,9 @@ export default function CapitalGainsReport() {
       )}
 
       <Dialog open={!!irrfDialog} onOpenChange={(open) => !open && !savingIrrf && setIrrfDialog(null)}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Ajustar IRRF efetivo</DialogTitle>
+            <DialogTitle>Ajustar apuração</DialogTitle>
             <DialogDescription>
               {irrfDialog ? `${monthLabel(irrfDialog.row.month)} / ${irrfDialog.row.year_month.slice(0, 4)} · ${REGIME_LABELS[irrfDialog.row.regime]}` : ''}
             </DialogDescription>
@@ -788,15 +938,42 @@ export default function CapitalGainsReport() {
                   <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">IRRF efetivo atual</Label>
                   <div className="mt-1 font-mono text-sm">R$ {formatMoney(irrfDialog.row.effective_irrf, hideValues)}</div>
                 </div>
+                <div>
+                  <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Imposto calculado</Label>
+                  <div className="mt-1 font-mono text-sm">R$ {formatMoney(irrfDialog.row.calculated_net_tax_payable, hideValues)}</div>
+                </div>
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="effective-irrf">IRRF efetivo considerado</Label>
-                <Input
-                  id="effective-irrf"
-                  value={irrfDialog.value}
-                  onChange={(event) => setIrrfDialog({ ...irrfDialog, value: applyCurrencyMask(event.target.value) })}
-                  disabled={savingIrrf}
-                />
+                <div className="flex gap-2">
+                  <Input
+                    id="effective-irrf"
+                    value={irrfDialog.value}
+                    onChange={(event) => setIrrfDialog({ ...irrfDialog, value: applyCurrencyMask(event.target.value) })}
+                    disabled={savingIrrf}
+                  />
+                  {irrfDialog.override?.id && (
+                    <Button variant="outline" size="icon" onClick={deleteIrrfOverride} disabled={savingIrrf} aria-label="Remover IRRF efetivo manual">
+                      <Trash2 />
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="manual-tax-paid">Imposto pago</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="manual-tax-paid"
+                    value={irrfDialog.taxPaidValue}
+                    onChange={(event) => setIrrfDialog({ ...irrfDialog, taxPaidValue: applyCurrencyMask(event.target.value) })}
+                    disabled={savingIrrf}
+                  />
+                  {irrfDialog.taxPaidOverride?.id && (
+                    <Button variant="outline" size="icon" onClick={deleteTaxPaidOverride} disabled={savingIrrf} aria-label="Remover imposto pago manual">
+                      <Trash2 />
+                    </Button>
+                  )}
+                </div>
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="irrf-notes">Observação</Label>
@@ -807,15 +984,64 @@ export default function CapitalGainsReport() {
                   disabled={savingIrrf}
                 />
               </div>
+              <div className="flex flex-col gap-3 rounded-md border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <Label className="text-sm font-medium">Venda de Direitos</Label>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={addManualEventDraft} disabled={savingIrrf}>
+                    <Plus data-icon="inline-start" />
+                    Adicionar
+                  </Button>
+                </div>
+                {irrfDialog.manualEvents.filter((event) => !event._deleted).length === 0 ? (
+                  <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                    Nenhum evento manual cadastrado.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {irrfDialog.manualEvents.filter((event) => !event._deleted).map((event) => (
+                      <div key={event.clientId} className="grid grid-cols-[5.5rem_1fr] gap-2 rounded-md border p-3 sm:grid-cols-[5.5rem_6.75rem_6.75rem_auto]">
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`manual-ticker-${event.clientId}`}>Ativo</Label>
+                          <Input
+                            id={`manual-ticker-${event.clientId}`}
+                            value={event.ticker}
+                            onChange={(inputEvent) => updateManualEventDraft(event.clientId, { ticker: inputEvent.target.value.toUpperCase() })}
+                            disabled={savingIrrf}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`manual-gross-${event.clientId}`}>Venda Bruta</Label>
+                          <Input
+                            id={`manual-gross-${event.clientId}`}
+                            value={event.gross_sale}
+                            onChange={(inputEvent) => updateManualEventDraft(event.clientId, { gross_sale: applyCurrencyMask(inputEvent.target.value) })}
+                            disabled={savingIrrf}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`manual-result-${event.clientId}`}>Resultado</Label>
+                          <Input
+                            id={`manual-result-${event.clientId}`}
+                            value={event.realized_result}
+                            onChange={(inputEvent) => updateManualEventDraft(event.clientId, { realized_result: applySignedCurrencyMask(inputEvent.target.value) })}
+                            disabled={savingIrrf}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <Button variant="ghost" size="icon" onClick={() => removeManualEventDraft(event.clientId)} disabled={savingIrrf} aria-label="Remover evento manual">
+                            <Trash2 />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
           <DialogFooter>
-            {irrfDialog?.override?.id && (
-              <Button variant="destructive" onClick={deleteIrrfOverride} disabled={savingIrrf}>
-                <Trash2 data-icon="inline-start" />
-                Remover
-              </Button>
-            )}
             <Button variant="outline" onClick={() => setIrrfDialog(null)} disabled={savingIrrf}>Cancelar</Button>
             <Button onClick={saveIrrfOverride} disabled={savingIrrf}>
               {savingIrrf ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
