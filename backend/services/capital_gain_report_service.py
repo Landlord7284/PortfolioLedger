@@ -26,7 +26,6 @@ from backend.services.fiscal_regime_service import (
 
 ZERO = Decimal("0")
 CENTS = Decimal("0.01")
-TREATMENT_EXEMPT_ZERO = "EXEMPT_ZERO"
 
 
 @dataclass
@@ -110,11 +109,10 @@ def _resolve_regime(row: sqlite3.Row) -> str | None:
     asset_class = row["asset_class"]
     market = row["market"]
     currency = row["currency"]
-    treatment = row["fiscal_tax_treatment"]
 
     if asset_class == AssetClass.CRIPTOMOEDA.value:
         return REGIME_CRYPTO
-    if asset_class == AssetClass.FI_INFRA.value and treatment == TREATMENT_EXEMPT_ZERO:
+    if asset_class == AssetClass.FI_INFRA.value:
         return REGIME_FI_INFRA_EXEMPT
     if market == "US" or currency == "USD":
         return None
@@ -270,6 +268,10 @@ def _tax_parameter(conn: sqlite3.Connection, regime: str, event_date: str) -> di
     if not row:
         raise ValueError(f"Parametro fiscal nao encontrado para {regime} em {event_date}.")
     return dict(row)
+
+
+def _is_tax_exempt_parameter(param: dict) -> bool:
+    return _d(param["tax_rate"]) == ZERO and not bool(param["monthly_darf_enabled"])
 
 
 def _overrides(conn: sqlite3.Connection, portfolio_id: int, year: int) -> dict[tuple[str, str], dict]:
@@ -492,6 +494,7 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
             param = _tax_parameter(conn, regime, reference_date)
             bucket = param["loss_bucket"]
             row = _empty_regime_row(regime, bucket, param)
+            fi_infra_is_exempt = regime == REGIME_FI_INFRA_EXEMPT and _is_tax_exempt_parameter(param)
 
             assets: dict[int, AssetAggregate] = {}
             action_gross = sum((item.gross_sale for item in items if _is_action_br(item)), ZERO)
@@ -525,15 +528,19 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int) -
                         aggregate.exempt_gain += item.net_result
                     continue
 
-                if regime in {REGIME_FI_INFRA_EXEMPT, REGIME_CRYPTO}:
-                    taxable_component = item.net_result if regime == REGIME_CRYPTO else ZERO
+                if regime == REGIME_FI_INFRA_EXEMPT:
+                    taxable_component = ZERO if fi_infra_is_exempt else item.net_result
+                elif regime == REGIME_CRYPTO:
+                    taxable_component = item.net_result
                 else:
                     taxable_component = item.net_result
                 row["taxable_result_before_compensation"] += taxable_component
                 aggregate.taxable_result_before_compensation += taxable_component
 
-            if regime == REGIME_FI_INFRA_EXEMPT:
-                row["exempt_gain"] = row["realized_result"] if row["realized_result"] > ZERO else ZERO
+            if fi_infra_is_exempt:
+                for aggregate in assets.values():
+                    aggregate.exempt_gain = aggregate.realized_result if aggregate.realized_result > ZERO else ZERO
+                row["exempt_gain"] = sum((aggregate.exempt_gain for aggregate in assets.values()), ZERO)
             elif action_is_exempt and action_result > ZERO:
                 row["exempt_gain"] = action_result
 

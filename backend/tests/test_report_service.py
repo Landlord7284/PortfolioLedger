@@ -155,7 +155,6 @@ def test_income_report_adds_exempt_capital_gain_lines_without_asset_binding(tmp_
             AssetClass.FI_INFRA.value,
             "INFRA11",
             market="BR",
-            fiscal_tax_treatment="EXEMPT_ZERO",
         )
 
         event_service.create_event(conn, portfolio["id"], stock["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")

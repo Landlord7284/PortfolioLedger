@@ -206,7 +206,6 @@ def test_fii_fi_infra_crypto_and_irrf_override_are_separate(tmp_path):
             AssetClass.FI_INFRA.value,
             "INFRA11",
             market="BR",
-            fiscal_tax_treatment="EXEMPT_ZERO",
         )
         crypto = asset_service.create_asset(conn, AssetClass.CRIPTOMOEDA.value, "BTC", market="BR")
         etf = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
@@ -251,6 +250,7 @@ def test_fii_fi_infra_crypto_and_irrf_override_are_separate(tmp_path):
     assert fi_infra_row["taxable_base"] == "0.00"
     assert fi_infra_row["darf_estimated"] == "0.00"
     assert fi_infra_row["final_loss_carryforward"] == "0.00"
+    assert fi_infra_row["assets"][0]["exempt_gain"] == "1000.00"
     assert crypto_row["gross_sale"] == "9500.00"
     assert crypto_row["cost_basis"] == "10000.00"
     assert crypto_row["realized_result"] == "-500.00"
@@ -346,6 +346,42 @@ def test_tax_parameters_are_selected_by_effective_period(tmp_path):
     assert row["tax_rate"] == "0.1"
     assert row["theoretical_irrf"] == "11.00"
     assert row["darf_estimated"] == "100.00"
+
+
+def test_fi_infra_follows_tax_parameter_effective_period_without_asset_treatment(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET valid_until = '2025-06-30'
+            WHERE regime = 'FI_INFRA_EXEMPT' AND valid_from = '1900-01-01'
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO fiscal_tax_parameters (
+                regime, valid_from, tax_rate, withholding_rate, exemption_limit,
+                darf_code, loss_bucket, monthly_darf_enabled
+            )
+            VALUES ('FI_INFRA_EXEMPT', '2025-07-01', '0.20', '0', NULL, '6015', 'FI_INFRA', 1)
+            """
+        )
+        asset = asset_service.create_asset(conn, AssetClass.FI_INFRA.value, "INFRA11", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-07-01", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-07-20", "100", "11000", gross_value="11000")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    row = _regime(report, "2025-07", "FI_INFRA_EXEMPT")
+    assert row["tax_rate"] == "0.2"
+    assert row["realized_result"] == "1000.00"
+    assert row["exempt_gain"] == "0.00"
+    assert row["taxable_base"] == "1000.00"
+    assert row["darf_estimated"] == "200.00"
+    assert row["assets"][0]["exempt_gain"] == "0.00"
 
 
 def test_irrf_override_api_lifecycle_and_report_fallback(tmp_path, monkeypatch):
