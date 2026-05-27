@@ -160,7 +160,7 @@ function formatCellValue(row, column, hideValues) {
   if (type === 'rate') return formatRate(row[field]);
   if (type === 'text') return row.is_manual && field === 'ticker' ? `${row[field] || '-'} (manual)` : row[field] || '-';
   if (type === 'regime') return REGIME_LABELS[row[field]] || row[field] || '-';
-  return `R$ ${formatMoney(row[field], hideValues)}`;
+  return formatMoney(row[field], hideValues);
 }
 
 function backendMoneyToInput(value) {
@@ -256,7 +256,7 @@ function SummaryCard({ title, value, hideValues }) {
       </CardHeader>
       <CardContent>
         <div className="font-mono text-2xl font-semibold tabular-nums">
-          R$ {formatMoney(value, hideValues)}
+          {formatMoney(value, hideValues)}
         </div>
       </CardContent>
     </Card>
@@ -372,7 +372,6 @@ function RegimeTable({
                 const hasManualTax = row.manual_tax_paid !== null && row.manual_tax_paid !== undefined;
                 const hasOverride = reportOverride !== null || !!overrideRecord || hasManualTax || manualEventRecords.length > 0;
                 const hasIrrfDiff = !moneyEquals(row.theoretical_irrf, row.effective_irrf);
-                const hasExemptGain = moneyGreaterThanZero(row.exempt_gain);
 
                 return (
                   <Fragment key={key}>
@@ -383,10 +382,7 @@ function RegimeTable({
                         </Button>
                       </TableCell>
                       <TableCell className="sticky left-0 min-w-[120px] bg-card font-medium">
-                        <div className="flex flex-col gap-1">
-                          <span>{monthLabel(row.month)} / {row.year_month.slice(0, 4)}</span>
-                          {hasExemptGain && <Badge variant="secondary">Ganho isento</Badge>}
-                        </div>
+                        {monthLabel(row.month)} / {row.year_month.slice(0, 4)}
                       </TableCell>
                       {columns.map((column) => (
                         <TableCell key={column[0]} className="text-right font-mono text-sm">
@@ -395,8 +391,14 @@ function RegimeTable({
                       ))}
                       {IRRF_REGIMES.has(regime) && (
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            {hasOverride && <Badge variant="secondary">Ajustado</Badge>}
+                          <div className="flex items-center justify-end gap-1">
+                            {hasOverride && (
+                              <span
+                                className="size-2 rounded-full bg-primary"
+                                title="Ajustado"
+                                aria-label="Ajustado"
+                              />
+                            )}
                             {!hasOverride && hasIrrfDiff && <Badge variant="outline">Difere</Badge>}
                             <Button variant="ghost" size="icon-sm" onClick={() => onEditIrrf(row, overrideRecord, taxPaidOverride, manualEventRecords)}>
                               <Edit2 />
@@ -457,11 +459,11 @@ function DarfSuggestionsTable({ suggestions, hideValues }) {
                       .join(', ')}
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm">
-                    R$ {formatMoney(suggestion.darf_estimated, hideValues)}
+                    {formatMoney(suggestion.darf_estimated, hideValues)}
                   </TableCell>
                   {hasAccumulatedDarf && (
                     <TableCell className="text-right font-mono text-sm">
-                      R$ {formatMoney(suggestion.final_darf_carryforward, hideValues)}
+                      {formatMoney(suggestion.final_darf_carryforward, hideValues)}
                     </TableCell>
                   )}
                 </TableRow>
@@ -1046,7 +1048,7 @@ export default function CapitalGainsReport() {
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="effective-irrf">IRRF efetivo considerado</Label>
+                <Label htmlFor="effective-irrf">IRRF Efetivo</Label>
                 <div className="flex gap-2">
                   <Input
                     id="effective-irrf"
@@ -1062,7 +1064,7 @@ export default function CapitalGainsReport() {
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="manual-tax-paid">Imposto pago</Label>
+                <Label htmlFor="manual-tax-paid">Imposto Pago</Label>
                 <div className="flex gap-2">
                   <Input
                     id="manual-tax-paid"
