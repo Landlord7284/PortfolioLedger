@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 
 const currentYear = new Date().getFullYear();
 const ALL = 'all';
+const REGIME_B3_COMMON = 'B3_COMMON_15';
 const IRRF_REGIMES = new Set(['B3_COMMON_15', 'B3_FII_FIAGRO_20']);
 
 const MONTHS = [
@@ -195,6 +196,45 @@ function isBlankManualEventDraft(event) {
     && decimalToCents(currencyToBackend(event.realized_result)) === 0n;
 }
 
+function emptyRegimeRow({ year, month, regime = REGIME_B3_COMMON }) {
+  const monthValue = String(month).padStart(2, '0');
+  return {
+    year_month: `${year}-${monthValue}`,
+    month: Number(month),
+    regime,
+    bucket: null,
+    darf_code: null,
+    gross_sale: '0.00',
+    net_sale: '0.00',
+    costs: '0.00',
+    cost_basis: '0.00',
+    realized_result: '0.00',
+    exempt_gain: '0.00',
+    taxable_result_before_compensation: '0.00',
+    initial_loss_carryforward: '0.00',
+    used_loss: '0.00',
+    taxable_base: '0.00',
+    tax_rate: '0',
+    tax_due: '0.00',
+    theoretical_irrf: '0.00',
+    irrf_override: null,
+    effective_irrf: '0.00',
+    calculated_net_tax_payable: '0.00',
+    manual_tax_paid: null,
+    minimum_darf_amount: '0.00',
+    initial_darf_carryforward: '0.00',
+    darf_before_minimum: '0.00',
+    darf_estimated: '0.00',
+    final_darf_carryforward: '0.00',
+    initial_irrf_carryforward: '0.00',
+    used_irrf: '0.00',
+    net_tax_payable: '0.00',
+    final_irrf_carryforward: '0.00',
+    final_loss_carryforward: '0.00',
+    assets: [],
+  };
+}
+
 function getReportOverride(row) {
   if (row.irrf_override !== undefined && row.irrf_override !== null) return row.irrf_override;
   if (row.override?.effective_irrf !== undefined && row.override?.effective_irrf !== null) return row.override.effective_irrf;
@@ -276,9 +316,11 @@ function RegimeTable({
   manualEventsByKey,
   onToggle,
   onEditIrrf,
+  onAddManualRights,
 }) {
   const columns = TABLE_COLUMNS[regime] || [];
   const expandedColSpan = columns.length + 2 + (IRRF_REGIMES.has(regime) ? 1 : 0);
+  const canAddManualRights = regime === REGIME_B3_COMMON;
 
   return (
     <Card className="overflow-hidden">
@@ -288,7 +330,12 @@ function RegimeTable({
             <CardTitle className="text-base">{REGIME_LABELS[regime] || regime}</CardTitle>
             <CardDescription>{REGIME_DESCRIPTIONS[regime]}</CardDescription>
           </div>
-          {(regime === 'FI_INFRA_EXEMPT' || regime === 'CRYPTO_GCAP') && (
+          {canAddManualRights ? (
+            <Button variant="outline" size="sm" onClick={onAddManualRights}>
+              <Plus data-icon="inline-start" />
+              Venda de Direitos
+            </Button>
+          ) : (regime === 'FI_INFRA_EXEMPT' || regime === 'CRYPTO_GCAP') && (
             <Badge variant="secondary">Informativo</Badge>
           )}
         </div>
@@ -309,7 +356,13 @@ function RegimeTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => {
+              {rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={expandedColSpan} className="h-20 text-center text-sm text-muted-foreground">
+                    Nenhum mês com apuração automática. Use Venda de Direitos para cadastrar um evento manual.
+                  </TableCell>
+                </TableRow>
+              ) : rows.map((row) => {
                 const key = overrideKey(row.year_month, row.regime);
                 const isExpanded = expanded.has(key);
                 const overrideRecord = overridesByKey.get(key);
@@ -564,11 +617,19 @@ export default function CapitalGainsReport() {
   }, [effectiveAssetFilter, effectiveClassFilter, monthFilter, regimeFilter, rows]);
 
   const groupedRows = useMemo(() => {
-    return REGIME_ORDER.map((regime) => ({
+    const groups = REGIME_ORDER.map((regime) => ({
       regime,
       rows: visibleRows.filter((row) => row.regime === regime),
     })).filter((group) => group.rows.length > 0);
-  }, [visibleRows]);
+    const canShowEmptyCommon = (regimeFilter === ALL || regimeFilter === REGIME_B3_COMMON)
+      && effectiveClassFilter === ALL
+      && effectiveAssetFilter === ALL
+      && !groups.some((group) => group.regime === REGIME_B3_COMMON);
+    if (canShowEmptyCommon) {
+      return [{ regime: REGIME_B3_COMMON, rows: [] }, ...groups];
+    }
+    return groups;
+  }, [effectiveAssetFilter, effectiveClassFilter, regimeFilter, visibleRows]);
 
   const visibleMonthKeys = useMemo(() => new Set(visibleRows.map((row) => row.year_month)), [visibleRows]);
 
@@ -636,23 +697,50 @@ export default function CapitalGainsReport() {
     setAssetFilter(ALL);
   };
 
+  const buildIrrfDialogState = (row, overrideRecord, taxPaidOverride, manualEventRecords, options = {}) => ({
+    row,
+    override: overrideRecord || null,
+    taxPaidOverride: taxPaidOverride || null,
+    value: backendMoneyToInput(row.effective_irrf),
+    taxPaidValue: backendMoneyToInput(taxPaidOverride?.manual_tax_paid || row.manual_tax_paid || '0'),
+    notes: overrideRecord?.notes || '',
+    allowMonthSelect: !!options.allowMonthSelect,
+    manualEvents: (manualEventRecords || []).map((event) => ({
+      clientId: `event-${event.id}`,
+      id: event.id,
+      ticker: event.ticker || '',
+      gross_sale: backendMoneyToInput(event.gross_sale),
+      realized_result: backendMoneyToInput(event.realized_result),
+      _deleted: false,
+    })),
+  });
+
   const openIrrfDialog = (row, overrideRecord, taxPaidOverride, manualEventRecords) => {
-    setIrrfDialog({
-      row,
-      override: overrideRecord || null,
-      taxPaidOverride: taxPaidOverride || null,
-      value: backendMoneyToInput(row.effective_irrf),
-      taxPaidValue: backendMoneyToInput(taxPaidOverride?.manual_tax_paid || row.manual_tax_paid || '0'),
-      notes: overrideRecord?.notes || '',
-      manualEvents: (manualEventRecords || []).map((event) => ({
-        clientId: `event-${event.id}`,
-        id: event.id,
-        ticker: event.ticker || '',
-        gross_sale: backendMoneyToInput(event.gross_sale),
-        realized_result: backendMoneyToInput(event.realized_result),
-        _deleted: false,
-      })),
-    });
+    setIrrfDialog(buildIrrfDialogState(row, overrideRecord, taxPaidOverride, manualEventRecords));
+  };
+
+  const commonRowForMonth = (month) => {
+    return rows.find((row) => row.regime === REGIME_B3_COMMON && String(row.month) === String(month))
+      || emptyRegimeRow({ year, month });
+  };
+
+  const openManualRightsDialog = () => {
+    const month = monthFilter !== ALL ? Number(monthFilter) : 1;
+    const row = commonRowForMonth(month);
+    const key = overrideKey(row.year_month, row.regime);
+    const overrideRecord = overridesByKey.get(key);
+    const taxPaidOverride = taxPaidOverridesByKey.get(key);
+    const manualEventRecords = manualEventsByKey.get(key) || [];
+    setIrrfDialog(buildIrrfDialogState(row, overrideRecord, taxPaidOverride, manualEventRecords, { allowMonthSelect: true }));
+  };
+
+  const updateDialogMonth = (month) => {
+    const row = commonRowForMonth(month);
+    const key = overrideKey(row.year_month, row.regime);
+    const overrideRecord = overridesByKey.get(key);
+    const taxPaidOverride = taxPaidOverridesByKey.get(key);
+    const manualEventRecords = manualEventsByKey.get(key) || [];
+    setIrrfDialog(buildIrrfDialogState(row, overrideRecord, taxPaidOverride, manualEventRecords, { allowMonthSelect: true }));
   };
 
   const updateManualEventDraft = (clientId, updates) => {
@@ -915,6 +1003,7 @@ export default function CapitalGainsReport() {
             manualEventsByKey={manualEventsByKey}
             onToggle={toggleExpanded}
             onEditIrrf={openIrrfDialog}
+            onAddManualRights={openManualRightsDialog}
           />
         ))
       )}
@@ -929,6 +1018,19 @@ export default function CapitalGainsReport() {
           </DialogHeader>
           {irrfDialog && (
             <div className="flex flex-col gap-4">
+              {irrfDialog.allowMonthSelect && (
+                <div className="flex flex-col gap-1.5">
+                  <Label>Mês da apuração</Label>
+                  <Select value={String(irrfDialog.row.month)} onValueChange={updateDialogMonth} disabled={savingIrrf}>
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {MONTHS.map((month) => <SelectItem key={month.value} value={month.value}>{month.label}</SelectItem>)}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">IRRF teórico</Label>
@@ -984,6 +1086,7 @@ export default function CapitalGainsReport() {
                   disabled={savingIrrf}
                 />
               </div>
+              {irrfDialog.row.regime === REGIME_B3_COMMON && (
               <div className="flex flex-col gap-3 rounded-md border p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -1039,6 +1142,7 @@ export default function CapitalGainsReport() {
                   </div>
                 )}
               </div>
+              )}
             </div>
           )}
           <DialogFooter>
