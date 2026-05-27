@@ -39,14 +39,14 @@ const REGIME_ORDER = ['B3_COMMON_15', 'B3_FII_FIAGRO_20', 'FI_INFRA_EXEMPT', 'CR
 const REGIME_LABELS = {
   B3_COMMON_15: 'B3 - Operações Comuns',
   B3_FII_FIAGRO_20: 'B3 - FII / Fiagro',
-  FI_INFRA_EXEMPT: 'Ganhos líquidos em operações no mercado à vista: FI-INFRA',
+  FI_INFRA_EXEMPT: 'FI-INFRA',
   CRYPTO_GCAP: 'Criptoativos',
 };
 
 const REGIME_DESCRIPTIONS = {
   B3_COMMON_15: 'Apuração de Ações, BDR e ETF. Alíquota de 15%.',
   B3_FII_FIAGRO_20: 'Apuração de FII e Fiagro. Alíquota de 20%.',
-  FI_INFRA_EXEMPT: 'Alienações isentas de FI-Infra. Valores consolidados também entram em Rendimentos Isentos e Não Tributáveis.',
+  FI_INFRA_EXEMPT: 'Apuração de FI-Infra conforme parâmetro fiscal vigente.',
   CRYPTO_GCAP: 'Apuração informativa nesta fase.',
 };
 
@@ -93,7 +93,7 @@ const ASSET_COLUMNS = [
   ['gross_sale', 'Venda Bruta'],
   ['realized_result', 'Resultado Líquido'],
   ['exempt_gain', 'Ganho Isento'],
-  ['theoretical_irrf', 'IRRF Teórico'],
+  ['theoretical_irrf', 'IRRF Nota'],
   ['effective_irrf', 'IRRF Efetivo'],
 ];
 
@@ -675,7 +675,6 @@ export default function CapitalGainsReport() {
 
   const alerts = useMemo(() => {
     const result = [];
-    if (visibleRows.some((row) => row.regime === 'FI_INFRA_EXEMPT')) result.push('FI-Infra exibido como informativo/isento.');
     if (visibleRows.some((row) => row.regime === 'CRYPTO_GCAP')) result.push('Cripto exibido apenas como apuração informativa nesta fase.');
     return result;
   }, [visibleRows]);

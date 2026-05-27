@@ -30,6 +30,18 @@ const EMPTY_PARAMETER_FORM = {
   monthly_darf_enabled: true,
 };
 
+const PARAMETER_PRESETS = {
+  FI_INFRA_EXEMPT: {
+    tax_rate_percent: '0',
+    withholding_rate_percent: '0',
+    exemption_limit: '',
+    darf_code: '',
+    minimum_darf_amount: '10,00',
+    loss_bucket: '',
+    monthly_darf_enabled: false,
+  },
+};
+
 function todayIso() {
   const now = new Date();
   const year = now.getFullYear();
@@ -224,7 +236,14 @@ export default function Settings() {
   };
 
   const updateParameterForm = (field, value) => {
-    setParameterForm((current) => ({ ...current, [field]: value }));
+    setParameterForm((current) => {
+      if (field === 'regime' && !editingParameter) {
+        const normalized = String(value || '').trim().toUpperCase();
+        const preset = PARAMETER_PRESETS[normalized];
+        if (preset) return { ...current, ...preset, regime: normalized };
+      }
+      return { ...current, [field]: value };
+    });
   };
 
   const parameterPayload = () => ({

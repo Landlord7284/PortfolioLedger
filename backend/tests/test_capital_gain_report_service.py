@@ -384,6 +384,32 @@ def test_fi_infra_follows_tax_parameter_effective_period_without_asset_treatment
     assert row["assets"][0]["exempt_gain"] == "0.00"
 
 
+def test_fi_infra_zero_tax_rate_is_exempt_even_with_monthly_darf_enabled(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'FI_INFRA_EXEMPT' AND valid_from = '1900-01-01'
+            """
+        )
+        asset = asset_service.create_asset(conn, AssetClass.FI_INFRA.value, "INFRA11", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-08-01", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-08-20", "100", "11000", gross_value="11000")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    row = _regime(report, "2025-08", "FI_INFRA_EXEMPT")
+    assert row["realized_result"] == "1000.00"
+    assert row["exempt_gain"] == "1000.00"
+    assert row["taxable_base"] == "0.00"
+    assert row["darf_estimated"] == "0.00"
+    assert row["assets"][0]["exempt_gain"] == "1000.00"
+
+
 def test_irrf_override_api_lifecycle_and_report_fallback(tmp_path, monkeypatch):
     db_path, ctx, conn, portfolio = _setup(tmp_path)
     try:

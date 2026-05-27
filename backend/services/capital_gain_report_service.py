@@ -271,7 +271,7 @@ def _tax_parameter(conn: sqlite3.Connection, regime: str, event_date: str) -> di
 
 
 def _is_tax_exempt_parameter(param: dict) -> bool:
-    return _d(param["tax_rate"]) == ZERO and not bool(param["monthly_darf_enabled"])
+    return _d(param["tax_rate"]) == ZERO
 
 
 def _overrides(conn: sqlite3.Connection, portfolio_id: int, year: int) -> dict[tuple[str, str], dict]:

@@ -181,6 +181,35 @@ def test_income_report_adds_exempt_capital_gain_lines_without_asset_binding(tmp_
     assert tax_exempt["total"] == "3000.00"
 
 
+def test_income_report_treats_zero_rate_fi_infra_as_exempt_even_with_monthly_darf(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        fi_infra = asset_service.create_asset(conn, AssetClass.FI_INFRA.value, "INFRA11", market="BR")
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'FI_INFRA_EXEMPT' AND valid_from = '1900-01-01'
+            """
+        )
+
+        event_service.create_event(conn, portfolio["id"], fi_infra["id"], EventType.COMPRA.value, "2025-03-01", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fi_infra["id"], EventType.VENDA.value, "2025-04-20", "100", "12000", gross_value="12000")
+
+        report = report_service.list_income_report(conn, portfolio["id"], 2025)
+
+    tax_exempt = next(table for table in report["tables"] if table["key"] == "tax_exempt")
+    rows_by_name = {row["payer_name"]: row for row in tax_exempt["rows"]}
+    fi_infra_row = rows_by_name[report_service.FI_INFRA_EXEMPT_GAIN_PAYER_NAME]
+
+    assert fi_infra_row["income_type"] == report_service.CAPITAL_GAIN_EXEMPT_INCOME_TYPE
+    assert fi_infra_row["value"] == "2000.00"
+    assert tax_exempt["total"] == "2000.00"
+
+
 def test_income_report_resolves_cancelled_and_duplicate_amortizations(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)
