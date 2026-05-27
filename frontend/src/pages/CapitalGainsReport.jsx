@@ -429,9 +429,9 @@ function DarfSuggestionsTable({ suggestions, hideValues }) {
   return (
     <Card className="overflow-hidden">
       <CardHeader className="border-b">
-        <CardTitle className="text-base">Apuração consolidada de DARF por código</CardTitle>
+        <CardTitle className="text-base">Apuração de DARF por regime</CardTitle>
         <CardDescription>
-          Guia estimada após cada regime aplicar prejuízo e IRRF próprios. O piso mínimo é consolidado por código de receita.
+          Guia estimada após cada regime aplicar prejuízo e IRRF próprios. Regimes com o mesmo código de receita são exibidos separadamente.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -441,20 +441,20 @@ function DarfSuggestionsTable({ suggestions, hideValues }) {
               <TableRow>
                 <TableHead>Mês</TableHead>
                 <TableHead>Código</TableHead>
-                <TableHead>Regimes incluídos</TableHead>
+                <TableHead>Regime</TableHead>
                 <TableHead className="text-right">DARF</TableHead>
                 {hasAccumulatedDarf && <TableHead className="text-right">DARF Acumulado</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {suggestions.map((suggestion) => (
-                <TableRow key={`${suggestion.year_month}|${suggestion.darf_code}`}>
+                <TableRow key={`${suggestion.year_month}|${suggestion.darf_code}|${suggestion.regime || (suggestion.included_regimes || []).join('|')}`}>
                   <TableCell className="whitespace-nowrap font-medium">
                     {monthLabel(suggestion.month)} / {suggestion.year_month.slice(0, 4)}
                   </TableCell>
                   <TableCell className="font-mono text-sm">{suggestion.darf_code}</TableCell>
                   <TableCell className="min-w-[260px] text-sm">
-                    {(suggestion.included_regimes || [])
+                    {REGIME_LABELS[suggestion.regime] || suggestion.regime || (suggestion.included_regimes || [])
                       .map((regime) => REGIME_LABELS[regime] || regime)
                       .join(', ')}
                   </TableCell>
@@ -639,8 +639,8 @@ export default function CapitalGainsReport() {
     return darfSuggestions
       .filter((suggestion) => monthFilter === ALL || String(suggestion.month) === monthFilter)
       .filter((suggestion) => visibleMonthKeys.has(suggestion.year_month))
-      .filter((suggestion) => regimeFilter === ALL || (suggestion.included_regimes || []).includes(regimeFilter))
-      .sort((a, b) => a.year_month.localeCompare(b.year_month) || a.darf_code.localeCompare(b.darf_code));
+      .filter((suggestion) => regimeFilter === ALL || suggestion.regime === regimeFilter || (suggestion.included_regimes || []).includes(regimeFilter))
+      .sort((a, b) => a.year_month.localeCompare(b.year_month) || a.darf_code.localeCompare(b.darf_code) || compareRegimes(a.regime, b.regime));
   }, [darfSuggestions, monthFilter, regimeFilter, visibleMonthKeys]);
 
   const finalLossBalance = useMemo(() => {

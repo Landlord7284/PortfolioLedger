@@ -351,6 +351,7 @@ class CapitalGainRegimeRow(BaseModel):
 
 class CapitalGainDarfSuggestion(BaseModel):
     darf_code: str
+    regime: str
     included_regimes: list[str]
     initial_darf_carryforward: str
     current_month_net_tax: str

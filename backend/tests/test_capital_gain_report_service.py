@@ -16,9 +16,15 @@ def _month(report, month):
     return next(row for row in report["months"] if row["year_month"] == month)
 
 
-def _darf_suggestion(report, month, darf_code):
+def _darf_suggestion(report, month, darf_code, regime=None):
     month_row = _month(report, month)
-    return next(row for row in month_row["darf_suggestions"] if row["darf_code"] == darf_code)
+    matches = [
+        row
+        for row in month_row["darf_suggestions"]
+        if row["darf_code"] == darf_code and (regime is None or row["regime"] == regime)
+    ]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def _setup(tmp_path):
@@ -94,8 +100,8 @@ def test_action_profit_under_monthly_limit_is_exempt(tmp_path):
     assert row["assets"][0]["fiscal_regime"] == "B3_COMMON_15"
     assert row["assets"][0]["realized_result"] == "1000.00"
     assert row["assets"][0]["theoretical_irrf"] == "0.55"
-    assert row["effective_irrf"] == "0.00"
-    assert row["assets"][0]["effective_irrf"] == "0.00"
+    assert row["effective_irrf"] == "0.55"
+    assert row["assets"][0]["effective_irrf"] == "0.55"
 
 
 def test_action_loss_under_monthly_limit_increases_loss_carryforward(tmp_path):
@@ -163,8 +169,8 @@ def test_action_above_limit_and_etf_use_common_bucket_chronologically(tmp_path):
     assert january["tax_rate"] == "0.15"
     assert january["tax_due"] == "3150.00"
     assert january["theoretical_irrf"] == "1.55"
-    assert january["effective_irrf"] == "0.00"
-    assert january["darf_estimated"] == "3150.00"
+    assert january["effective_irrf"] == "1.55"
+    assert january["darf_estimated"] == "3148.45"
     assert january["taxable_base"] == "21000.00"
     assert february["final_loss_carryforward"] == "1000.00"
     assert march["initial_loss_carryforward"] == "1000.00"
@@ -190,7 +196,7 @@ def test_etf_and_bdr_are_common_taxable_without_stock_exemption(tmp_path):
     assert row["gross_sale"] == "17000.00"
     assert row["exempt_gain"] == "0.00"
     assert row["taxable_base"] == "2000.00"
-    assert row["darf_estimated"] == "300.00"
+    assert row["darf_estimated"] == "299.15"
     assert {asset["asset_class"]: asset["fiscal_regime"] for asset in row["assets"]} == {
         AssetClass.BDR.value: "B3_COMMON_15",
         AssetClass.ETF.value: "B3_COMMON_15",
@@ -242,7 +248,7 @@ def test_fii_fi_infra_crypto_and_irrf_override_are_separate(tmp_path):
 
     assert fii_row["taxable_base"] == "2000.00"
     assert fii_row["tax_rate"] == "0.2"
-    assert _darf_suggestion(report, "2025-04", "6015")["darf_estimated"] == "400.00"
+    assert _darf_suggestion(report, "2025-04", "6015", "B3_FII_FIAGRO_20")["darf_estimated"] == "399.40"
     assert common_row["final_loss_carryforward"] == "1000.00"
     assert fii_row["initial_loss_carryforward"] == "0.00"
     assert fii_row["used_loss"] == "0.00"
@@ -345,7 +351,7 @@ def test_tax_parameters_are_selected_by_effective_period(tmp_path):
     row = _regime(report, "2025-07", "B3_COMMON_15")
     assert row["tax_rate"] == "0.1"
     assert row["theoretical_irrf"] == "11.00"
-    assert row["darf_estimated"] == "100.00"
+    assert row["darf_estimated"] == "89.00"
 
 
 def test_fi_infra_follows_tax_parameter_effective_period_without_asset_treatment(tmp_path):
@@ -519,7 +525,7 @@ def test_irrf_override_api_lifecycle_and_report_fallback(tmp_path, monkeypatch):
     fallback_response = client.get(f"/api/reports/capital-gains?portfolio_id={portfolio['id']}&year=2025")
     row = _regime(fallback_response.json(), "2025-08", "B3_COMMON_15")
     assert row["irrf_override"] is None
-    assert row["effective_irrf"] == "0.00"
+    assert row["effective_irrf"] == "0.55"
 
 
 def test_manual_tax_paid_override_replaces_only_payable_tax_and_zero_falls_back(tmp_path):
@@ -668,12 +674,12 @@ def test_irrf_credit_carries_within_year_and_resets_next_year(tmp_path):
     assert january["final_irrf_carryforward"] == "50.00"
     assert january["darf_estimated"] == "0.00"
     assert february["initial_irrf_carryforward"] == "50.00"
-    assert february["used_irrf"] == "50.00"
-    assert february["darf_estimated"] == "100.00"
+    assert february["used_irrf"] == "50.55"
+    assert february["darf_estimated"] == "99.45"
     assert december["final_irrf_carryforward"] == "50.00"
     assert next_january["initial_irrf_carryforward"] == "0.00"
-    assert next_january["used_irrf"] == "0.00"
-    assert next_january["darf_estimated"] == "150.00"
+    assert next_january["used_irrf"] == "0.55"
+    assert next_january["darf_estimated"] == "149.45"
 
 
 def test_minimum_darf_defers_until_threshold_and_crosses_year(tmp_path):
@@ -715,7 +721,7 @@ def test_minimum_darf_defers_until_threshold_and_crosses_year(tmp_path):
     assert next_january["darf_estimated"] == "10.00"
 
 
-def test_minimum_darf_carryforward_is_shared_by_darf_code_after_regime_irrf(tmp_path):
+def test_minimum_darf_carryforward_is_separate_by_regime_after_regime_irrf(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:
         conn.execute(
@@ -749,7 +755,8 @@ def test_minimum_darf_carryforward_is_shared_by_darf_code_after_regime_irrf(tmp_
 
     common_row = _regime(report, "2025-01", "B3_COMMON_15")
     fii_row = _regime(report, "2025-01", "B3_FII_FIAGRO_20")
-    suggestion = _darf_suggestion(report, "2025-01", "6015")
+    common_suggestion = _darf_suggestion(report, "2025-01", "6015", "B3_COMMON_15")
+    fii_suggestion = _darf_suggestion(report, "2025-01", "6015", "B3_FII_FIAGRO_20")
 
     assert common_row["tax_due"] == "6.00"
     assert common_row["used_irrf"] == "0.50"
@@ -757,14 +764,19 @@ def test_minimum_darf_carryforward_is_shared_by_darf_code_after_regime_irrf(tmp_
     assert fii_row["tax_due"] == "5.00"
     assert fii_row["used_irrf"] == "0.10"
     assert fii_row["net_tax_payable"] == "4.90"
-    assert suggestion["current_month_net_tax"] == "10.40"
-    assert suggestion["darf_before_minimum"] == "10.40"
-    assert suggestion["darf_estimated"] == "10.40"
-    assert suggestion["final_darf_carryforward"] == "0.00"
-    assert set(suggestion["included_regimes"]) == {"B3_COMMON_15", "B3_FII_FIAGRO_20"}
+    assert common_suggestion["regime"] == "B3_COMMON_15"
+    assert common_suggestion["current_month_net_tax"] == "5.50"
+    assert common_suggestion["darf_before_minimum"] == "5.50"
+    assert common_suggestion["darf_estimated"] == "0.00"
+    assert common_suggestion["final_darf_carryforward"] == "5.50"
+    assert fii_suggestion["regime"] == "B3_FII_FIAGRO_20"
+    assert fii_suggestion["current_month_net_tax"] == "4.90"
+    assert fii_suggestion["darf_before_minimum"] == "4.90"
+    assert fii_suggestion["darf_estimated"] == "0.00"
+    assert fii_suggestion["final_darf_carryforward"] == "4.90"
 
 
-def test_minimum_darf_carryforward_is_shared_by_6015_across_regimes_and_months(tmp_path):
+def test_minimum_darf_carryforward_is_not_shared_by_6015_across_regimes_and_months(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:
         conn.execute(
@@ -794,16 +806,16 @@ def test_minimum_darf_carryforward_is_shared_by_6015_across_regimes_and_months(t
     finally:
         _close(ctx)
 
-    january = _darf_suggestion(report, "2025-01", "6015")
-    february = _darf_suggestion(report, "2025-02", "6015")
+    january = _darf_suggestion(report, "2025-01", "6015", "B3_FII_FIAGRO_20")
+    february = _darf_suggestion(report, "2025-02", "6015", "B3_COMMON_15")
     assert january["current_month_net_tax"] == "5.00"
     assert january["darf_before_minimum"] == "5.00"
     assert january["darf_estimated"] == "0.00"
     assert january["final_darf_carryforward"] == "5.00"
-    assert february["initial_darf_carryforward"] == "5.00"
+    assert february["initial_darf_carryforward"] == "0.00"
     assert february["current_month_net_tax"] == "100.00"
-    assert february["darf_before_minimum"] == "105.00"
-    assert february["darf_estimated"] == "105.00"
+    assert february["darf_before_minimum"] == "100.00"
+    assert february["darf_estimated"] == "100.00"
     assert february["final_darf_carryforward"] == "0.00"
 
 
@@ -841,7 +853,7 @@ def test_irrf_carryforward_is_not_shared_between_common_and_fii_even_with_same_d
 
     common_row = _regime(report, "2025-01", "B3_COMMON_15")
     fii_row = _regime(report, "2025-01", "B3_FII_FIAGRO_20")
-    suggestion = _darf_suggestion(report, "2025-01", "6015")
+    suggestion = _darf_suggestion(report, "2025-01", "6015", "B3_FII_FIAGRO_20")
 
     assert common_row["tax_due"] == "6.00"
     assert common_row["used_irrf"] == "6.00"
@@ -856,7 +868,71 @@ def test_irrf_carryforward_is_not_shared_between_common_and_fii_even_with_same_d
     assert suggestion["final_darf_carryforward"] == "5.00"
 
 
-def test_irrf_carryforward_resets_at_year_end_but_darf_code_carryforward_crosses_year(tmp_path):
+def test_fii_darf_uses_only_fii_irrf_when_common_has_irrf_carryforward(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.20', withholding_rate = '0', minimum_darf_amount = '10.00',
+                darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_FII_FIAGRO_20'
+            """
+        )
+        fii = asset_service.create_asset(conn, AssetClass.FII.value, "FUND11", market="BR")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2025-02-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2025-02-20", "100", "10100", gross_value="10100")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2025-01", regime="B3_COMMON_15", effective_irrf="5.00")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2025-01", regime="B3_FII_FIAGRO_20", effective_irrf="3.00")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2025-02", regime="B3_COMMON_15", effective_irrf="0.00")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    common_row = _regime(report, "2025-02", "B3_COMMON_15")
+    fii_row = _regime(report, "2025-02", "B3_FII_FIAGRO_20")
+    fii_suggestion = _darf_suggestion(report, "2025-02", "6015", "B3_FII_FIAGRO_20")
+
+    assert common_row["initial_irrf_carryforward"] == "5.00"
+    assert common_row["final_irrf_carryforward"] == "5.00"
+    assert fii_row["tax_due"] == "20.00"
+    assert fii_row["initial_irrf_carryforward"] == "3.00"
+    assert fii_row["used_irrf"] == "3.00"
+    assert fii_row["net_tax_payable"] == "17.00"
+    assert fii_suggestion["regime"] == "B3_FII_FIAGRO_20"
+    assert fii_suggestion["darf_code"] == "6015"
+    assert fii_suggestion["darf_estimated"] == "17.00"
+
+
+def test_stock_sale_above_exemption_uses_withholding_and_accumulates_small_darf(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-03-02", "1", "21000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-03-20", "1", "21018", gross_value="21018")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    row = _regime(report, "2025-03", "B3_COMMON_15")
+    suggestion = _darf_suggestion(report, "2025-03", "6015", "B3_COMMON_15")
+
+    assert row["gross_sale"] == "21018.00"
+    assert row["taxable_base"] == "18.00"
+    assert row["tax_due"] == "2.70"
+    assert row["effective_irrf"] == "1.05"
+    assert row["used_irrf"] == "1.05"
+    assert row["net_tax_payable"] == "1.65"
+    assert row["darf_estimated"] == "0.00"
+    assert row["final_darf_carryforward"] == "1.65"
+    assert suggestion["regime"] == "B3_COMMON_15"
+    assert suggestion["darf_estimated"] == "0.00"
+    assert suggestion["final_darf_carryforward"] == "1.65"
+
+
+def test_irrf_resets_at_year_end_and_darf_carryforward_stays_separate_by_regime(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:
         conn.execute(
@@ -891,14 +967,15 @@ def test_irrf_carryforward_resets_at_year_end_but_darf_code_carryforward_crosses
         _close(ctx)
 
     december_common = _regime(report_2025, "2025-12", "B3_COMMON_15")
-    december_darf = _darf_suggestion(report_2025, "2025-12", "6015")
+    december_darf = _darf_suggestion(report_2025, "2025-12", "6015", "B3_FII_FIAGRO_20")
     next_january_common = _regime(report_2026, "2026-01", "B3_COMMON_15")
-    next_january_darf = _darf_suggestion(report_2026, "2026-01", "6015")
+    next_january_darf = _darf_suggestion(report_2026, "2026-01", "6015", "B3_COMMON_15")
 
     assert december_common["final_irrf_carryforward"] == "4.00"
     assert december_darf["final_darf_carryforward"] == "5.00"
     assert next_january_common["initial_irrf_carryforward"] == "0.00"
-    assert next_january_darf["initial_darf_carryforward"] == "5.00"
+    assert next_january_darf["initial_darf_carryforward"] == "0.00"
+    assert next_january_darf["final_darf_carryforward"] == "6.00"
 
 
 @pytest.mark.skip(reason="Nao ha segundo codigo de DARF mensal ativo no escopo atual alem do 6015.")
