@@ -40,7 +40,7 @@ def _close(conn_ctx):
     conn_ctx.__exit__(None, None, None)
 
 
-def test_capital_gains_route_returns_annual_contract_and_omits_months_without_sales(tmp_path, monkeypatch):
+def test_capital_gains_route_returns_annual_contract_and_keeps_january_snapshot(tmp_path, monkeypatch):
     db_path, ctx, conn, portfolio = _setup(tmp_path)
     try:
         asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
@@ -59,8 +59,8 @@ def test_capital_gains_route_returns_annual_contract_and_omits_months_without_sa
     body = response.json()
     assert body["portfolio_id"] == portfolio["id"]
     assert body["year"] == 2025
-    assert [month["year_month"] for month in body["months"]] == ["2025-03"]
-    month = body["months"][0]
+    assert [month["year_month"] for month in body["months"]] == ["2025-01", "2025-03"]
+    month = body["months"][1]
     assert month["month"] == 3
     assert month["regimes"]
     regime = month["regimes"][0]
@@ -102,6 +102,90 @@ def test_action_profit_under_monthly_limit_is_exempt(tmp_path):
     assert row["assets"][0]["theoretical_irrf"] == "0.55"
     assert row["effective_irrf"] == "0.55"
     assert row["assets"][0]["effective_irrf"] == "0.55"
+
+
+def test_january_snapshot_is_included_without_current_month_events_to_show_prior_loss(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        asset = asset_service.create_asset(conn, AssetClass.ETF.value, "LOSS11", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2024-12-01", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2024-12-20", "100", "9500", gross_value="9500")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    assert [month["year_month"] for month in report["months"]] == ["2025-01"]
+    row = _regime(report, "2025-01", "B3_COMMON_15")
+    assert row["initial_loss_carryforward"] == "500.00"
+    assert row["final_loss_carryforward"] == "500.00"
+    assert row["realized_result"] == "0.00"
+
+
+def test_neutral_exempt_stock_month_after_january_without_irrf_is_omitted(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET withholding_rate = '0'
+            WHERE regime = 'B3_COMMON_15'
+            """
+        )
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-02-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-02-20", "100", "11500", gross_value="11500")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    assert [month["year_month"] for month in report["months"]] == ["2025-01"]
+
+
+def test_exempt_stock_month_with_irrf_is_included_for_audit(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-02-02", "100", "6000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-02-20", "100", "9000", gross_value="9000")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    assert [month["year_month"] for month in report["months"]] == ["2025-01", "2025-02"]
+    row = _regime(report, "2025-02", "B3_COMMON_15")
+    assert row["exempt_gain"] == "3000.00"
+    assert row["taxable_result_before_compensation"] == "0.00"
+    assert row["darf_estimated"] == "0.00"
+    assert row["effective_irrf"] == "0.45"
+
+
+def test_loss_month_without_irrf_is_included_to_show_loss_origin(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET withholding_rate = '0'
+            WHERE regime = 'B3_COMMON_15'
+            """
+        )
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "LOSS3", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-03-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-03-20", "100", "9500", gross_value="9500")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    assert [month["year_month"] for month in report["months"]] == ["2025-01", "2025-03"]
+    row = _regime(report, "2025-03", "B3_COMMON_15")
+    assert row["taxable_result_before_compensation"] == "-500.00"
+    assert row["darf_estimated"] == "0.00"
+    assert row["effective_irrf"] == "0.00"
+    assert row["final_loss_carryforward"] == "500.00"
 
 
 def test_action_loss_under_monthly_limit_increases_loss_carryforward(tmp_path):
@@ -318,7 +402,8 @@ def test_us_or_usd_assets_are_deferred_and_do_not_enter_initial_capital_gain_eng
     finally:
         _close(ctx)
 
-    assert report["months"] == []
+    assert [month["year_month"] for month in report["months"]] == ["2025-01"]
+    assert _regime(report, "2025-01", "B3_COMMON_15")["assets"] == []
 
 
 def test_tax_parameters_are_selected_by_effective_period(tmp_path):
@@ -401,14 +486,14 @@ def test_fi_infra_zero_tax_rate_is_exempt_even_with_monthly_darf_enabled(tmp_pat
             """
         )
         asset = asset_service.create_asset(conn, AssetClass.FI_INFRA.value, "INFRA11", market="BR")
-        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-08-01", "100", "10000")
-        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-08-20", "100", "11000", gross_value="11000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-01-01", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-01-20", "100", "11000", gross_value="11000")
 
         report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
     finally:
         _close(ctx)
 
-    row = _regime(report, "2025-08", "FI_INFRA_EXEMPT")
+    row = _regime(report, "2025-01", "FI_INFRA_EXEMPT")
     assert row["realized_result"] == "1000.00"
     assert row["exempt_gain"] == "1000.00"
     assert row["taxable_base"] == "0.00"

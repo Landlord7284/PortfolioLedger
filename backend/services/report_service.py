@@ -46,10 +46,29 @@ _ZERO = Decimal("0")
 FISCAL_ASSETS_AND_RIGHTS_SECTION = "assets_and_rights"
 FISCAL_TAX_EXEMPT_INCOME_SECTION = "tax_exempt_income"
 FISCAL_EXCLUSIVE_TAXATION_INCOME_SECTION = "exclusive_taxation_income"
+FISCAL_CAPITAL_GAINS_SECTION = "capital_gains"
 DEFAULT_FISCAL_SECTIONS = [
     FISCAL_ASSETS_AND_RIGHTS_SECTION,
     FISCAL_TAX_EXEMPT_INCOME_SECTION,
     FISCAL_EXCLUSIVE_TAXATION_INCOME_SECTION,
+    FISCAL_CAPITAL_GAINS_SECTION,
+]
+CAPITAL_GAIN_SHEETS = [
+    ("B3_COMMON_15", "GC Operações Comuns"),
+    ("B3_FII_FIAGRO_20", "GC FII Fiagro"),
+    ("FI_INFRA_EXEMPT", "GC FI-Infra"),
+    ("CRYPTO_GCAP", "GC Cripto"),
+]
+CAPITAL_GAIN_XLSX_COLUMNS = [
+    ("month", "Mês"),
+    ("realized_result", "Operações Comuns"),
+    ("initial_loss_carryforward", "Resultado negativo até o mês anterior"),
+    ("final_loss_carryforward", "Prejuízo a compensar"),
+    ("effective_irrf", "IR fonte mês"),
+    ("initial_irrf_carryforward", "IR fonte meses anteriores"),
+    ("used_irrf", "IR fonte a compensar"),
+    ("darf_before_minimum", "Imposto devido"),
+    ("darf_estimated", "Imposto pago"),
 ]
 INCOME_REPORT_ASSET_CLASSES = {
     AssetClass.ACAO.value,
@@ -172,7 +191,7 @@ def _add_capital_gain_exempt_income(
 ) -> None:
     from backend.services import capital_gain_report_service
 
-    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year)
+    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year, include_neutral_months=True)
     stock_exempt_gain = _ZERO
     fi_infra_exempt_gain = _ZERO
 
@@ -548,6 +567,43 @@ def _append_income_sheet(workbook: Workbook, table: dict, title: str) -> None:
     _fit_columns(worksheet)
 
 
+def _format_year_month(value: str) -> str:
+    return f"{value[5:7]}/{value[0:4]}"
+
+
+def _append_capital_gain_sheets(workbook: Workbook, conn: sqlite3.Connection, portfolio_id: int, year: int) -> None:
+    from backend.services import capital_gain_report_service
+
+    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year)
+    rows_by_regime: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
+    for month in report["months"]:
+        for row in month["regimes"]:
+            rows_by_regime[row["regime"]].append((month, row))
+
+    for regime, title in CAPITAL_GAIN_SHEETS:
+        worksheet = _target_sheet(workbook)
+        worksheet.title = title
+        worksheet.append([label for _, label in CAPITAL_GAIN_XLSX_COLUMNS])
+        _style_header(worksheet)
+
+        for month, row in rows_by_regime.get(regime, []):
+            worksheet.append(
+                [
+                    _format_year_month(month["year_month"]),
+                    *[
+                        _xlsx_decimal(row[field])
+                        for field, _ in CAPITAL_GAIN_XLSX_COLUMNS
+                        if field != "month"
+                    ],
+                ]
+            )
+            current_row = worksheet.max_row
+            for column in range(2, len(CAPITAL_GAIN_XLSX_COLUMNS) + 1):
+                worksheet.cell(row=current_row, column=column).number_format = "#,##0.00"
+
+        _fit_columns(worksheet)
+
+
 def build_fiscal_report_xlsx(
     conn: sqlite3.Connection,
     portfolio_id: int,
@@ -568,6 +624,9 @@ def build_fiscal_report_xlsx(
             tables = {table["key"]: table for table in income_report["tables"]}
             table_key = "tax_exempt" if section == FISCAL_TAX_EXEMPT_INCOME_SECTION else "exclusive_taxation"
             _append_income_sheet(workbook, tables[table_key], INCOME_TABLES[table_key]["xlsx_title"])
+            continue
+        if section == FISCAL_CAPITAL_GAINS_SECTION:
+            _append_capital_gain_sheets(workbook, conn, portfolio_id, year)
             continue
         raise ValueError(f"Unknown fiscal section: {section}")
 

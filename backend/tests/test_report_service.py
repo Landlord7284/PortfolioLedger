@@ -2,7 +2,7 @@ from openpyxl import load_workbook
 
 from backend.database import get_db, init_db
 from backend.domain.enums import AssetClass, EventType
-from backend.services import asset_service, event_service, portfolio_service, report_service
+from backend.services import asset_service, event_service, portfolio_service, report_service, tax_service
 
 
 def _b3_import(conn, portfolio_id, filename="2025-12.xlsx"):
@@ -412,7 +412,15 @@ def test_fiscal_report_xlsx_defaults_to_all_annual_sections(tmp_path):
 
     workbook = load_workbook(xlsx_path)
 
-    assert workbook.sheetnames == ["Bens e Direitos", "Rendimentos Isentos", "Tributação Exclusiva"]
+    assert workbook.sheetnames == [
+        "Bens e Direitos",
+        "Rendimentos Isentos",
+        "Tributação Exclusiva",
+        "GC Operações Comuns",
+        "GC FII Fiagro",
+        "GC FI-Infra",
+        "GC Cripto",
+    ]
     assert workbook["Rendimentos Isentos"]["A1"].value == "TICKER"
     assert workbook["Rendimentos Isentos"]["B1"].value == "CNPJ DA FONTE PAGADORA"
     assert workbook["Rendimentos Isentos"]["C1"].value == "NOME DA FONTE PAGADORA"
@@ -425,6 +433,58 @@ def test_fiscal_report_xlsx_defaults_to_all_annual_sections(tmp_path):
     assert workbook["Rendimentos Isentos"]["E2"].number_format == "#,##0.00"
     assert workbook[workbook.sheetnames[2]]["D2"].value is None
     assert workbook[workbook.sheetnames[2]]["E2"].value is None
+
+
+def test_fiscal_report_xlsx_includes_capital_gain_sheets_by_regime(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    xlsx_path = tmp_path / "report.xlsx"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.001', withholding_rate = '0', exemption_limit = '0',
+                minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_COMMON_15'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE fiscal_tax_parameters
+            SET tax_rate = '0.001', withholding_rate = '0',
+                minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
+            WHERE regime = 'B3_FII_FIAGRO_20'
+            """
+        )
+        common = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        fii = asset_service.create_asset(conn, AssetClass.FII.value, "FUND11", market="BR")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.COMPRA.value, "2026-05-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], common["id"], EventType.VENDA.value, "2026-05-20", "100", "20000", gross_value="20000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2026-05-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2026-05-20", "100", "15000", gross_value="15000")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2026-05", regime="B3_COMMON_15", effective_irrf="100.00")
+        tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2026-05", regime="B3_FII_FIAGRO_20", effective_irrf="0.00")
+
+        xlsx_path.write_bytes(report_service.build_fiscal_report_xlsx(conn, portfolio["id"], 2026))
+
+    workbook = load_workbook(xlsx_path)
+    common_sheet = workbook["GC Operações Comuns"]
+    fii_sheet = workbook["GC FII Fiagro"]
+
+    assert common_sheet["A1"].value == "Mês"
+    assert common_sheet["B1"].value == "Operações Comuns"
+    assert common_sheet["C1"].value == "Resultado negativo até o mês anterior"
+    assert common_sheet["I1"].value == "Imposto pago"
+
+    common_row = next(row for row in common_sheet.iter_rows(min_row=2, values_only=True) if row[0] == "05/2026")
+    fii_row = next(row for row in fii_sheet.iter_rows(min_row=2, values_only=True) if row[0] == "05/2026")
+
+    assert common_row == ("05/2026", 10000, 0, 0, 100, 0, 10, 0, 0)
+    assert fii_row == ("05/2026", 5000, 0, 0, 0, 0, 0, 5, 0)
+    assert common_sheet["B3"].number_format == "#,##0.00"
+    assert fii_sheet["H3"].number_format == "#,##0.00"
 
 
 def test_fiscal_report_filename_slugifies_portfolio_name():

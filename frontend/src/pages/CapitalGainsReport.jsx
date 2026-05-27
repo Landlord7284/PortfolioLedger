@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ChevronDown, ChevronRight, Edit2, Loader2, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronRight, Download, Edit2, Loader2, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppContext } from '../App';
 import { reports as reportsApi, tax as taxApi } from '../api/client';
@@ -491,6 +491,7 @@ export default function CapitalGainsReport() {
   const [expanded, setExpanded] = useState(new Set());
   const [irrfDialog, setIrrfDialog] = useState(null);
   const [savingIrrf, setSavingIrrf] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
   const yearOptions = useMemo(() => Array.from({ length: 8 }, (_, index) => String(currentYear - index)), []);
@@ -864,6 +865,26 @@ export default function CapitalGainsReport() {
     }
   };
 
+  const exportXlsx = async () => {
+    if (!activePortfolioId) return;
+    setExporting(true);
+    try {
+      const { blob, filename } = await reportsApi.fiscalExportXlsx({ portfolioId: activePortfolioId, year });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err.message || 'Falha ao exportar XLSX.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -887,6 +908,10 @@ export default function CapitalGainsReport() {
               </SelectGroup>
             </SelectContent>
           </Select>
+          <Button variant="outline" onClick={exportXlsx} disabled={!activePortfolioId || exporting || loading}>
+            {exporting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Download data-icon="inline-start" />}
+            Exportar XLSX
+          </Button>
         </div>
       </div>
 
