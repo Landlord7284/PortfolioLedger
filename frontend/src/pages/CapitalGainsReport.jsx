@@ -39,14 +39,14 @@ const REGIME_ORDER = ['B3_COMMON_15', 'B3_FII_FIAGRO_20', 'FI_INFRA_EXEMPT', 'CR
 const REGIME_LABELS = {
   B3_COMMON_15: 'B3 - Operações Comuns',
   B3_FII_FIAGRO_20: 'B3 - FII / Fiagro',
-  FI_INFRA_EXEMPT: 'FI-Infra / Isentos',
+  FI_INFRA_EXEMPT: 'Ganhos líquidos em operações no mercado à vista: FI-INFRA',
   CRYPTO_GCAP: 'Criptoativos',
 };
 
 const REGIME_DESCRIPTIONS = {
   B3_COMMON_15: 'Apuração de Ações, BDR e ETF. Alíquota de 15%.',
   B3_FII_FIAGRO_20: 'Apuração de FII e Fiagro. Alíquota de 20%.',
-  FI_INFRA_EXEMPT: 'Bloco informativo/isento nesta fase.',
+  FI_INFRA_EXEMPT: 'Alienações isentas de FI-Infra. Valores consolidados também entram em Rendimentos Isentos e Não Tributáveis.',
   CRYPTO_GCAP: 'Apuração informativa nesta fase.',
 };
 

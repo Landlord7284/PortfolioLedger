@@ -67,6 +67,9 @@ INCOME_TABLES = {
     },
 }
 REIMBURSEMENT_PAYER_NAME = "REEMBOLSOS DE EMPRÉSTIMO DE ATIVOS"
+CAPITAL_GAIN_EXEMPT_INCOME_TYPE = "Ganho líquido"
+STOCK_EXEMPT_GAIN_PAYER_NAME = "Ganhos líquidos em operações no mercado à vista de ações"
+FI_INFRA_EXEMPT_GAIN_PAYER_NAME = "Ganhos líquidos em operações no mercado à vista: FI-INFRA"
 
 # Keep this table centralized so date-scoped tax rule changes can be added
 # without changing the aggregation code.
@@ -159,6 +162,57 @@ def _add_income_amount(
         payer_name = REIMBURSEMENT_PAYER_NAME
     key = (table_key, income_type, ticker or "", asset_id, payer_cnpj or "", payer_name or "")
     grouped[key] += amount
+
+
+def _add_capital_gain_exempt_income(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    year: int,
+    grouped: dict[tuple[str, str, str, int | str, str, str], Decimal],
+) -> None:
+    from backend.services import capital_gain_report_service
+
+    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year)
+    stock_exempt_gain = _ZERO
+    fi_infra_exempt_gain = _ZERO
+
+    for month in report["months"]:
+        for regime in month["regimes"]:
+            if regime["regime"] == "B3_COMMON_15":
+                stock_exempt_gain += sum(
+                    (
+                        Decimal(asset["exempt_gain"])
+                        for asset in regime["assets"]
+                        if asset["asset_class"] == AssetClass.ACAO.value
+                    ),
+                    _ZERO,
+                )
+            elif regime["regime"] == "FI_INFRA_EXEMPT":
+                fi_infra_exempt_gain += Decimal(regime["exempt_gain"])
+
+    if stock_exempt_gain > _ZERO:
+        _add_income_amount(
+            grouped,
+            table_key="tax_exempt",
+            income_type=CAPITAL_GAIN_EXEMPT_INCOME_TYPE,
+            asset_id="stock_exempt_capital_gain",
+            ticker=None,
+            payer_cnpj=None,
+            payer_name=STOCK_EXEMPT_GAIN_PAYER_NAME,
+            amount=stock_exempt_gain,
+        )
+
+    if fi_infra_exempt_gain > _ZERO:
+        _add_income_amount(
+            grouped,
+            table_key="tax_exempt",
+            income_type=CAPITAL_GAIN_EXEMPT_INCOME_TYPE,
+            asset_id="fi_infra_exempt_capital_gain",
+            ticker=None,
+            payer_cnpj=None,
+            payer_name=FI_INFRA_EXEMPT_GAIN_PAYER_NAME,
+            amount=fi_infra_exempt_gain,
+        )
 
 
 def list_income_report(conn: sqlite3.Connection, portfolio_id: int, year: int) -> dict:
@@ -285,6 +339,8 @@ def list_income_report(conn: sqlite3.Connection, portfolio_id: int, year: int) -
             payer_name=row["name"],
             amount=Decimal(row["net_value"] or "0"),
         )
+
+    _add_capital_gain_exempt_income(conn, portfolio_id, year, grouped)
 
     tables = _empty_income_tables()
     for (table_key, income_type, ticker, asset_id, payer_cnpj, payer_name), value in sorted(

@@ -143,6 +143,45 @@ def test_income_report_aggregates_eligible_b3_and_ledger_rows(tmp_path):
     assert tables["exclusive_taxation"]["total"] == "70.00"
 
 
+def test_income_report_adds_exempt_capital_gain_lines_without_asset_binding(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        stock = asset_service.create_asset(conn, AssetClass.ACAO.value, "ACAO3", market="BR")
+        fi_infra = asset_service.create_asset(
+            conn,
+            AssetClass.FI_INFRA.value,
+            "INFRA11",
+            market="BR",
+            fiscal_tax_treatment="EXEMPT_ZERO",
+        )
+
+        event_service.create_event(conn, portfolio["id"], stock["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], stock["id"], EventType.VENDA.value, "2025-02-20", "100", "11000", gross_value="11000")
+        event_service.create_event(conn, portfolio["id"], fi_infra["id"], EventType.COMPRA.value, "2025-03-01", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fi_infra["id"], EventType.VENDA.value, "2025-04-20", "100", "12000", gross_value="12000")
+
+        report = report_service.list_income_report(conn, portfolio["id"], 2025)
+
+    tax_exempt = next(table for table in report["tables"] if table["key"] == "tax_exempt")
+    rows_by_name = {row["payer_name"]: row for row in tax_exempt["rows"]}
+
+    stock_row = rows_by_name[report_service.STOCK_EXEMPT_GAIN_PAYER_NAME]
+    fi_infra_row = rows_by_name[report_service.FI_INFRA_EXEMPT_GAIN_PAYER_NAME]
+
+    assert stock_row["ticker"] is None
+    assert stock_row["payer_cnpj"] is None
+    assert stock_row["income_type"] == report_service.CAPITAL_GAIN_EXEMPT_INCOME_TYPE
+    assert stock_row["value"] == "1000.00"
+    assert fi_infra_row["ticker"] is None
+    assert fi_infra_row["payer_cnpj"] is None
+    assert fi_infra_row["income_type"] == report_service.CAPITAL_GAIN_EXEMPT_INCOME_TYPE
+    assert fi_infra_row["value"] == "2000.00"
+    assert tax_exempt["total"] == "3000.00"
+
+
 def test_income_report_resolves_cancelled_and_duplicate_amortizations(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)
