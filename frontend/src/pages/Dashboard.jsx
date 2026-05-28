@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppContext } from '../App';
 import { positions as posApi } from '../api/client';
 import EventForm from '../components/EventForm';
@@ -61,6 +61,12 @@ export default function Dashboard() {
     return localStorage.getItem('showRedeemed') === 'true';
   });
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') === 'assets' ? 'assets' : 'dashboard';
+
+  const handleTabChange = (value) => {
+    setSearchParams(value === 'assets' ? { tab: 'assets' } : {}, { replace: true });
+  };
 
   useEffect(() => {
     localStorage.setItem('showRedeemed', showRedeemed);
@@ -166,7 +172,7 @@ export default function Dashboard() {
 
   return (
     <div className="-mt-3 space-y-6">
-      <Tabs defaultValue="dashboard" className="flex flex-col gap-5">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-col gap-5">
         {/* Action bar */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="overflow-x-auto pb-1">
@@ -317,9 +323,9 @@ export default function Dashboard() {
             </Card>
           ) : (
             <Card className="overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="max-h-[calc(100vh-18rem)] overflow-auto">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 z-10 bg-background">
                     <TableRow>
                       <TableHead>Ticker</TableHead>
                       <TableHead>Classe</TableHead>
@@ -358,10 +364,10 @@ export default function Dashboard() {
                           <TableCell className={`text-right font-mono text-sm ${qty === 0 ? 'text-muted-foreground/50' : ''}`}>
                             {displayQuantity(pos.quantity, pos.asset_class)}
                           </TableCell>
-                          <TableCell className="text-right font-mono text-sm">R$ {displayMoney(pos.total_cost)}</TableCell>
-                          <TableCell className="text-right font-mono text-sm">R$ {displayMoney(pos.average_price)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{displayMoney(pos.total_cost)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{displayMoney(pos.average_price)}</TableCell>
                           <TableCell className={`text-right font-mono text-sm ${!hideValues && realized > 0 ? 'text-emerald-500' : !hideValues && realized < 0 ? 'text-red-500' : ''}`}>
-                            R$ {displayMoney(pos.realized_result)}
+                            {displayMoney(pos.realized_result)}
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">{formatPercent(pos.category_share, hideValues)}</TableCell>
                           <TableCell className="text-right font-mono text-sm">{formatPercent(pos.portfolio_share, hideValues)}</TableCell>

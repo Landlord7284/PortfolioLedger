@@ -228,7 +228,7 @@ export default function AssetDetail() {
       }
 
       if (alertTarget.type === 'asset-delete') {
-        navigate('/');
+        navigate('/?tab=assets');
       } else {
         if (alertTarget.type === 'bulk-delete') {
           setSelectedEvents(new Set());
@@ -331,7 +331,7 @@ export default function AssetDetail() {
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <HelpCircle className="w-12 h-12 text-muted-foreground/30 mb-4" />
         <h3 className="text-lg font-semibold mb-2">Ativo não encontrado</h3>
-        <Button variant="outline" className="mt-4" onClick={() => navigate('/')}>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/?tab=assets')}>
           <ArrowLeft className="w-4 h-4" /> Voltar ao Dashboard
         </Button>
       </div>
@@ -343,7 +343,7 @@ export default function AssetDetail() {
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => navigate('/')}>
+      <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => navigate('/?tab=assets')}>
         <ArrowLeft className="w-4 h-4" /> Voltar
       </Button>
 
