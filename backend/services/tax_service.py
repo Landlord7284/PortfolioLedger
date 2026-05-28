@@ -744,6 +744,71 @@ def delete_capital_gain_tax_paid_override(conn: sqlite3.Connection, override_id:
     return cur.rowcount > 0
 
 
+def list_capital_gain_darf_payment_confirmations(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    year: Optional[int] = None,
+) -> list[dict]:
+    params: list[Any] = [portfolio_id]
+    where = "portfolio_id = ?"
+    if year is not None:
+        where += " AND year_month BETWEEN ? AND ?"
+        params.extend([f"{year}-01", f"{year}-12"])
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM fiscal_capital_gain_darf_payment_confirmations
+        WHERE {where}
+        ORDER BY year_month, regime
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def upsert_capital_gain_darf_payment_confirmation(
+    conn: sqlite3.Connection,
+    *,
+    portfolio_id: int,
+    year_month: str,
+    regime: str,
+) -> dict:
+    _validate_year_month(year_month)
+    require_supported_capital_gain_regime(regime)
+    if not conn.execute("SELECT 1 FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone():
+        raise ValueError(f"Carteira {portfolio_id} nao encontrada.")
+    if not has_tax_parameter(conn, regime, f"{year_month}-01"):
+        raise ValueError(f"Parametro fiscal nao encontrado para {regime} em {year_month}.")
+    conn.execute(
+        """
+        INSERT INTO fiscal_capital_gain_darf_payment_confirmations (
+            portfolio_id, year_month, regime
+        )
+        VALUES (?, ?, ?)
+        ON CONFLICT(portfolio_id, year_month, regime) DO UPDATE SET
+            updated_at = datetime('now')
+        """,
+        (portfolio_id, year_month, regime),
+    )
+    row = conn.execute(
+        """
+        SELECT *
+        FROM fiscal_capital_gain_darf_payment_confirmations
+        WHERE portfolio_id = ? AND year_month = ? AND regime = ?
+        """,
+        (portfolio_id, year_month, regime),
+    ).fetchone()
+    return dict(row)
+
+
+def delete_capital_gain_darf_payment_confirmation(conn: sqlite3.Connection, confirmation_id: int) -> bool:
+    cur = conn.execute(
+        "DELETE FROM fiscal_capital_gain_darf_payment_confirmations WHERE id = ?",
+        (confirmation_id,),
+    )
+    return cur.rowcount > 0
+
+
 def list_capital_gain_manual_events(
     conn: sqlite3.Connection,
     portfolio_id: int,

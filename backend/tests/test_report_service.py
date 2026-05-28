@@ -453,7 +453,7 @@ def test_fiscal_report_xlsx_includes_capital_gain_sheets_by_regime(tmp_path):
         conn.execute(
             """
             UPDATE fiscal_tax_parameters
-            SET tax_rate = '0.001', withholding_rate = '0',
+            SET tax_rate = '0.01', withholding_rate = '0',
                 minimum_darf_amount = '10.00', darf_code = '6015', monthly_darf_enabled = 1
             WHERE regime = 'B3_FII_FIAGRO_20'
             """
@@ -466,8 +466,14 @@ def test_fiscal_report_xlsx_includes_capital_gain_sheets_by_regime(tmp_path):
         event_service.create_event(conn, portfolio["id"], common["id"], EventType.VENDA.value, "2026-06-20", "100", "11000", gross_value="11000")
         event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2026-05-02", "100", "10000")
         event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2026-05-20", "100", "15000", gross_value="15000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2026-06-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2026-06-20", "100", "11000", gross_value="11000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2026-07-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2026-07-20", "100", "11000", gross_value="11000")
         tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2026-05", regime="B3_COMMON_15", effective_irrf="100.00")
         tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2026-05", regime="B3_FII_FIAGRO_20", effective_irrf="0.00")
+        tax_service.upsert_capital_gain_darf_payment_confirmation(conn, portfolio_id=portfolio["id"], year_month="2026-05", regime="B3_FII_FIAGRO_20")
+        tax_service.upsert_capital_gain_tax_paid_override(conn, portfolio_id=portfolio["id"], year_month="2026-07", regime="B3_FII_FIAGRO_20", manual_tax_paid="8.00")
 
         xlsx_path.write_bytes(report_service.build_fiscal_report_xlsx(conn, portfolio["id"], 2026))
 
@@ -483,10 +489,14 @@ def test_fiscal_report_xlsx_includes_capital_gain_sheets_by_regime(tmp_path):
     common_row = next(row for row in common_sheet.iter_rows(min_row=2, values_only=True) if row[0] == "05/2026")
     common_no_override_row = next(row for row in common_sheet.iter_rows(min_row=2, values_only=True) if row[0] == "06/2026")
     fii_row = next(row for row in fii_sheet.iter_rows(min_row=2, values_only=True) if row[0] == "05/2026")
+    fii_unconfirmed_row = next(row for row in fii_sheet.iter_rows(min_row=2, values_only=True) if row[0] == "06/2026")
+    fii_manual_paid_row = next(row for row in fii_sheet.iter_rows(min_row=2, values_only=True) if row[0] == "07/2026")
 
     assert common_row == ("05/2026", 10000, 0, 0, 100, 0, 10, 0, 0)
     assert common_no_override_row == ("06/2026", 1000, 0, 0, 0, 90, 1, 0, 0)
-    assert fii_row == ("05/2026", 5000, 0, 0, 0, 0, 0, 5, 0)
+    assert fii_row == ("05/2026", 5000, 0, 0, 0, 0, 0, 50, 50)
+    assert fii_unconfirmed_row == ("06/2026", 1000, 0, 0, 0, 0, 0, 10, 0)
+    assert fii_manual_paid_row == ("07/2026", 1000, 0, 0, 0, 0, 0, 8, 8)
     assert common_sheet["B3"].number_format == "#,##0.00"
     assert fii_sheet["H3"].number_format == "#,##0.00"
 

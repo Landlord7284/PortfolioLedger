@@ -194,6 +194,15 @@ export const tax = {
     request('/tax/capital-gains/tax-paid-overrides', { method: 'PUT', body: JSON.stringify(data) }),
   deleteCapitalGainTaxPaidOverride: (id) =>
     request(`/tax/capital-gains/tax-paid-overrides/${id}`, { method: 'DELETE' }),
+  capitalGainDarfPaymentConfirmations: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId });
+    if (year) params.set('year', year);
+    return request(`/tax/capital-gains/darf-payment-confirmations?${params.toString()}`);
+  },
+  upsertCapitalGainDarfPaymentConfirmation: (data) =>
+    request('/tax/capital-gains/darf-payment-confirmations', { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCapitalGainDarfPaymentConfirmation: (id) =>
+    request(`/tax/capital-gains/darf-payment-confirmations/${id}`, { method: 'DELETE' }),
   capitalGainManualEvents: ({ portfolioId, year }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId });
     if (year) params.set('year', year);

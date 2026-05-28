@@ -494,6 +494,21 @@ class CapitalGainTaxPaidOverrideResponse(BaseModel):
     updated_at: str
 
 
+class CapitalGainDarfPaymentConfirmationUpsert(BaseModel):
+    portfolio_id: int
+    year_month: str
+    regime: str
+
+
+class CapitalGainDarfPaymentConfirmationResponse(BaseModel):
+    id: int
+    portfolio_id: int
+    year_month: str
+    regime: str
+    created_at: str
+    updated_at: str
+
+
 class CapitalGainManualEventCreate(BaseModel):
     portfolio_id: int
     year_month: str

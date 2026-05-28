@@ -234,6 +234,20 @@ CREATE TABLE IF NOT EXISTS fiscal_capital_gain_tax_overrides (
 CREATE INDEX IF NOT EXISTS idx_fiscal_capital_gain_tax_overrides_lookup
     ON fiscal_capital_gain_tax_overrides(portfolio_id, year_month, regime);
 
+-- DARF payment confirmations for capital gains fiscal export
+CREATE TABLE IF NOT EXISTS fiscal_capital_gain_darf_payment_confirmations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id    INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+    year_month      TEXT    NOT NULL,
+    regime          TEXT    NOT NULL,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(portfolio_id, year_month, regime)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiscal_capital_gain_darf_payment_confirmations_lookup
+    ON fiscal_capital_gain_darf_payment_confirmations(portfolio_id, year_month, regime);
+
 -- Manual capital gain events that do not belong in the ledger
 CREATE TABLE IF NOT EXISTS fiscal_capital_gain_manual_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -435,6 +449,19 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_fiscal_capital_gain_tax_overrides_lookup
             ON fiscal_capital_gain_tax_overrides(portfolio_id, year_month, regime);
+
+        CREATE TABLE IF NOT EXISTS fiscal_capital_gain_darf_payment_confirmations (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id    INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            year_month      TEXT    NOT NULL,
+            regime          TEXT    NOT NULL,
+            created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(portfolio_id, year_month, regime)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_fiscal_capital_gain_darf_payment_confirmations_lookup
+            ON fiscal_capital_gain_darf_payment_confirmations(portfolio_id, year_month, regime);
 
         CREATE TABLE IF NOT EXISTS fiscal_capital_gain_manual_events (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,

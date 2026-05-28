@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -246,6 +247,14 @@ function compareRegimes(a, b) {
   return REGIME_ORDER.indexOf(a) - REGIME_ORDER.indexOf(b);
 }
 
+function hasManualTaxPaid(row) {
+  return row?.manual_tax_paid !== null && row?.manual_tax_paid !== undefined && moneyGreaterThanZero(row.manual_tax_paid);
+}
+
+function hasManualTaxPaidDifferentFromCalculated(row) {
+  return hasManualTaxPaid(row) && !moneyEquals(row.manual_tax_paid, row.calculated_net_tax_payable);
+}
+
 function SummaryCard({ title, value, hideValues }) {
   return (
     <Card>
@@ -422,7 +431,7 @@ function RegimeTable({
   );
 }
 
-function DarfSuggestionsTable({ suggestions, hideValues }) {
+function DarfSuggestionsTable({ suggestions, hideValues, paymentConfirmationsByKey, rowsByKey, savingPaymentKeys, onTogglePayment }) {
   if (suggestions.length === 0) return null;
   const hasAccumulatedDarf = suggestions.some((suggestion) => moneyGreaterThanZero(suggestion.final_darf_carryforward));
 
@@ -443,31 +452,48 @@ function DarfSuggestionsTable({ suggestions, hideValues }) {
                 <TableHead>Código</TableHead>
                 <TableHead>Regime</TableHead>
                 <TableHead className="text-right">DARF</TableHead>
+                <TableHead className="text-center">Pago</TableHead>
                 {hasAccumulatedDarf && <TableHead className="text-right">DARF Acumulado</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {suggestions.map((suggestion) => (
-                <TableRow key={`${suggestion.year_month}|${suggestion.darf_code}|${suggestion.regime || (suggestion.included_regimes || []).join('|')}`}>
-                  <TableCell className="whitespace-nowrap font-medium">
-                    {monthLabel(suggestion.month)} / {suggestion.year_month.slice(0, 4)}
-                  </TableCell>
-                  <TableCell className="font-mono text-sm">{suggestion.darf_code}</TableCell>
-                  <TableCell className="min-w-[260px] text-sm">
-                    {REGIME_LABELS[suggestion.regime] || suggestion.regime || (suggestion.included_regimes || [])
-                      .map((regime) => REGIME_LABELS[regime] || regime)
-                      .join(', ')}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm">
-                    {formatMoney(suggestion.darf_estimated, hideValues)}
-                  </TableCell>
-                  {hasAccumulatedDarf && (
-                    <TableCell className="text-right font-mono text-sm">
-                      {formatMoney(suggestion.final_darf_carryforward, hideValues)}
+              {suggestions.map((suggestion) => {
+                const paymentKey = overrideKey(suggestion.year_month, suggestion.regime);
+                const row = rowsByKey.get(paymentKey);
+                const manualPaidDifferent = hasManualTaxPaidDifferentFromCalculated(row);
+                const checked = !manualPaidDifferent && (hasManualTaxPaid(row) || paymentConfirmationsByKey.has(paymentKey));
+                const disabled = savingPaymentKeys.has(paymentKey) || hasManualTaxPaid(row) || !moneyGreaterThanZero(suggestion.darf_estimated);
+
+                return (
+                  <TableRow key={`${suggestion.year_month}|${suggestion.darf_code}|${suggestion.regime || (suggestion.included_regimes || []).join('|')}`}>
+                    <TableCell className="whitespace-nowrap font-medium">
+                      {monthLabel(suggestion.month)} / {suggestion.year_month.slice(0, 4)}
                     </TableCell>
-                  )}
-                </TableRow>
-              ))}
+                    <TableCell className="font-mono text-sm">{suggestion.darf_code}</TableCell>
+                    <TableCell className="min-w-[260px] text-sm">
+                      {REGIME_LABELS[suggestion.regime] || suggestion.regime || (suggestion.included_regimes || [])
+                        .map((regime) => REGIME_LABELS[regime] || regime)
+                        .join(', ')}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm">
+                      {formatMoney(suggestion.darf_estimated, hideValues)}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Checkbox
+                        checked={checked}
+                        disabled={disabled}
+                        onCheckedChange={() => onTogglePayment(suggestion)}
+                        aria-label={`Confirmar pagamento do DARF de ${monthLabel(suggestion.month)} / ${suggestion.year_month.slice(0, 4)}`}
+                      />
+                    </TableCell>
+                    {hasAccumulatedDarf && (
+                      <TableCell className="text-right font-mono text-sm">
+                        {formatMoney(suggestion.final_darf_carryforward, hideValues)}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -482,6 +508,7 @@ export default function CapitalGainsReport() {
   const [report, setReport] = useState(null);
   const [overrides, setOverrides] = useState([]);
   const [taxPaidOverrides, setTaxPaidOverrides] = useState([]);
+  const [darfPaymentConfirmations, setDarfPaymentConfirmations] = useState([]);
   const [manualEvents, setManualEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [monthFilter, setMonthFilter] = useState(ALL);
@@ -491,6 +518,7 @@ export default function CapitalGainsReport() {
   const [expanded, setExpanded] = useState(new Set());
   const [irrfDialog, setIrrfDialog] = useState(null);
   const [savingIrrf, setSavingIrrf] = useState(false);
+  const [savingPaymentKeys, setSavingPaymentKeys] = useState(new Set());
   const [exporting, setExporting] = useState(false);
 
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
@@ -501,26 +529,30 @@ export default function CapitalGainsReport() {
       setReport(null);
       setOverrides([]);
       setTaxPaidOverrides([]);
+      setDarfPaymentConfirmations([]);
       setManualEvents([]);
       return;
     }
 
     setLoading(true);
     try {
-      const [reportData, overrideData, taxPaidOverrideData, manualEventData] = await Promise.all([
+      const [reportData, overrideData, taxPaidOverrideData, paymentConfirmationData, manualEventData] = await Promise.all([
         reportsApi.capitalGains({ portfolioId: activePortfolioId, year }),
         taxApi.irrfOverrides({ portfolioId: activePortfolioId, year }),
         taxApi.capitalGainTaxPaidOverrides({ portfolioId: activePortfolioId, year }),
+        taxApi.capitalGainDarfPaymentConfirmations({ portfolioId: activePortfolioId, year }),
         taxApi.capitalGainManualEvents({ portfolioId: activePortfolioId, year }),
       ]);
       setReport(reportData);
       setOverrides(overrideData);
       setTaxPaidOverrides(taxPaidOverrideData);
+      setDarfPaymentConfirmations(paymentConfirmationData);
       setManualEvents(manualEventData);
     } catch (err) {
       setReport(null);
       setOverrides([]);
       setTaxPaidOverrides([]);
+      setDarfPaymentConfirmations([]);
       setManualEvents([]);
       toast.error(err.message || 'Falha ao carregar Ganho de Capital.');
     } finally {
@@ -542,6 +574,10 @@ export default function CapitalGainsReport() {
   const taxPaidOverridesByKey = useMemo(() => {
     return new Map(taxPaidOverrides.map((override) => [overrideKey(override.year_month, override.regime), override]));
   }, [taxPaidOverrides]);
+
+  const darfPaymentConfirmationsByKey = useMemo(() => {
+    return new Map(darfPaymentConfirmations.map((confirmation) => [overrideKey(confirmation.year_month, confirmation.regime), confirmation]));
+  }, [darfPaymentConfirmations]);
 
   const manualEventsByKey = useMemo(() => {
     const byKey = new Map();
@@ -566,6 +602,10 @@ export default function CapitalGainsReport() {
         }));
     });
   }, [report]);
+
+  const rowsByKey = useMemo(() => {
+    return new Map(rows.map((row) => [overrideKey(row.year_month, row.regime), row]));
+  }, [rows]);
 
   const darfSuggestions = useMemo(() => {
     return (report?.months || []).flatMap((month) => {
@@ -644,6 +684,16 @@ export default function CapitalGainsReport() {
       .sort((a, b) => a.year_month.localeCompare(b.year_month) || a.darf_code.localeCompare(b.darf_code) || compareRegimes(a.regime, b.regime));
   }, [darfSuggestions, monthFilter, regimeFilter, visibleMonthKeys]);
 
+  const hasPendingDarfPayment = useMemo(() => {
+    return visibleDarfSuggestions.some((suggestion) => {
+      if (!moneyGreaterThanZero(suggestion.darf_estimated)) return false;
+      const key = overrideKey(suggestion.year_month, suggestion.regime);
+      const row = rowsByKey.get(key);
+      if (hasManualTaxPaid(row)) return false;
+      return !darfPaymentConfirmationsByKey.has(key);
+    });
+  }, [darfPaymentConfirmationsByKey, rowsByKey, visibleDarfSuggestions]);
+
   const finalLossBalance = useMemo(() => {
     const latestByRegime = new Map();
     visibleRows.forEach((row) => {
@@ -697,6 +747,37 @@ export default function CapitalGainsReport() {
     setRegimeFilter(ALL);
     setClassFilter(ALL);
     setAssetFilter(ALL);
+  };
+
+  const toggleDarfPaymentConfirmation = async (suggestion) => {
+    if (!activePortfolioId || !suggestion.regime) return;
+    const key = overrideKey(suggestion.year_month, suggestion.regime);
+    const existing = darfPaymentConfirmationsByKey.get(key);
+    setSavingPaymentKeys((current) => new Set(current).add(key));
+    try {
+      if (existing) {
+        await taxApi.deleteCapitalGainDarfPaymentConfirmation(existing.id);
+        setDarfPaymentConfirmations((current) => current.filter((confirmation) => confirmation.id !== existing.id));
+      } else {
+        const created = await taxApi.upsertCapitalGainDarfPaymentConfirmation({
+          portfolio_id: activePortfolioId,
+          year_month: suggestion.year_month,
+          regime: suggestion.regime,
+        });
+        setDarfPaymentConfirmations((current) => [
+          ...current.filter((confirmation) => overrideKey(confirmation.year_month, confirmation.regime) !== key),
+          created,
+        ]);
+      }
+    } catch (err) {
+      toast.error(err.message || 'Falha ao confirmar pagamento do DARF.');
+    } finally {
+      setSavingPaymentKeys((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
   };
 
   const buildIrrfDialogState = (row, overrideRecord, taxPaidOverride, manualEventRecords, options = {}) => ({
@@ -792,6 +873,8 @@ export default function CapitalGainsReport() {
       }
 
       const taxPaid = currencyToBackend(irrfDialog.taxPaidValue);
+      const paymentKey = overrideKey(irrfDialog.row.year_month, irrfDialog.row.regime);
+      const paymentConfirmation = darfPaymentConfirmationsByKey.get(paymentKey);
       if (decimalToCents(taxPaid) > 0n) {
         operations.push(taxApi.upsertCapitalGainTaxPaidOverride({
           portfolio_id: activePortfolioId,
@@ -799,6 +882,9 @@ export default function CapitalGainsReport() {
           regime: irrfDialog.row.regime,
           manual_tax_paid: taxPaid,
         }));
+        if (paymentConfirmation && !moneyEquals(taxPaid, irrfDialog.row.calculated_net_tax_payable)) {
+          operations.push(taxApi.deleteCapitalGainDarfPaymentConfirmation(paymentConfirmation.id));
+        }
       } else if (irrfDialog.taxPaidOverride?.id) {
         operations.push(taxApi.deleteCapitalGainTaxPaidOverride(irrfDialog.taxPaidOverride.id));
       }
@@ -1001,7 +1087,21 @@ export default function CapitalGainsReport() {
         <SummaryCard title="Prejuízo final" value={summary.finalLoss} hideValues={hideValues} />
       </div>
 
-      <DarfSuggestionsTable suggestions={visibleDarfSuggestions} hideValues={hideValues} />
+      {hasPendingDarfPayment && (
+        <Alert>
+          <AlertCircle />
+          <AlertDescription>DARF pendente de confirmação de pagamento.</AlertDescription>
+        </Alert>
+      )}
+
+      <DarfSuggestionsTable
+        suggestions={visibleDarfSuggestions}
+        hideValues={hideValues}
+        paymentConfirmationsByKey={darfPaymentConfirmationsByKey}
+        rowsByKey={rowsByKey}
+        savingPaymentKeys={savingPaymentKeys}
+        onTogglePayment={toggleDarfPaymentConfirmation}
+      />
 
       {loading ? (
         <Card>

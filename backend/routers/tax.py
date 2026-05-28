@@ -15,6 +15,8 @@ from backend.models import (
     FiscalTaxParameterCreate,
     FiscalTaxParameterResponse,
     FiscalTaxParameterUpdate,
+    CapitalGainDarfPaymentConfirmationResponse,
+    CapitalGainDarfPaymentConfirmationUpsert,
     CapitalGainManualEventCreate,
     CapitalGainManualEventResponse,
     CapitalGainManualEventUpdate,
@@ -185,6 +187,37 @@ def delete_capital_gain_tax_paid_override(override_id: int):
     with get_db() as conn:
         if not tax_service.delete_capital_gain_tax_paid_override(conn, override_id):
             raise HTTPException(404, "Ajuste de imposto pago nao encontrado.")
+    return {"ok": True}
+
+
+@router.get("/capital-gains/darf-payment-confirmations", response_model=list[CapitalGainDarfPaymentConfirmationResponse])
+def list_capital_gain_darf_payment_confirmations(
+    portfolio_id: int = Query(...),
+    year: Optional[int] = Query(None),
+):
+    with get_db() as conn:
+        return tax_service.list_capital_gain_darf_payment_confirmations(conn, portfolio_id=portfolio_id, year=year)
+
+
+@router.put("/capital-gains/darf-payment-confirmations", response_model=CapitalGainDarfPaymentConfirmationResponse)
+def upsert_capital_gain_darf_payment_confirmation(body: CapitalGainDarfPaymentConfirmationUpsert):
+    with get_db() as conn:
+        try:
+            return tax_service.upsert_capital_gain_darf_payment_confirmation(
+                conn,
+                portfolio_id=body.portfolio_id,
+                year_month=body.year_month,
+                regime=body.regime,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+
+@router.delete("/capital-gains/darf-payment-confirmations/{confirmation_id}")
+def delete_capital_gain_darf_payment_confirmation(confirmation_id: int):
+    with get_db() as conn:
+        if not tax_service.delete_capital_gain_darf_payment_confirmation(conn, confirmation_id):
+            raise HTTPException(404, "Confirmacao de pagamento de DARF nao encontrada.")
     return {"ok": True}
 
 

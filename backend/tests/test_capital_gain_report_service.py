@@ -657,6 +657,61 @@ def test_manual_tax_paid_override_replaces_only_payable_tax_and_zero_falls_back(
     assert fallback_suggestion["darf_estimated"] == "100.00"
 
 
+def test_darf_payment_confirmation_api_lifecycle(tmp_path, monkeypatch):
+    db_path, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        pass
+    finally:
+        _close(ctx)
+
+    monkeypatch.setattr("backend.routers.tax.get_db", lambda: get_db(db_path))
+    client = TestClient(app)
+
+    response = client.put(
+        "/api/tax/capital-gains/darf-payment-confirmations",
+        json={
+            "portfolio_id": portfolio["id"],
+            "year_month": "2025-01",
+            "regime": "B3_COMMON_15",
+        },
+    )
+    assert response.status_code == 200
+    confirmation = response.json()
+    assert confirmation["portfolio_id"] == portfolio["id"]
+    assert confirmation["year_month"] == "2025-01"
+    assert confirmation["regime"] == "B3_COMMON_15"
+
+    update_response = client.put(
+        "/api/tax/capital-gains/darf-payment-confirmations",
+        json={
+            "portfolio_id": portfolio["id"],
+            "year_month": "2025-01",
+            "regime": "B3_COMMON_15",
+        },
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["id"] == confirmation["id"]
+
+    list_response = client.get(f"/api/tax/capital-gains/darf-payment-confirmations?portfolio_id={portfolio['id']}&year=2025")
+    assert list_response.status_code == 200
+    assert [item["id"] for item in list_response.json()] == [confirmation["id"]]
+
+    invalid_response = client.put(
+        "/api/tax/capital-gains/darf-payment-confirmations",
+        json={
+            "portfolio_id": portfolio["id"],
+            "year_month": "2025-13",
+            "regime": "B3_COMMON_15",
+        },
+    )
+    assert invalid_response.status_code == 400
+
+    delete_response = client.delete(f"/api/tax/capital-gains/darf-payment-confirmations/{confirmation['id']}")
+    assert delete_response.status_code == 200
+    list_after_delete_response = client.get(f"/api/tax/capital-gains/darf-payment-confirmations?portfolio_id={portfolio['id']}&year=2025")
+    assert list_after_delete_response.json() == []
+
+
 def test_manual_capital_gain_event_enters_report_without_ledger_event(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:

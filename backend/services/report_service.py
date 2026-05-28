@@ -571,13 +571,27 @@ def _format_year_month(value: str) -> str:
     return f"{value[5:7]}/{value[0:4]}"
 
 
+def _capital_gain_paid_xlsx_value(row: dict, paid_confirmations: set[tuple[str, str]]) -> Decimal:
+    manual_tax_paid = row.get("manual_tax_paid")
+    if manual_tax_paid is not None and Decimal(manual_tax_paid) > _ZERO:
+        return _xlsx_decimal(manual_tax_paid)
+    if (row["year_month"], row["regime"]) in paid_confirmations:
+        return _xlsx_decimal(row["darf_before_minimum"])
+    return _ZERO
+
+
 def _append_capital_gain_sheets(workbook: Workbook, conn: sqlite3.Connection, portfolio_id: int, year: int) -> None:
-    from backend.services import capital_gain_report_service
+    from backend.services import capital_gain_report_service, tax_service
 
     report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year, include_january_snapshot=True)
+    paid_confirmations = {
+        (row["year_month"], row["regime"])
+        for row in tax_service.list_capital_gain_darf_payment_confirmations(conn, portfolio_id, year)
+    }
     rows_by_regime: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
     for month in report["months"]:
         for row in month["regimes"]:
+            row["year_month"] = month["year_month"]
             rows_by_regime[row["regime"]].append((month, row))
 
     for regime, title in CAPITAL_GAIN_SHEETS:
@@ -591,7 +605,9 @@ def _append_capital_gain_sheets(workbook: Workbook, conn: sqlite3.Connection, po
                 [
                     _format_year_month(month["year_month"]),
                     *[
-                        _xlsx_decimal(row[field])
+                        _capital_gain_paid_xlsx_value(row, paid_confirmations)
+                        if field == "darf_estimated"
+                        else _xlsx_decimal(row[field])
                         for field, _ in CAPITAL_GAIN_XLSX_COLUMNS
                         if field != "month"
                     ],
