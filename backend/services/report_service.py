@@ -70,6 +70,15 @@ CAPITAL_GAIN_XLSX_COLUMNS = [
     ("darf_before_minimum", "Imposto devido"),
     ("darf_estimated", "Imposto pago"),
 ]
+CAPITAL_GAIN_DETAIL_START_ROW = 15
+CAPITAL_GAIN_DETAIL_XLSX_COLUMNS = [
+    ("month", "Mês"),
+    ("ticker", "Ativo"),
+    ("asset_class", "Classe"),
+    ("gross_sale", "Venda Bruta"),
+    ("realized_result", "Resultado Líquido"),
+    ("exempt_gain", "Ganho Isento"),
+]
 INCOME_REPORT_ASSET_CLASSES = {
     AssetClass.ACAO.value,
     AssetClass.FII.value,
@@ -502,6 +511,13 @@ def _style_header(worksheet) -> None:
         cell.fill = header_fill
 
 
+def _style_row_header(worksheet, row_number: int) -> None:
+    header_fill = PatternFill("solid", fgColor="D9EAD3")
+    for cell in worksheet[row_number]:
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+
+
 def _fit_columns(worksheet) -> None:
     for column_cells in worksheet.columns:
         max_length = max(len(str(cell.value or "")) for cell in column_cells)
@@ -580,10 +596,46 @@ def _capital_gain_paid_xlsx_value(row: dict, paid_confirmations: set[tuple[str, 
     return _ZERO
 
 
+def _capital_gain_detail_columns(regime: str) -> list[tuple[str, str]]:
+    if regime == "B3_FII_FIAGRO_20":
+        return [column for column in CAPITAL_GAIN_DETAIL_XLSX_COLUMNS if column[0] != "exempt_gain"]
+    return CAPITAL_GAIN_DETAIL_XLSX_COLUMNS
+
+
+def _append_capital_gain_detail_rows(worksheet, regime: str, rows: list[tuple[dict, dict]]) -> None:
+    detail_columns = _capital_gain_detail_columns(regime)
+    while worksheet.max_row < CAPITAL_GAIN_DETAIL_START_ROW - 1:
+        worksheet.append([None])
+    worksheet.append([label for _, label in detail_columns])
+    _style_row_header(worksheet, CAPITAL_GAIN_DETAIL_START_ROW)
+
+    for month, row in rows:
+        for asset in sorted(row.get("assets") or [], key=lambda item: (month["year_month"], item.get("ticker") or "", item.get("asset_id") or 0)):
+            worksheet.append(
+                [
+                    _format_year_month(month["year_month"]),
+                    asset.get("ticker") or "",
+                    asset.get("asset_class") or "",
+                    _xlsx_decimal(asset["gross_sale"]),
+                    _xlsx_decimal(asset["realized_result"]),
+                    *([] if regime == "B3_FII_FIAGRO_20" else [_xlsx_decimal(asset["exempt_gain"])]),
+                ]
+            )
+            current_row = worksheet.max_row
+            for column in range(4, len(detail_columns) + 1):
+                worksheet.cell(row=current_row, column=column).number_format = "#,##0.00"
+
+
 def _append_capital_gain_sheets(workbook: Workbook, conn: sqlite3.Connection, portfolio_id: int, year: int) -> None:
     from backend.services import capital_gain_report_service, tax_service
 
-    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year, include_january_snapshot=True)
+    report = capital_gain_report_service.list_capital_gains(
+        conn,
+        portfolio_id,
+        year,
+        include_neutral_months=True,
+        include_january_snapshot=True,
+    )
     paid_confirmations = {
         (row["year_month"], row["regime"])
         for row in tax_service.list_capital_gain_darf_payment_confirmations(conn, portfolio_id, year)
@@ -617,6 +669,7 @@ def _append_capital_gain_sheets(workbook: Workbook, conn: sqlite3.Connection, po
             for column in range(2, len(CAPITAL_GAIN_XLSX_COLUMNS) + 1):
                 worksheet.cell(row=current_row, column=column).number_format = "#,##0.00"
 
+        _append_capital_gain_detail_rows(worksheet, regime, rows_by_regime.get(regime, []))
         _fit_columns(worksheet)
 
 

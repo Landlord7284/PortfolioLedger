@@ -460,6 +460,7 @@ def test_fiscal_report_xlsx_includes_capital_gain_sheets_by_regime(tmp_path):
         )
         common = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
         fii = asset_service.create_asset(conn, AssetClass.FII.value, "FUND11", market="BR")
+        fi_infra = asset_service.create_asset(conn, AssetClass.FI_INFRA.value, "INFRA11", market="BR")
         event_service.create_event(conn, portfolio["id"], common["id"], EventType.COMPRA.value, "2026-05-02", "100", "10000")
         event_service.create_event(conn, portfolio["id"], common["id"], EventType.VENDA.value, "2026-05-20", "100", "20000", gross_value="20000")
         event_service.create_event(conn, portfolio["id"], common["id"], EventType.COMPRA.value, "2026-06-02", "100", "10000")
@@ -470,6 +471,8 @@ def test_fiscal_report_xlsx_includes_capital_gain_sheets_by_regime(tmp_path):
         event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2026-06-20", "100", "11000", gross_value="11000")
         event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2026-07-02", "100", "10000")
         event_service.create_event(conn, portfolio["id"], fii["id"], EventType.VENDA.value, "2026-07-20", "100", "11000", gross_value="11000")
+        event_service.create_event(conn, portfolio["id"], fi_infra["id"], EventType.COMPRA.value, "2026-08-02", "100", "10000")
+        event_service.create_event(conn, portfolio["id"], fi_infra["id"], EventType.VENDA.value, "2026-08-20", "100", "11000", gross_value="11000")
         tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2026-05", regime="B3_COMMON_15", effective_irrf="100.00")
         tax_service.upsert_irrf_override(conn, portfolio_id=portfolio["id"], year_month="2026-05", regime="B3_FII_FIAGRO_20", effective_irrf="0.00")
         tax_service.upsert_capital_gain_darf_payment_confirmation(conn, portfolio_id=portfolio["id"], year_month="2026-05", regime="B3_FII_FIAGRO_20")
@@ -480,6 +483,7 @@ def test_fiscal_report_xlsx_includes_capital_gain_sheets_by_regime(tmp_path):
     workbook = load_workbook(xlsx_path)
     common_sheet = workbook["GC Operações Comuns"]
     fii_sheet = workbook["GC FII Fiagro"]
+    fi_infra_sheet = workbook["GC FI-Infra"]
 
     assert common_sheet["A1"].value == "Mês"
     assert common_sheet["B1"].value == "Operações Comuns"
@@ -499,6 +503,27 @@ def test_fiscal_report_xlsx_includes_capital_gain_sheets_by_regime(tmp_path):
     assert fii_manual_paid_row == ("07/2026", 1000, 0, 0, 0, 0, 0, 8, 8)
     assert common_sheet["B3"].number_format == "#,##0.00"
     assert fii_sheet["H3"].number_format == "#,##0.00"
+    assert common_sheet["A15"].value == "Mês"
+    assert common_sheet["B15"].value == "Ativo"
+    assert common_sheet["F15"].value == "Ganho Isento"
+    assert common_sheet["A16"].value == "05/2026"
+    assert common_sheet["B16"].value == "ETF11"
+    assert common_sheet["C16"].value == AssetClass.ETF.value
+    assert common_sheet["D16"].value == 20000
+    assert common_sheet["E16"].value == 10000
+    assert common_sheet["F16"].value == 0
+    assert common_sheet["D16"].number_format == "#,##0.00"
+    assert fii_sheet["A15"].value == "Mês"
+    assert fii_sheet["E15"].value == "Resultado Líquido"
+    assert fii_sheet["F15"].value is None
+    assert fii_sheet["A16"].value == "05/2026"
+    assert fii_sheet["B16"].value == "FUND11"
+    assert fii_sheet["E16"].value == 5000
+    assert fi_infra_sheet["A15"].value == "Mês"
+    assert fi_infra_sheet["F15"].value == "Ganho Isento"
+    assert fi_infra_sheet["A16"].value == "08/2026"
+    assert fi_infra_sheet["B16"].value == "INFRA11"
+    assert fi_infra_sheet["F16"].value == 1000
 
 
 def test_fiscal_report_filename_slugifies_portfolio_name():
