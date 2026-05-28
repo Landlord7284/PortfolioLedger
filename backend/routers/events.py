@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
 
 from backend.database import get_db
 from backend.domain.engine import EngineValidationError
@@ -21,7 +22,11 @@ from backend.models import (
     ImportResult,
 )
 from backend.services import event_service
-from backend.services.import_service import import_to_ledger
+from backend.services.import_service import (
+    IMPORT_TEMPLATE_MEDIA_TYPE,
+    build_import_template_xlsx,
+    import_to_ledger,
+)
 
 router = APIRouter(tags=["events"])
 
@@ -177,6 +182,21 @@ def resolve_duplicate(event_id: int):
 
 
 # ── Import ───────────────────────────────────────────────────
+
+@router.get("/api/import/template.xlsx")
+def import_template_xlsx(template: str = Query(...)):
+    """Download an XLSX template compatible with the import parser."""
+    try:
+        content = build_import_template_xlsx(template)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    filename = f"modelo-importacao-posicoes-{template.lower().strip()}.xlsx"
+    return StreamingResponse(
+        BytesIO(content),
+        media_type=IMPORT_TEMPLATE_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 @router.post("/api/import/xlsx", response_model=ImportResult)
 async def import_xlsx(

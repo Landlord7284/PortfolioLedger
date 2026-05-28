@@ -2,7 +2,7 @@ from backend.database import get_db, init_db
 from backend.domain.enums import AssetClass, EventType
 from io import BytesIO
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from backend.services import asset_service, event_service, import_service, portfolio_service, report_service
 
@@ -193,6 +193,52 @@ def test_us_xlsx_import_converts_values_for_brl_position(tmp_path):
     assert result["imported"] == 1
     assert position["total_cost"] == "5000.00"
     assert position["total_cost_original"] == "1000"
+
+
+def test_import_template_xlsx_uses_brazil_columns():
+    content = import_service.build_import_template_xlsx("brasil")
+    workbook = load_workbook(BytesIO(content))
+    worksheet = workbook.active
+    instructions = workbook["Instruções"]
+
+    assert worksheet.title == "Registro"
+    assert [cell.value for cell in worksheet[1]] == [
+        "Classe",
+        "Ativo",
+        "Evento",
+        "Data",
+        "Quantidade",
+        "Valor Evento",
+        "Valor Bruto",
+    ]
+    assert instructions["B2"].value == "Use valores como Ação, BDR, ETF, FII, FI-INFRA, Tesouro Direto, Debênture."
+    assert instructions["B3"].value == "Ticker do ativo, por exemplo PETR4."
+    assert instructions["B5"].value == "Informe a data do evento em DD/MM/AAAA, ou como data do Excel."
+    assert instructions["A8"].value == "Valor Bruto"
+    assert instructions["B8"].value == "Campo cadastrado em vendas. Informe o valor bruto da venda em BRL."
+
+
+def test_import_template_xlsx_uses_international_columns():
+    content = import_service.build_import_template_xlsx("exterior")
+    workbook = load_workbook(BytesIO(content))
+    worksheet = workbook.active
+    instructions = workbook["Instruções"]
+
+    assert worksheet.title == "Exterior"
+    assert [cell.value for cell in worksheet[1]] == [
+        "Classe",
+        "Ativo",
+        "Evento",
+        "Data",
+        "Quantidade",
+        "Valor Evento",
+        "Origem US",
+    ]
+    assert instructions["B2"].value == "Use valores como Stock, REIT, ETF."
+    assert instructions["B3"].value == "Ticker do ativo, por exemplo AAPL."
+    assert instructions["B5"].value == "Informe a data do evento em DD/MM/AAAA, ou como data do Excel."
+    assert instructions["A8"].value == "Origem US"
+    assert instructions["B8"].value == "Para compras no exterior antes de 2024, parcela paga com recursos já em USD."
 
 
 def test_assets_and_rights_uses_brl_cost_for_us_assets(tmp_path):

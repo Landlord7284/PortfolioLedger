@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional, BinaryIO
 
 import openpyxl
+from openpyxl.styles import Alignment, Font, PatternFill
 
 from backend.domain.enums import AssetClass, EventType
 from backend.domain.engine import to_decimal
@@ -155,6 +156,90 @@ _EVENT_LABEL_MAP = {
     "Resgate Antecipado": EventType.RESGATE_ANTECIPADO,
     "Resgate Vencimento": EventType.RESGATE_VENCIMENTO,
 }
+
+
+IMPORT_TEMPLATE_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+_BR_TEMPLATE_HEADERS = [
+    "Classe",
+    "Ativo",
+    "Evento",
+    "Data",
+    "Quantidade",
+    "Valor Evento",
+    "Valor Bruto",
+]
+
+_INTERNATIONAL_TEMPLATE_HEADERS = [
+    "Classe",
+    "Ativo",
+    "Evento",
+    "Data",
+    "Quantidade",
+    "Valor Evento",
+    "Origem US",
+]
+
+_BR_TEMPLATE_INSTRUCTIONS = [
+    ("Classe", "Use valores como Ação, BDR, ETF, FII, FI-INFRA, Tesouro Direto, Debênture."),
+    ("Ativo", "Ticker do ativo, por exemplo PETR4."),
+    ("Evento", "Use Compra, Venda, Desdobramento, Grupamento, Amortização, Bonificação, Cisão, Resgate Antecipado ou Resgate Vencimento."),
+    ("Data", "Informe a data do evento em DD/MM/AAAA, ou como data do Excel."),
+    ("Quantidade", "Quantidade movimentada no evento."),
+    ("Valor Evento", "Valor líquido em BRL."),
+    ("Valor Bruto", "Campo cadastrado em vendas. Informe o valor bruto da venda em BRL."),
+]
+
+_INTERNATIONAL_TEMPLATE_INSTRUCTIONS = [
+    ("Classe", "Use valores como Stock, REIT, ETF."),
+    ("Ativo", "Ticker do ativo, por exemplo AAPL."),
+    ("Evento", "Use Compra, Venda, Desdobramento, Grupamento, Amortização, Bonificação, Cisão, Resgate Antecipado ou Resgate Vencimento."),
+    ("Data", "Informe a data do evento em DD/MM/AAAA, ou como data do Excel."),
+    ("Quantidade", "Quantidade movimentada no evento."),
+    ("Valor Evento", "Valor em USD."),
+    ("Origem US", "Para compras no exterior antes de 2024, parcela paga com recursos já em USD."),
+]
+
+
+def build_import_template_xlsx(template: str) -> bytes:
+    """Build an XLSX template compatible with the event import parser."""
+    normalized = template.lower().strip()
+    if normalized not in {"brasil", "exterior"}:
+        raise ValueError("Modelo deve ser 'brasil' ou 'exterior'.")
+
+    is_international = normalized == "exterior"
+    headers = _INTERNATIONAL_TEMPLATE_HEADERS if is_international else _BR_TEMPLATE_HEADERS
+    workbook = openpyxl.Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Exterior" if is_international else "Registro"
+    worksheet.append(headers)
+
+    header_fill = PatternFill("solid", fgColor="E5E7EB")
+    for cell in worksheet[1]:
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    widths = [18, 16, 22, 14, 14, 18, 18]
+    for index, width in enumerate(widths, start=1):
+        worksheet.column_dimensions[openpyxl.utils.get_column_letter(index)].width = width
+    worksheet.freeze_panes = "A2"
+
+    instructions = workbook.create_sheet("Instruções")
+    instructions.append(["Campo", "Orientação"])
+    rows = _INTERNATIONAL_TEMPLATE_INSTRUCTIONS if is_international else _BR_TEMPLATE_INSTRUCTIONS
+    for row in rows:
+        instructions.append(row)
+    for cell in instructions[1]:
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+    instructions.column_dimensions["A"].width = 18
+    instructions.column_dimensions["B"].width = 90
+    instructions.freeze_panes = "A2"
+
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 # ─────────────────────────────────────────────────────────────

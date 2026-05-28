@@ -227,6 +227,11 @@ export const importXlsx = (portfolioId, file) => {
   });
 };
 
+export const importTemplateXlsx = (template) => {
+  const params = new URLSearchParams({ template });
+  return requestBlob(`/import/template.xlsx?${params.toString()}`);
+};
+
 export const brokerageNotes = {
   calculate: (data) =>
     request('/brokerage-notes/calculate', { method: 'POST', body: JSON.stringify(data) }),

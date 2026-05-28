@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { importXlsx } from '../api/client';
-import { UploadCloud, FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2, AlertCircle } from 'lucide-react';
+import { importTemplateXlsx, importXlsx } from '../api/client';
+import { UploadCloud, FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2, AlertCircle, Download, ChevronDown } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,8 +11,29 @@ import { toast } from 'sonner';
 export default function ImportModal({ portfolioId, onClose, onSuccess }) {
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState('');
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+
+  const downloadTemplate = async (template) => {
+    setDownloadingTemplate(template);
+    try {
+      const { blob, filename } = await importTemplateXlsx(template);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err.message || 'Falha ao baixar modelo.');
+    } finally {
+      setDownloadingTemplate('');
+    }
+  };
 
   const handleImport = async () => {
     if (!file) return;
@@ -45,7 +66,7 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UploadCloud className="w-5 h-5" />
-            Importar Eventos
+            Importar Posições
           </DialogTitle>
           {!result && (
             <DialogDescription>
@@ -55,7 +76,49 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
         </DialogHeader>
 
         {!result ? (
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
+            <div className="rounded-lg border bg-muted/30">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between p-3 text-left text-sm font-medium"
+                onClick={() => setTemplatesOpen((open) => !open)}
+                aria-expanded={templatesOpen}
+              >
+                Templates Excel
+                <ChevronDown className={`w-4 h-4 transition-transform ${templatesOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {templatesOpen && (
+                <div className="flex flex-col items-center gap-3 px-3 pb-3">
+                  <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => downloadTemplate('brasil')}
+                      disabled={Boolean(downloadingTemplate)}
+                    >
+                      {downloadingTemplate === 'brasil' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                      Modelo Brasil
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => downloadTemplate('exterior')}
+                      disabled={Boolean(downloadingTemplate)}
+                    >
+                      {downloadingTemplate === 'exterior' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                      Modelo Exterior
+                    </Button>
+                  </div>
+                  <div className="flex flex-col gap-1 text-center text-xs text-muted-foreground">
+                    <p>Brasil: Valor Bruto é cadastrado em vendas.</p>
+                    <p>Exterior: Valor Evento em USD.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <Input
               type="file"
               accept=".xlsx"
