@@ -40,13 +40,13 @@ def _close(conn_ctx):
     conn_ctx.__exit__(None, None, None)
 
 
-def test_capital_gains_route_returns_annual_contract_and_keeps_january_snapshot(tmp_path, monkeypatch):
+def test_capital_gains_route_returns_annual_contract_and_omits_neutral_months(tmp_path, monkeypatch):
     db_path, ctx, conn, portfolio = _setup(tmp_path)
     try:
         asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
         event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-01-02", "100", "10000")
         event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-02-02", "10", "1000")
-        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-03-20", "100", "11000", gross_value="11000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2025-03-20", "100", "21000", gross_value="21000")
     finally:
         _close(ctx)
 
@@ -59,8 +59,8 @@ def test_capital_gains_route_returns_annual_contract_and_keeps_january_snapshot(
     body = response.json()
     assert body["portfolio_id"] == portfolio["id"]
     assert body["year"] == 2025
-    assert [month["year_month"] for month in body["months"]] == ["2025-01", "2025-03"]
-    month = body["months"][1]
+    assert [month["year_month"] for month in body["months"]] == ["2025-03"]
+    month = body["months"][0]
     assert month["month"] == 3
     assert month["regimes"]
     regime = month["regimes"][0]
@@ -100,18 +100,18 @@ def test_action_profit_under_monthly_limit_is_exempt(tmp_path):
     assert row["assets"][0]["fiscal_regime"] == "B3_COMMON_15"
     assert row["assets"][0]["realized_result"] == "1000.00"
     assert row["assets"][0]["theoretical_irrf"] == "0.55"
-    assert row["effective_irrf"] == "0.55"
-    assert row["assets"][0]["effective_irrf"] == "0.55"
+    assert row["effective_irrf"] == "0.00"
+    assert row["assets"][0]["effective_irrf"] == "0.00"
 
 
-def test_january_snapshot_is_included_without_current_month_events_to_show_prior_loss(tmp_path):
+def test_january_snapshot_is_included_when_requested_to_show_prior_loss(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:
         asset = asset_service.create_asset(conn, AssetClass.ETF.value, "LOSS11", market="BR")
         event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2024-12-01", "100", "10000")
         event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA.value, "2024-12-20", "100", "9500", gross_value="9500")
 
-        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025, include_january_snapshot=True)
     finally:
         _close(ctx)
 
@@ -140,10 +140,10 @@ def test_neutral_exempt_stock_month_after_january_without_irrf_is_omitted(tmp_pa
     finally:
         _close(ctx)
 
-    assert [month["year_month"] for month in report["months"]] == ["2025-01"]
+    assert [month["year_month"] for month in report["months"]] == []
 
 
-def test_exempt_stock_month_with_irrf_is_included_for_audit(tmp_path):
+def test_exempt_stock_month_with_only_note_irrf_is_omitted_after_january(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:
         asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
@@ -154,12 +154,7 @@ def test_exempt_stock_month_with_irrf_is_included_for_audit(tmp_path):
     finally:
         _close(ctx)
 
-    assert [month["year_month"] for month in report["months"]] == ["2025-01", "2025-02"]
-    row = _regime(report, "2025-02", "B3_COMMON_15")
-    assert row["exempt_gain"] == "3000.00"
-    assert row["taxable_result_before_compensation"] == "0.00"
-    assert row["darf_estimated"] == "0.00"
-    assert row["effective_irrf"] == "0.45"
+    assert [month["year_month"] for month in report["months"]] == []
 
 
 def test_loss_month_without_irrf_is_included_to_show_loss_origin(tmp_path):
@@ -180,7 +175,7 @@ def test_loss_month_without_irrf_is_included_to_show_loss_origin(tmp_path):
     finally:
         _close(ctx)
 
-    assert [month["year_month"] for month in report["months"]] == ["2025-01", "2025-03"]
+    assert [month["year_month"] for month in report["months"]] == ["2025-03"]
     row = _regime(report, "2025-03", "B3_COMMON_15")
     assert row["taxable_result_before_compensation"] == "-500.00"
     assert row["darf_estimated"] == "0.00"
@@ -253,8 +248,8 @@ def test_action_above_limit_and_etf_use_common_bucket_chronologically(tmp_path):
     assert january["tax_rate"] == "0.15"
     assert january["tax_due"] == "3150.00"
     assert january["theoretical_irrf"] == "1.55"
-    assert january["effective_irrf"] == "1.55"
-    assert january["darf_estimated"] == "3148.45"
+    assert january["effective_irrf"] == "0.00"
+    assert january["darf_estimated"] == "3150.00"
     assert january["taxable_base"] == "21000.00"
     assert february["final_loss_carryforward"] == "1000.00"
     assert march["initial_loss_carryforward"] == "1000.00"
@@ -280,7 +275,7 @@ def test_etf_and_bdr_are_common_taxable_without_stock_exemption(tmp_path):
     assert row["gross_sale"] == "17000.00"
     assert row["exempt_gain"] == "0.00"
     assert row["taxable_base"] == "2000.00"
-    assert row["darf_estimated"] == "299.15"
+    assert row["darf_estimated"] == "300.00"
     assert {asset["asset_class"]: asset["fiscal_regime"] for asset in row["assets"]} == {
         AssetClass.BDR.value: "B3_COMMON_15",
         AssetClass.ETF.value: "B3_COMMON_15",
@@ -332,7 +327,7 @@ def test_fii_fi_infra_crypto_and_irrf_override_are_separate(tmp_path):
 
     assert fii_row["taxable_base"] == "2000.00"
     assert fii_row["tax_rate"] == "0.2"
-    assert _darf_suggestion(report, "2025-04", "6015", "B3_FII_FIAGRO_20")["darf_estimated"] == "399.40"
+    assert _darf_suggestion(report, "2025-04", "6015", "B3_FII_FIAGRO_20")["darf_estimated"] == "400.00"
     assert common_row["final_loss_carryforward"] == "1000.00"
     assert fii_row["initial_loss_carryforward"] == "0.00"
     assert fii_row["used_loss"] == "0.00"
@@ -402,8 +397,7 @@ def test_us_or_usd_assets_are_deferred_and_do_not_enter_initial_capital_gain_eng
     finally:
         _close(ctx)
 
-    assert [month["year_month"] for month in report["months"]] == ["2025-01"]
-    assert _regime(report, "2025-01", "B3_COMMON_15")["assets"] == []
+    assert report["months"] == []
 
 
 def test_tax_parameters_are_selected_by_effective_period(tmp_path):
@@ -436,7 +430,8 @@ def test_tax_parameters_are_selected_by_effective_period(tmp_path):
     row = _regime(report, "2025-07", "B3_COMMON_15")
     assert row["tax_rate"] == "0.1"
     assert row["theoretical_irrf"] == "11.00"
-    assert row["darf_estimated"] == "89.00"
+    assert row["effective_irrf"] == "0.00"
+    assert row["darf_estimated"] == "100.00"
 
 
 def test_fi_infra_follows_tax_parameter_effective_period_without_asset_treatment(tmp_path):
@@ -610,7 +605,7 @@ def test_irrf_override_api_lifecycle_and_report_fallback(tmp_path, monkeypatch):
     fallback_response = client.get(f"/api/reports/capital-gains?portfolio_id={portfolio['id']}&year=2025")
     row = _regime(fallback_response.json(), "2025-08", "B3_COMMON_15")
     assert row["irrf_override"] is None
-    assert row["effective_irrf"] == "0.55"
+    assert row["effective_irrf"] == "0.00"
 
 
 def test_manual_tax_paid_override_replaces_only_payable_tax_and_zero_falls_back(tmp_path):
@@ -759,12 +754,12 @@ def test_irrf_credit_carries_within_year_and_resets_next_year(tmp_path):
     assert january["final_irrf_carryforward"] == "50.00"
     assert january["darf_estimated"] == "0.00"
     assert february["initial_irrf_carryforward"] == "50.00"
-    assert february["used_irrf"] == "50.55"
-    assert february["darf_estimated"] == "99.45"
+    assert february["used_irrf"] == "50.00"
+    assert february["darf_estimated"] == "100.00"
     assert december["final_irrf_carryforward"] == "50.00"
     assert next_january["initial_irrf_carryforward"] == "0.00"
-    assert next_january["used_irrf"] == "0.55"
-    assert next_january["darf_estimated"] == "149.45"
+    assert next_january["used_irrf"] == "0.00"
+    assert next_january["darf_estimated"] == "150.00"
 
 
 def test_minimum_darf_defers_until_threshold_and_crosses_year(tmp_path):
@@ -990,7 +985,7 @@ def test_fii_darf_uses_only_fii_irrf_when_common_has_irrf_carryforward(tmp_path)
     assert fii_suggestion["darf_estimated"] == "17.00"
 
 
-def test_stock_sale_above_exemption_uses_withholding_and_accumulates_small_darf(tmp_path):
+def test_stock_sale_above_exemption_does_not_use_note_irrf_without_override(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:
         asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
@@ -1007,14 +1002,15 @@ def test_stock_sale_above_exemption_uses_withholding_and_accumulates_small_darf(
     assert row["gross_sale"] == "21018.00"
     assert row["taxable_base"] == "18.00"
     assert row["tax_due"] == "2.70"
-    assert row["effective_irrf"] == "1.05"
-    assert row["used_irrf"] == "1.05"
-    assert row["net_tax_payable"] == "1.65"
+    assert row["theoretical_irrf"] == "1.05"
+    assert row["effective_irrf"] == "0.00"
+    assert row["used_irrf"] == "0.00"
+    assert row["net_tax_payable"] == "2.70"
     assert row["darf_estimated"] == "0.00"
-    assert row["final_darf_carryforward"] == "1.65"
+    assert row["final_darf_carryforward"] == "2.70"
     assert suggestion["regime"] == "B3_COMMON_15"
     assert suggestion["darf_estimated"] == "0.00"
-    assert suggestion["final_darf_carryforward"] == "1.65"
+    assert suggestion["final_darf_carryforward"] == "2.70"
 
 
 def test_irrf_resets_at_year_end_and_darf_carryforward_stays_separate_by_regime(tmp_path):

@@ -457,7 +457,13 @@ def _should_include_month(month: str, rows: list[dict]) -> bool:
     )
 
 
-def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int, include_neutral_months: bool = False) -> dict:
+def list_capital_gains(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    year: int,
+    include_neutral_months: bool = False,
+    include_january_snapshot: bool = False,
+) -> dict:
     sales_by_month_regime: dict[tuple[str, str], list[SaleItem]] = defaultdict(list)
     for item in [*_fetch_sales(conn, portfolio_id, year), *_fetch_manual_events(conn, portfolio_id, year)]:
         sales_by_month_regime[(_month_key(item.event_date), item.regime)].append(item)
@@ -470,12 +476,14 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int, i
     months = []
     current_irrf_year: str | None = None
 
-    year_months = sorted(
+    year_months = (
         {month for month, _ in sales_by_month_regime}
         | {month for month, _ in overrides}
         | {month for month, _ in tax_paid_overrides}
-        | {f"{year}-01"}
     )
+    if include_january_snapshot:
+        year_months.add(f"{year}-01")
+    year_months = sorted(year_months)
 
     for month in year_months:
         month_year = month[:4]
@@ -501,7 +509,7 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int, i
                  if key_month == month and is_supported_capital_gain_regime(regime)
              }
         )
-        if month == f"{year}-01":
+        if include_january_snapshot and month == f"{year}-01":
             month_regimes = sorted({*month_regimes, *JANUARY_SNAPSHOT_REGIMES})
 
         for regime in month_regimes:
@@ -584,7 +592,7 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int, i
                 row["irrf_override"] = _d(override["effective_irrf"])
                 row["effective_irrf"] = row["irrf_override"]
             else:
-                row["effective_irrf"] = _round_money(row["theoretical_irrf"])
+                row["effective_irrf"] = ZERO
 
             if param["monthly_darf_enabled"]:
                 row["initial_irrf_carryforward"] = irrf_carry_by_regime[regime]
@@ -647,7 +655,10 @@ def list_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int, i
                 guide_row["darf_estimated"] = darf_estimated
                 guide_row["final_darf_carryforward"] = final_carry
 
-        if month_year == str(year) and (include_neutral_months or _should_include_month(month, month_raw_rows)):
+        should_include_january_snapshot = include_january_snapshot and month == f"{year}-01" and bool(month_raw_rows)
+        if month_year == str(year) and (
+            include_neutral_months or should_include_january_snapshot or _should_include_month(month, month_raw_rows)
+        ):
             months.append(
                 {
                     "year_month": month,

@@ -574,7 +574,7 @@ def _format_year_month(value: str) -> str:
 def _append_capital_gain_sheets(workbook: Workbook, conn: sqlite3.Connection, portfolio_id: int, year: int) -> None:
     from backend.services import capital_gain_report_service
 
-    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year)
+    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year, include_january_snapshot=True)
     rows_by_regime: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
     for month in report["months"]:
         for row in month["regimes"]:
