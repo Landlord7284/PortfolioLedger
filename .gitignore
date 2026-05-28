@@ -14,3 +14,4 @@ backend/ledger.db
 *.xlsx
 *.xls
 *.csv
+.docs
