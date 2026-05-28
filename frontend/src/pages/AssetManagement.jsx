@@ -351,7 +351,11 @@ export default function AssetManagement() {
           <h2 className="text-xl font-semibold tracking-tight">Gestão de Ativos</h2>
           <p className="text-muted-foreground text-sm mt-0.5">Cadastro global, revisões, tickers e mesclagem manual.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-3 md:w-auto md:justify-end">
+          <div className="relative w-full sm:w-auto">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input className="pl-8 w-full sm:w-[280px]" placeholder="Buscar ticker, nome ou id..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
           <Button
             variant="destructive"
             size="sm"
@@ -360,12 +364,6 @@ export default function AssetManagement() {
           >
             <Trash2 className="w-4 h-4" /> Sanitizar B3
           </Button>
-          <div className="flex items-center gap-2">
-            <Label htmlFor="include-merged" className="text-sm text-muted-foreground cursor-pointer font-normal">
-              Exibir mesclados
-            </Label>
-            <Switch id="include-merged" checked={includeMerged} onCheckedChange={setIncludeMerged} />
-          </div>
         </div>
       </div>
 
@@ -437,24 +435,24 @@ export default function AssetManagement() {
         </Card>
       )}
 
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button variant={!filterClass ? 'default' : 'outline'} size="sm" className="text-sm" onClick={() => setFilterClass('')}>Todos</Button>
+          {ASSET_CLASSES.map((assetClass) => (
+            <Button key={assetClass} variant={filterClass === assetClass ? 'default' : 'outline'} size="sm" className="text-sm" onClick={() => setFilterClass(assetClass)}>
+              {assetClass}
+            </Button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <Label htmlFor="include-merged" className="text-sm text-muted-foreground cursor-pointer font-normal">
+            Mesclados
+          </Label>
+          <Switch id="include-merged" checked={includeMerged} onCheckedChange={setIncludeMerged} />
+        </div>
+      </div>
+
       <Card>
-        <CardHeader className="space-y-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <CardTitle className="text-base">Ativos Registrados</CardTitle>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input className="pl-8 w-full md:w-[280px]" placeholder="Buscar ticker, nome ou id..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Button variant={!filterClass ? 'default' : 'outline'} size="xs" onClick={() => setFilterClass('')}>Todos</Button>
-            {ASSET_CLASSES.map((assetClass) => (
-              <Button key={assetClass} variant={filterClass === assetClass ? 'default' : 'outline'} size="xs" onClick={() => setFilterClass(assetClass)}>
-                {assetClass}
-              </Button>
-            ))}
-          </div>
-        </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>

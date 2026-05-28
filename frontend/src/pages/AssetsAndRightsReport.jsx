@@ -207,7 +207,7 @@ export default function AssetsAndRightsReport() {
           </CardHeader>
           <CardContent>
             <div className="font-mono text-2xl font-semibold tabular-nums">
-              R$ {formatMoney(visibleTotals.previousYearCost, hideValues)}
+              {formatMoney(visibleTotals.previousYearCost, hideValues)}
             </div>
           </CardContent>
         </Card>
@@ -219,7 +219,7 @@ export default function AssetsAndRightsReport() {
           </CardHeader>
           <CardContent>
             <div className="font-mono text-2xl font-semibold tabular-nums">
-              R$ {formatMoney(visibleTotals.currentYearCost, hideValues)}
+              {formatMoney(visibleTotals.currentYearCost, hideValues)}
             </div>
           </CardContent>
         </Card>
@@ -231,7 +231,7 @@ export default function AssetsAndRightsReport() {
           </CardHeader>
           <CardContent>
             <div className={`font-mono text-2xl font-semibold tabular-nums ${!hideValues && fiscalDelta > 0 ? 'text-emerald-500' : !hideValues && fiscalDelta < 0 ? 'text-red-500' : ''}`}>
-              R$ {formatMoney(fiscalDelta, hideValues)}
+              {formatMoney(fiscalDelta, hideValues)}
             </div>
           </CardContent>
         </Card>
@@ -288,10 +288,10 @@ export default function AssetsAndRightsReport() {
                         <TableCell className="min-w-[180px]">{row.name || '-'}</TableCell>
                         <TableCell className="font-mono text-sm text-muted-foreground">{row.cnpj || '-'}</TableCell>
                         <TableCell className="text-right font-mono text-sm">
-                          R$ {formatMoney(row.previous_year_cost, hideValues)}
+                          {formatMoney(row.previous_year_cost, hideValues)}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">
-                          R$ {formatMoney(row.current_year_cost, hideValues)}
+                          {formatMoney(row.current_year_cost, hideValues)}
                         </TableCell>
                       </TableRow>
                     );
@@ -309,10 +309,10 @@ export default function AssetsAndRightsReport() {
                     <TableCell></TableCell>
                     <TableCell className="font-semibold">TOTAL</TableCell>
                     <TableCell className="text-right font-mono text-sm font-semibold">
-                      R$ {formatMoney(visibleTotals.previousYearCost, hideValues)}
+                      {formatMoney(visibleTotals.previousYearCost, hideValues)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm font-semibold">
-                      R$ {formatMoney(visibleTotals.currentYearCost, hideValues)}
+                      {formatMoney(visibleTotals.currentYearCost, hideValues)}
                     </TableCell>
                   </TableRow>
                 </TableBody>

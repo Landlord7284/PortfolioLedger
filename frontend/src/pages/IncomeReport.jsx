@@ -84,7 +84,7 @@ function IncomeTable({ table, markedRows, onToggle, hideValues }) {
                       <TableCell className="min-w-[240px]">{row.payer_name || '-'}</TableCell>
                       <TableCell className="text-muted-foreground">{row.income_type}</TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        R$ {formatMoney(row.value, hideValues)}
+                        {formatMoney(row.value, hideValues)}
                       </TableCell>
                     </TableRow>
                   );
@@ -102,7 +102,7 @@ function IncomeTable({ table, markedRows, onToggle, hideValues }) {
                 <TableCell></TableCell>
                 <TableCell className="font-semibold">TOTAL</TableCell>
                 <TableCell className="text-right font-mono text-sm font-semibold">
-                  R$ {formatMoney(table.total, hideValues)}
+                  {formatMoney(table.total, hideValues)}
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -229,7 +229,7 @@ export default function IncomeReport() {
           </CardHeader>
           <CardContent>
             <div className="font-mono text-2xl font-semibold tabular-nums">
-              R$ {formatMoney(totalIncome, hideValues)}
+              {formatMoney(totalIncome, hideValues)}
             </div>
           </CardContent>
         </Card>

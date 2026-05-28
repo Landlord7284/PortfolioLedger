@@ -5,7 +5,7 @@ import { positions as posApi } from '../api/client';
 import EventForm from '../components/EventForm';
 import B3MonthlyImportModal from '../components/B3MonthlyImportModal';
 import ImportModal from '../components/ImportModal';
-import { Search, Plus, Download, FolderOpen, Inbox, AlertCircle, Loader2 } from 'lucide-react';
+import { Search, Plus, Download, FolderOpen, Inbox, AlertCircle, Loader2, ArrowDown, ArrowUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -14,19 +14,9 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
-
-const SORT_OPTIONS = [
-  { value: 'asset-asc', label: 'Ativo A-Z' },
-  { value: 'asset-desc', label: 'Ativo Z-A' },
-  { value: 'balance-asc', label: 'Menor Saldo' },
-  { value: 'balance-desc', label: 'Maior Saldo' },
-  { value: 'share-asc', label: 'Menor Participação' },
-  { value: 'share-desc', label: 'Maior Participação' },
-];
 
 function toNumber(value) {
   const parsed = parseFloat(value || 0);
@@ -46,6 +36,42 @@ function formatPercent(value, hideValues = false) {
   })}%`;
 }
 
+function compareText(a, b) {
+  return String(a || '').localeCompare(String(b || ''), 'pt-BR', {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+function comparePositions(a, b, key) {
+  if (key === 'ticker') return compareText(getAssetLabel(a), getAssetLabel(b));
+  if (key === 'total_cost') return toNumber(a.total_cost) - toNumber(b.total_cost);
+  if (key === 'realized_result') return toNumber(a.realized_result) - toNumber(b.realized_result);
+  if (key === 'category_share') return a.category_share - b.category_share;
+  if (key === 'portfolio_share') return a.portfolio_share - b.portfolio_share;
+  return 0;
+}
+
+function SortableHead({ sortKey, sort, onSort, children, align = 'left' }) {
+  const active = sort.key === sortKey;
+  const Icon = sort.direction === 'asc' ? ArrowUp : ArrowDown;
+  const alignmentClass = align === 'right' ? 'ml-auto -mr-2' : '-ml-3';
+
+  return (
+    <TableHead className={align === 'right' ? 'text-right' : undefined}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className={`${alignmentClass} h-8 px-2 text-xs font-medium text-muted-foreground hover:text-foreground`}
+        onClick={() => onSort(sortKey)}
+      >
+        {children}
+        {active && <Icon className="ml-1 h-3.5 w-3.5" />}
+      </Button>
+    </TableHead>
+  );
+}
+
 export default function Dashboard() {
   const { activePortfolioId, portfolioList, hideValues } = useContext(AppContext);
   const [positionList, setPositionList] = useState([]);
@@ -55,7 +81,7 @@ export default function Dashboard() {
   const [showImport, setShowImport] = useState(false);
   const [filterClass, setFilterClass] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState('asset-asc');
+  const [sort, setSort] = useState({ key: 'ticker', direction: 'asc' });
   const [isLargeModal, setIsLargeModal] = useState(false);
   const [showRedeemed, setShowRedeemed] = useState(() => {
     return localStorage.getItem('showRedeemed') === 'true';
@@ -94,6 +120,14 @@ export default function Dashboard() {
     loadPositions();
   }, [loadPositions]);
 
+  const handleSort = (key) => {
+    setSort((current) => (
+      current.key === key
+        ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: 'asc' }
+    ));
+  };
+
   const positionsWithShare = useMemo(() => {
     const allocationBase = positionList.filter((p) => showRedeemed || toNumber(p.quantity) !== 0);
     const portfolioTotal = allocationBase.reduce((sum, p) => sum + Math.max(toNumber(p.total_cost), 0), 0);
@@ -128,28 +162,12 @@ export default function Dashboard() {
       return true;
     });
 
-    const compareByAsset = (a, b) => getAssetLabel(a).localeCompare(getAssetLabel(b), 'pt-BR', {
-      numeric: true,
-      sensitivity: 'base',
-    });
-
     return [...visible].sort((a, b) => {
-      switch (sortBy) {
-        case 'asset-desc':
-          return compareByAsset(b, a);
-        case 'balance-asc':
-          return toNumber(a.total_cost) - toNumber(b.total_cost) || compareByAsset(a, b);
-        case 'balance-desc':
-          return toNumber(b.total_cost) - toNumber(a.total_cost) || compareByAsset(a, b);
-        case 'share-asc':
-          return a.portfolio_share - b.portfolio_share || compareByAsset(a, b);
-        case 'share-desc':
-          return b.portfolio_share - a.portfolio_share || compareByAsset(a, b);
-        default:
-          return compareByAsset(a, b);
-      }
+      const direction = sort.direction === 'asc' ? 1 : -1;
+      const result = comparePositions(a, b, sort.key);
+      return result === 0 ? compareText(getAssetLabel(a), getAssetLabel(b)) : result * direction;
     });
-  }, [positionsWithShare, showRedeemed, filterClass, searchQuery, sortBy]);
+  }, [positionsWithShare, showRedeemed, filterClass, searchQuery, sort]);
 
   const displayMoney = (val) => formatMoney(val, hideValues);
   const displayQuantity = (val, assetClass) => formatQuantity(val, assetClass, hideValues);
@@ -262,40 +280,29 @@ export default function Dashboard() {
             <div className="flex flex-wrap items-center gap-1.5">
               {classes.length > 1 && (
                 <>
-                  <span className="text-xs font-medium text-muted-foreground mr-1">Filtrar:</span>
                   <Button
                     variant={!filterClass ? "default" : "outline"}
-                    size="xs"
+                    size="sm"
+                    className="text-sm"
                     onClick={() => setFilterClass('')}
                   >
                     Todos
                   </Button>
                   {classes.map((c) => (
                     <Button
-                      key={c}
-                      variant={filterClass === c ? "default" : "outline"}
-                      size="xs"
-                      onClick={() => setFilterClass(c)}
-                    >
-                      {c}
+                    key={c}
+                    variant={filterClass === c ? "default" : "outline"}
+                    size="sm"
+                    className="text-sm"
+                    onClick={() => setFilterClass(c)}
+                  >
+                    {c}
                     </Button>
                   ))}
                 </>
               )}
             </div>
             <div className="flex items-center gap-3">
-              <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-[190px]" aria-label="Ordenar posições">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SORT_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Label htmlFor="show-redeemed" className="text-sm text-muted-foreground cursor-pointer font-normal">
                 Exibir resgatados
               </Label>
@@ -327,14 +334,14 @@ export default function Dashboard() {
                 <Table>
                   <TableHeader className="sticky top-0 z-10 bg-background">
                     <TableRow>
-                      <TableHead>Ticker</TableHead>
+                      <SortableHead sortKey="ticker" sort={sort} onSort={handleSort}>Ticker</SortableHead>
                       <TableHead>Classe</TableHead>
                       <TableHead className="text-right">Quantidade</TableHead>
-                      <TableHead className="text-right">Custo Total</TableHead>
+                      <SortableHead sortKey="total_cost" sort={sort} onSort={handleSort} align="right">Custo Total</SortableHead>
                       <TableHead className="text-right">Preço Médio</TableHead>
-                      <TableHead className="text-right">Resultado</TableHead>
-                      <TableHead className="text-right">% Categoria</TableHead>
-                      <TableHead className="text-right">% Carteira</TableHead>
+                      <SortableHead sortKey="realized_result" sort={sort} onSort={handleSort} align="right">Resultado</SortableHead>
+                      <SortableHead sortKey="category_share" sort={sort} onSort={handleSort} align="right">% Categoria</SortableHead>
+                      <SortableHead sortKey="portfolio_share" sort={sort} onSort={handleSort} align="right">% Carteira</SortableHead>
                       <TableHead>Último Evento</TableHead>
                     </TableRow>
                   </TableHeader>

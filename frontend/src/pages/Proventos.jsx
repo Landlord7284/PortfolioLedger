@@ -138,7 +138,7 @@ function IncomeTooltip({ active, payload, hideValues }) {
                 <span className="min-w-0 truncate font-medium">{segment.key}</span>
               </span>
               <span className="font-mono font-semibold tabular-nums">
-                R$ {formatMoney(segment.value, hideValues)} ({hideValues ? '•••' : `${formatPercent(segment.share)}%`})
+                {formatMoney(segment.value, hideValues)} ({hideValues ? '•••' : `${formatPercent(segment.share)}%`})
               </span>
             </div>
           ))
@@ -147,7 +147,7 @@ function IncomeTooltip({ active, payload, hideValues }) {
       <Separator className="my-3" />
       <div className="grid grid-cols-[1fr_auto] items-center gap-4 font-semibold">
         <span>Total Recebido:</span>
-        <span className="font-mono tabular-nums">R$ {formatMoney(month.totalNetValue, hideValues)}</span>
+        <span className="font-mono tabular-nums">{formatMoney(month.totalNetValue, hideValues)}</span>
       </div>
     </div>
   );
@@ -387,7 +387,7 @@ export default function Proventos() {
             </CardHeader>
             <CardContent>
               <div className="font-mono text-2xl font-semibold tabular-nums">
-                R$ {formatMoney(report?.summary.total_net_value, hideValues)}
+                {formatMoney(report?.summary.total_net_value, hideValues)}
               </div>
             </CardContent>
           </Card>
@@ -399,7 +399,7 @@ export default function Proventos() {
             </CardHeader>
             <CardContent>
               <div className="font-mono text-2xl font-semibold tabular-nums">
-                R$ {formatMoney(report?.summary.monthly_average, hideValues)}
+                {formatMoney(report?.summary.monthly_average, hideValues)}
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {report?.summary.month_count || 0} meses no período
@@ -453,7 +453,7 @@ export default function Proventos() {
                   axisLine={false}
                   tickMargin={8}
                   width={80}
-                  tickFormatter={(value) => hideValues ? '' : `R$ ${formatMoney(value)}`}
+                  tickFormatter={(value) => hideValues ? '' : formatMoney(value)}
                 />
                 <ChartTooltip
                   cursor={false}
@@ -595,7 +595,7 @@ export default function Proventos() {
                         {formatQuantity(row.quantity, row.asset_class, hideValues)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right font-mono text-sm">
-                        R$ {formatMoney(row.net_value, hideValues)}
+                        {formatMoney(row.net_value, hideValues)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -612,7 +612,7 @@ export default function Proventos() {
                     <TableCell className="font-semibold">TOTAL</TableCell>
                     <TableCell></TableCell>
                     <TableCell className="text-right font-mono text-sm font-semibold">
-                      R$ {formatMoney(report?.table.total_net_value, hideValues)}
+                      {formatMoney(report?.table.total_net_value, hideValues)}
                     </TableCell>
                   </TableRow>
                 </TableBody>
