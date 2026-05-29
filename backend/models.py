@@ -734,6 +734,86 @@ class B3IncomeReportResponse(BaseModel):
     table: B3IncomeTable
 
 
+# ── Patrimonial dashboard ────────────────────────────────────
+
+class DashboardSummary(BaseModel):
+    market_value: str
+    market_value_month: Optional[str] = None
+    market_value_date: Optional[str] = None
+    market_value_uses_cost_fallback: bool = False
+    market_value_cost_fallback_count: int = 0
+    market_value_cost_fallback_amount: str
+    cost_basis: str
+    unrealized_result: str
+    unrealized_result_pct: str
+    realized_result: str
+    realized_result_period_start: Optional[str] = None
+    realized_result_period_end: Optional[str] = None
+    income_12m: str
+    income_12m_monthly_avg: str
+
+
+class DashboardEquityPoint(BaseModel):
+    year_month: str
+    market_value: str
+    cost_basis: str
+    net_contributions: str
+    uses_cost_fallback: bool = False
+    missing_quote_count: int = 0
+
+
+class DashboardAllocationRow(BaseModel):
+    asset_class: str
+    market_value: str
+    weight_pct: str
+    uses_cost_fallback: bool = False
+
+
+class DashboardResultByClassRow(BaseModel):
+    asset_class: str
+    market_value: str
+    cost_basis: str
+    unrealized_result: str
+    unrealized_result_pct: str
+    uses_cost_fallback: bool = False
+
+
+class DashboardIncomePoint(BaseModel):
+    year_month: str
+    amount: str
+
+
+class DashboardOperationalAlerts(BaseModel):
+    missing_recent_quotes_count: int = 0
+    missing_recent_quotes_summary: list[str] = []
+    last_b3_import_at: Optional[str] = None
+    latest_quote_month: Optional[str] = None
+    latest_quote_date: Optional[str] = None
+    no_events: bool = False
+    no_quotes: bool = False
+    uses_cost_fallback: bool = False
+    cost_fallback_amount: str
+
+
+class DashboardFilters(BaseModel):
+    portfolio_id: int
+    period: str
+    asset_class: Optional[str] = None
+    grouping: str = "monthly"
+    asset_classes: list[str]
+
+
+class DashboardResponse(BaseModel):
+    portfolio_id: int
+    filters: DashboardFilters
+    summary: DashboardSummary
+    equity_curve: list[DashboardEquityPoint]
+    allocation: list[DashboardAllocationRow]
+    result_by_class: list[DashboardResultByClassRow]
+    income_series: list[DashboardIncomePoint]
+    operational_alerts: DashboardOperationalAlerts
+
+
 # â”€â”€ Brokerage notes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class BrokerageNoteOperation(BaseModel):

@@ -115,6 +115,14 @@ export const positions = {
   get: (portfolioId, assetId) => request(`/positions/${portfolioId}/${assetId}`),
 };
 
+export const dashboard = {
+  get: ({ portfolioId, period, assetClass, grouping = 'monthly' }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, period, grouping });
+    if (assetClass) params.set('asset_class', assetClass);
+    return request(`/dashboard?${params.toString()}`);
+  },
+};
+
 export const reports = {
   assetsAndRights: ({ portfolioId, year }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, year });
