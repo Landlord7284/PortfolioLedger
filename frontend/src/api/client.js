@@ -3,6 +3,16 @@
  */
 
 const BASE_URL = 'http://localhost:8000/api';
+const BACKEND_UNAVAILABLE_MESSAGE = `Nao foi possivel conectar ao backend em ${BASE_URL}. Verifique se o servidor FastAPI esta rodando na porta 8000.`;
+
+async function fetchBackend(url, options = {}) {
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    throw new Error(BACKEND_UNAVAILABLE_MESSAGE);
+  }
+}
 
 async function request(path, options = {}) {
   const url = `${BASE_URL}${path}`;
@@ -16,7 +26,7 @@ async function request(path, options = {}) {
     config.headers['Content-Type'] = 'application/json';
   }
 
-  const res = await fetch(url, config);
+  const res = await fetchBackend(url, config);
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
@@ -28,7 +38,7 @@ async function request(path, options = {}) {
 
 async function requestBlob(path, options = {}) {
   const url = `${BASE_URL}${path}`;
-  const res = await fetch(url, options);
+  const res = await fetchBackend(url, options);
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));

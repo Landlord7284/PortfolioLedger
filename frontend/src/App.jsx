@@ -36,6 +36,7 @@ function RouteLoading() {
 function App() {
   const [portfolioList, setPortfolioList] = useState([]);
   const [activePortfolioId, setActivePortfolioId] = useState(getStoredActivePortfolioId);
+  const [portfolioLoadError, setPortfolioLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [hideValues, setHideValues] = useState(() => {
     return localStorage.getItem('hideValues') === 'true';
@@ -66,6 +67,7 @@ function App() {
     try {
       const list = await portfolioApi.list();
       setPortfolioList(list);
+      setPortfolioLoadError('');
       setActivePortfolioId((currentActiveId) => {
         const candidateId = currentActiveId || getStoredActivePortfolioId();
         if (candidateId && list.some((portfolio) => portfolio.id === candidateId)) {
@@ -75,6 +77,7 @@ function App() {
       });
     } catch (err) {
       console.error('Failed to load portfolios:', err);
+      setPortfolioLoadError(err.message || 'Falha ao carregar carteiras.');
       toast.error(err.message || 'Falha ao carregar carteiras.');
     } finally {
       setLoading(false);
@@ -100,6 +103,7 @@ function App() {
   return (
     <AppContext.Provider value={{
       portfolioList,
+      portfolioLoadError,
       activePortfolioId,
       setActivePortfolioId,
       refreshPortfolios,

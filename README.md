@@ -15,6 +15,19 @@ Aplicacao local de portfolio financeiro, com backend Python/FastAPI, frontend Re
 - Backend: Python, FastAPI, SQLite, pytest e openpyxl.
 - Frontend: React, Vite, Shadcn/ui, Tailwind CSS e Recharts.
 
+## Desenvolvimento
+
+No primeiro startup do backend, o SQLite local e criado automaticamente em `backend/ledger.db`, incluindo o schema e os parametros fiscais padrao.
+
+Para subir backend e frontend juntos:
+
+```bash
+cd frontend
+npm run dev:all
+```
+
+O script `dev:backend` escolhe o Python da `.venv` de forma cross-platform: `.venv/Scripts/python.exe` no Windows e `.venv/bin/python` em macOS/Linux. Se a `.venv` nao existir, ele tenta `PYTHON`, `python3` e `python`.
+
 ## Estrutura
 
 - `backend/`: API, servicos, dominio, persistencia e testes.

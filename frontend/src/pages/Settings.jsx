@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useContext } from 'react';
 import { AppContext } from '../App';
 import { portfolios as portfolioApi, tax as taxApi } from '../api/client';
 import { formatMoney } from '@/lib/formatters';
-import { Plus, Check, X, Trash2, Edit2, AlertTriangle, FolderOpen, Loader2, Wallet, FileText } from 'lucide-react';
+import { Plus, Check, X, Trash2, Edit2, AlertTriangle, FolderOpen, Loader2, Wallet, FileText, RefreshCw } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -111,11 +111,11 @@ function parameterToForm(parameter) {
 }
 
 export default function Settings() {
-  const { portfolioList, refreshPortfolios, activePortfolioId, setActivePortfolioId } = useContext(AppContext);
+  const { portfolioList, portfolioLoadError, refreshPortfolios, activePortfolioId, setActivePortfolioId } = useContext(AppContext);
 
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
 
@@ -125,6 +125,7 @@ export default function Settings() {
 
   const [parameters, setParameters] = useState([]);
   const [loadingParameters, setLoadingParameters] = useState(false);
+  const [parameterLoadError, setParameterLoadError] = useState('');
   const [parameterDialogOpen, setParameterDialogOpen] = useState(false);
   const [editingParameter, setEditingParameter] = useState(null);
   const [parameterForm, setParameterForm] = useState(EMPTY_PARAMETER_FORM);
@@ -134,12 +135,14 @@ export default function Settings() {
 
   const loadParameters = useCallback(async () => {
     setLoadingParameters(true);
+    setParameterLoadError('');
     try {
       const data = await taxApi.parameters();
       setParameters(data);
     } catch (err) {
-      setError(err.message);
-      toast.error(err.message || 'Falha ao carregar parâmetros fiscais.');
+      const message = err.message || 'Falha ao carregar parâmetros fiscais.';
+      setParameterLoadError(message);
+      toast.error(message);
     } finally {
       setLoadingParameters(false);
     }
@@ -153,18 +156,18 @@ export default function Settings() {
     e.preventDefault();
     if (!newName.trim()) return;
     setCreating(true);
-    setError('');
+    setActionError('');
     try {
       const p = await portfolioApi.create({ name: newName.trim(), consolidated: true });
       setNewName('');
-      setError('');
+      setActionError('');
       await refreshPortfolios();
       if (!activePortfolioId) {
         setActivePortfolioId(p.id);
       }
       toast.success('Carteira criada com sucesso.');
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
       toast.error(err.message || 'Falha ao criar carteira.');
     } finally {
       setCreating(false);
@@ -174,11 +177,11 @@ export default function Settings() {
   const handleToggleConsolidated = async (id, current) => {
     try {
       await portfolioApi.update(id, { consolidated: !current });
-      setError('');
+      setActionError('');
       await refreshPortfolios();
       toast.success('Status de consolidação atualizado.');
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
       toast.error(err.message || 'Falha ao atualizar carteira.');
     }
   };
@@ -188,11 +191,11 @@ export default function Settings() {
     try {
       await portfolioApi.update(id, { name: editName.trim() });
       setEditingId(null);
-      setError('');
+      setActionError('');
       await refreshPortfolios();
       toast.success('Nome da carteira atualizado.');
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
       toast.error(err.message || 'Falha ao renomear carteira.');
     }
   };
@@ -212,11 +215,11 @@ export default function Settings() {
       }
       setPortfolioToDelete(null);
       setDeleteConfirmText('');
-      setError('');
+      setActionError('');
       await refreshPortfolios();
       toast.success('Carteira excluída com sucesso.');
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
       toast.error(err.message || 'Falha ao excluir carteira.');
     } finally {
       setDeleting(false);
@@ -263,7 +266,7 @@ export default function Settings() {
   const saveParameter = async (e) => {
     e.preventDefault();
     setSavingParameter(true);
-    setError('');
+    setActionError('');
     try {
       const payload = parameterPayload();
       if (editingParameter) {
@@ -274,10 +277,10 @@ export default function Settings() {
         toast.success('Parâmetro fiscal criado.');
       }
       setParameterDialogOpen(false);
-      setError('');
+      setActionError('');
       await loadParameters();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
       toast.error(err.message || 'Falha ao salvar parâmetro fiscal.');
     } finally {
       setSavingParameter(false);
@@ -286,10 +289,10 @@ export default function Settings() {
 
   return (
     <div className="flex w-full max-w-7xl flex-col gap-6">
-      {error && (
+      {actionError && (
         <Alert variant="destructive">
           <AlertTriangle className="shrink-0" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{actionError}</AlertDescription>
         </Alert>
       )}
 
@@ -308,6 +311,19 @@ export default function Settings() {
         </div>
 
         <TabsContent value="portfolios" className="flex flex-col gap-6">
+          {portfolioLoadError && (
+            <Alert variant="destructive" className="items-center">
+              <AlertTriangle className="shrink-0" />
+              <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span>{portfolioLoadError}</span>
+                <Button type="button" variant="outline" size="sm" onClick={refreshPortfolios}>
+                  <RefreshCw data-icon="inline-start" />
+                  Tentar novamente
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle>Nova carteira</CardTitle>
@@ -338,7 +354,15 @@ export default function Settings() {
               <h3 className="text-base font-semibold">Carteiras cadastradas</h3>
               <p className="text-sm text-muted-foreground">Renomeie, consolide ou exclua carteiras existentes.</p>
             </div>
-            {portfolioList.length === 0 ? (
+            {portfolioLoadError ? (
+              <Card className="border-dashed">
+                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                  <AlertTriangle className="mb-3 text-destructive" />
+                  <h3 className="mb-1 text-base font-medium">Carteiras indisponíveis</h3>
+                  <p className="max-w-sm text-sm text-muted-foreground">Não foi possível carregar as carteiras do backend.</p>
+                </CardContent>
+              </Card>
+            ) : portfolioList.length === 0 ? (
               <Card className="border-dashed">
                 <CardContent className="flex flex-col items-center justify-center py-16 text-center">
                   <FolderOpen className="mb-3 text-muted-foreground" />
@@ -419,6 +443,23 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="tax-parameters" className="flex flex-col gap-4">
+          {parameterLoadError && (
+            <Alert variant="destructive" className="items-center">
+              <AlertTriangle className="shrink-0" />
+              <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span>{parameterLoadError}</span>
+                <Button type="button" variant="outline" size="sm" onClick={loadParameters} disabled={loadingParameters}>
+                  {loadingParameters ? (
+                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    <RefreshCw data-icon="inline-start" />
+                  )}
+                  Tentar novamente
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
           <Card className="overflow-hidden">
             <CardHeader>
               <CardTitle>Regras por vigência</CardTitle>
@@ -454,6 +495,12 @@ export default function Settings() {
                         <TableCell colSpan={11}><Skeleton className="h-9" /></TableCell>
                       </TableRow>
                     ))
+                  ) : parameterLoadError ? (
+                    <TableRow>
+                      <TableCell colSpan={11} className="py-10 text-center text-muted-foreground">
+                        Parâmetros fiscais indisponíveis.
+                      </TableCell>
+                    </TableRow>
                   ) : parameters.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={11} className="py-10 text-center text-muted-foreground">
