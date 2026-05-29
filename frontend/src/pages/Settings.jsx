@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useContext } from 'react';
 import { AppContext } from '../App';
 import { portfolios as portfolioApi, tax as taxApi } from '../api/client';
 import { formatMoney } from '@/lib/formatters';
-import { Plus, Check, X, Trash2, Edit2, AlertTriangle, FolderOpen, Loader2, Wallet, FileText, RefreshCw } from 'lucide-react';
+import { Plus, Check, X, Trash2, Edit2, AlertTriangle, FolderOpen, Loader2, Wallet, FileText, RefreshCw, ChevronDown, ChevronRight, History, SlidersHorizontal } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogMedia, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -29,6 +30,39 @@ const EMPTY_PARAMETER_FORM = {
   active: true,
   monthly_darf_enabled: true,
 };
+
+const EMPTY_SUCCESSOR_FORM = {
+  valid_from: '',
+  tax_rate_percent: '',
+  withholding_rate_percent: '',
+  exemption_limit: '',
+  darf_code: '',
+  minimum_darf_amount: '10,00',
+  monthly_darf_enabled: true,
+};
+
+const SUPPORTED_TAX_REGIMES = [
+  {
+    code: 'B3_COMMON_15',
+    label: 'Ações, ETF e BDR',
+    description: 'Operações comuns B3 com regra de isenção mensal para ações brasileiras.',
+  },
+  {
+    code: 'B3_FII_FIAGRO_20',
+    label: 'FII e Fiagro',
+    description: 'Apuração mensal de fundos imobiliários e Fiagro.',
+  },
+  {
+    code: 'FI_INFRA_EXEMPT',
+    label: 'FI-INFRA',
+    description: 'Parâmetros vigentes definem se o regime opera como isento ou tributado.',
+  },
+  {
+    code: 'CRYPTO_GCAP',
+    label: 'Criptoativos',
+    description: 'Regime acompanhado fora da DARF mensal padrão quando configurado assim.',
+  },
+];
 
 const PARAMETER_PRESETS = {
   FI_INFRA_EXEMPT: {
@@ -79,11 +113,27 @@ function formatPercent(value) {
   return `${parsed.toLocaleString('pt-BR', { maximumFractionDigits: 6 })}%`;
 }
 
+function formatCurrencyValue(value) {
+  return value ? `R$ ${formatMoney(value)}` : '-';
+}
+
+function formatBoolean(value) {
+  return value ? 'Sim' : 'Não';
+}
+
+function isCurrentParameter(parameter, today) {
+  return Boolean(
+    parameter?.active &&
+    parameter.valid_from <= today &&
+    (!parameter.valid_until || parameter.valid_until >= today)
+  );
+}
+
 function parameterStatus(parameter, today) {
   if (!parameter.active) return { label: 'Inativo', variant: 'outline' };
-  if (parameter.valid_from > today) return { label: 'Futuro', variant: 'secondary' };
-  if (parameter.valid_until && parameter.valid_until < today) return { label: 'Expirado', variant: 'outline' };
-  return { label: 'Vigente', variant: 'default' };
+  if (parameter.valid_from > today) return { label: 'Futura', variant: 'secondary' };
+  if (parameter.valid_until && parameter.valid_until < today) return { label: 'Histórica', variant: 'outline' };
+  return { label: 'Atual', variant: 'default' };
 }
 
 function formatDate(value) {
@@ -110,6 +160,19 @@ function parameterToForm(parameter) {
   };
 }
 
+function parameterToSuccessorForm(parameter) {
+  if (!parameter) return EMPTY_SUCCESSOR_FORM;
+  return {
+    ...EMPTY_SUCCESSOR_FORM,
+    tax_rate_percent: decimalToPercentInput(parameter.tax_rate),
+    withholding_rate_percent: decimalToPercentInput(parameter.withholding_rate),
+    exemption_limit: parameter.exemption_limit || '',
+    darf_code: parameter.darf_code || '',
+    minimum_darf_amount: parameter.minimum_darf_amount || '10.00',
+    monthly_darf_enabled: Boolean(parameter.monthly_darf_enabled),
+  };
+}
+
 export default function Settings() {
   const { portfolioList, portfolioLoadError, refreshPortfolios, activePortfolioId, setActivePortfolioId } = useContext(AppContext);
 
@@ -130,8 +193,28 @@ export default function Settings() {
   const [editingParameter, setEditingParameter] = useState(null);
   const [parameterForm, setParameterForm] = useState(EMPTY_PARAMETER_FORM);
   const [savingParameter, setSavingParameter] = useState(false);
+  const [successorDialogOpen, setSuccessorDialogOpen] = useState(false);
+  const [successorBaseParameter, setSuccessorBaseParameter] = useState(null);
+  const [successorForm, setSuccessorForm] = useState(EMPTY_SUCCESSOR_FORM);
+  const [savingSuccessor, setSavingSuccessor] = useState(false);
+  const [expandedRegimes, setExpandedRegimes] = useState(new Set());
 
   const currentDate = useMemo(() => todayIso(), []);
+  const regimeGroups = useMemo(() => {
+    return SUPPORTED_TAX_REGIMES.map((regime) => {
+      const rows = parameters
+        .filter((parameter) => parameter.regime === regime.code)
+        .sort((a, b) => {
+          if (a.valid_from !== b.valid_from) return b.valid_from.localeCompare(a.valid_from);
+          return b.id - a.id;
+        });
+      return {
+        ...regime,
+        rows,
+        current: rows.find((parameter) => isCurrentParameter(parameter, currentDate)) || null,
+      };
+    });
+  }, [parameters, currentDate]);
 
   const loadParameters = useCallback(async () => {
     setLoadingParameters(true);
@@ -228,7 +311,7 @@ export default function Settings() {
 
   const openCreateParameter = () => {
     setEditingParameter(null);
-    setParameterForm(EMPTY_PARAMETER_FORM);
+    setParameterForm({ ...EMPTY_PARAMETER_FORM, regime: SUPPORTED_TAX_REGIMES[0].code });
     setParameterDialogOpen(true);
   };
 
@@ -236,6 +319,12 @@ export default function Settings() {
     setEditingParameter(parameter);
     setParameterForm(parameterToForm(parameter));
     setParameterDialogOpen(true);
+  };
+
+  const openCreateSuccessor = (parameter) => {
+    setSuccessorBaseParameter(parameter);
+    setSuccessorForm(parameterToSuccessorForm(parameter));
+    setSuccessorDialogOpen(true);
   };
 
   const updateParameterForm = (field, value) => {
@@ -246,6 +335,22 @@ export default function Settings() {
         if (preset) return { ...current, ...preset, regime: normalized };
       }
       return { ...current, [field]: value };
+    });
+  };
+
+  const updateSuccessorForm = (field, value) => {
+    setSuccessorForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const toggleRegimeHistory = (regime) => {
+    setExpandedRegimes((current) => {
+      const next = new Set(current);
+      if (next.has(regime)) {
+        next.delete(regime);
+      } else {
+        next.add(regime);
+      }
+      return next;
     });
   };
 
@@ -261,6 +366,16 @@ export default function Settings() {
     loss_bucket: parameterForm.loss_bucket.trim() || null,
     active: parameterForm.active,
     monthly_darf_enabled: parameterForm.monthly_darf_enabled,
+  });
+
+  const successorPayload = () => ({
+    valid_from: successorForm.valid_from,
+    tax_rate: percentInputToBackend(successorForm.tax_rate_percent),
+    withholding_rate: percentInputToBackend(successorForm.withholding_rate_percent),
+    exemption_limit: decimalInputToBackend(successorForm.exemption_limit),
+    darf_code: successorForm.darf_code.trim() || null,
+    minimum_darf_amount: decimalInputToBackend(successorForm.minimum_darf_amount) || '0',
+    monthly_darf_enabled: successorForm.monthly_darf_enabled,
   });
 
   const saveParameter = async (e) => {
@@ -284,6 +399,26 @@ export default function Settings() {
       toast.error(err.message || 'Falha ao salvar parâmetro fiscal.');
     } finally {
       setSavingParameter(false);
+    }
+  };
+
+  const saveSuccessor = async (e) => {
+    e.preventDefault();
+    if (!successorBaseParameter) return;
+    setSavingSuccessor(true);
+    setActionError('');
+    try {
+      await taxApi.createParameterSuccessor(successorBaseParameter.id, successorPayload());
+      setSuccessorDialogOpen(false);
+      setSuccessorBaseParameter(null);
+      setActionError('');
+      await loadParameters();
+      toast.success('Nova vigência fiscal criada.');
+    } catch (err) {
+      setActionError(err.message);
+      toast.error(err.message || 'Falha ao criar nova vigência fiscal.');
+    } finally {
+      setSavingSuccessor(false);
     }
   };
 
@@ -460,94 +595,378 @@ export default function Settings() {
             </Alert>
           )}
 
-          <Card className="overflow-hidden">
-            <CardHeader>
-              <CardTitle>Regras por vigência</CardTitle>
-              <CardDescription>O backend escolhe o parâmetro aplicável pela data do fato gerador.</CardDescription>
-              <CardAction>
-                <Button onClick={openCreateParameter}>
-                  <Plus data-icon="inline-start" />
-                  Novo parâmetro
-                </Button>
-              </CardAction>
-            </CardHeader>
-            <div className="overflow-x-auto">
-              <Table className="table-fixed">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-44">Regime</TableHead>
-                    <TableHead className="w-28">Início</TableHead>
-                    <TableHead className="w-28">Fim</TableHead>
-                    <TableHead className="w-24 text-right">Alíquota</TableHead>
-                    <TableHead className="w-24 text-right">IRRF</TableHead>
-                    <TableHead className="w-32 text-right">Isenção</TableHead>
-                    <TableHead className="w-20">DARF</TableHead>
-                    <TableHead className="w-28 text-right">Mínima</TableHead>
-                    <TableHead className="w-40">Compensação</TableHead>
-                    <TableHead className="w-24">Status</TableHead>
-                    <TableHead className="w-16 text-right">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loadingParameters ? (
-                    Array.from({ length: 4 }).map((_, index) => (
-                      <TableRow key={index}>
-                        <TableCell colSpan={11}><Skeleton className="h-9" /></TableCell>
+          <Tabs defaultValue="regimes" className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="overflow-x-auto pb-1">
+                <TabsList className="min-w-max justify-start">
+                  <TabsTrigger value="regimes" className="h-9 flex-none px-3">
+                    <History data-icon="inline-start" />
+                    Regimes fiscais
+                  </TabsTrigger>
+                  <TabsTrigger value="advanced" className="h-9 flex-none px-3">
+                    <SlidersHorizontal data-icon="inline-start" />
+                    Modo avançado
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={loadParameters} disabled={loadingParameters}>
+                {loadingParameters ? (
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <RefreshCw data-icon="inline-start" />
+                )}
+                Atualizar
+              </Button>
+            </div>
+
+            <TabsContent value="regimes" className="flex flex-col gap-4">
+              {loadingParameters ? (
+                Array.from({ length: 4 }).map((_, index) => (
+                  <Card key={index}>
+                    <CardHeader>
+                      <Skeleton className="h-5 w-48" />
+                      <Skeleton className="h-4 w-72" />
+                    </CardHeader>
+                    <CardContent>
+                      <Skeleton className="h-28" />
+                    </CardContent>
+                  </Card>
+                ))
+              ) : parameterLoadError ? (
+                <Card className="border-dashed">
+                  <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                    <AlertTriangle className="mb-3 text-destructive" />
+                    <h3 className="mb-1 text-base font-medium">Parâmetros fiscais indisponíveis</h3>
+                    <p className="max-w-sm text-sm text-muted-foreground">Não foi possível carregar as regras fiscais do backend.</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                regimeGroups.map((group) => {
+                  const current = group.current;
+                  const historyOpen = expandedRegimes.has(group.code);
+                  return (
+                    <Card key={group.code} className="overflow-hidden">
+                      <CardHeader>
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <CardTitle className="text-lg">{group.label}</CardTitle>
+                            {current ? <Badge>Atual</Badge> : <Badge variant="outline">Sem vigente</Badge>}
+                          </div>
+                          <CardDescription>{group.description}</CardDescription>
+                          <span className="font-mono text-xs text-muted-foreground">Código técnico: {group.code}</span>
+                        </div>
+                        <CardAction className="col-span-full row-start-auto justify-self-start sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:justify-self-end">
+                          <Button
+                            className="h-auto min-h-8 whitespace-normal text-left sm:h-8 sm:whitespace-nowrap"
+                            onClick={() => openCreateSuccessor(current)}
+                            disabled={!current}
+                          >
+                            <Plus data-icon="inline-start" />
+                            Alterar regra a partir de uma data
+                          </Button>
+                        </CardAction>
+                      </CardHeader>
+                      <CardContent className="flex flex-col gap-4">
+                        {current ? (
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">Alíquota</p>
+                              <p className="font-mono text-sm font-medium">{formatPercent(current.tax_rate)}</p>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">IRRF teórico</p>
+                              <p className="font-mono text-sm font-medium">{formatPercent(current.withholding_rate)}</p>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">Limite de isenção</p>
+                              <p className="font-mono text-sm font-medium">{formatCurrencyValue(current.exemption_limit)}</p>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">DARF mensal</p>
+                              <p className="text-sm font-medium">{formatBoolean(current.monthly_darf_enabled)}</p>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">Código DARF</p>
+                              <p className="font-mono text-sm font-medium">{current.darf_code || '-'}</p>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">DARF mínima</p>
+                              <p className="font-mono text-sm font-medium">{formatCurrencyValue(current.minimum_darf_amount)}</p>
+                            </div>
+                            <div className="rounded-md border p-3 sm:col-span-2">
+                              <p className="text-xs text-muted-foreground">Vigência</p>
+                              <p className="font-mono text-sm font-medium">
+                                Desde {formatDate(current.valid_from)}
+                                {current.valid_until ? ` até ${formatDate(current.valid_until)}` : ''}
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                            Este regime não tem uma configuração ativa para a data atual. Use o modo avançado para criar ou reparar a vigência.
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between gap-3 border-t pt-4">
+                          <div>
+                            <h4 className="text-sm font-medium">Histórico de vigências</h4>
+                            <p className="text-xs text-muted-foreground">{group.rows.length} registro(s) fiscal(is) neste regime.</p>
+                          </div>
+                          <Button type="button" variant="outline" size="sm" onClick={() => toggleRegimeHistory(group.code)}>
+                            {historyOpen ? <ChevronDown data-icon="inline-start" /> : <ChevronRight data-icon="inline-start" />}
+                            {historyOpen ? 'Ocultar histórico' : 'Ver histórico'}
+                          </Button>
+                        </div>
+
+                        {historyOpen && (
+                          <div className="overflow-hidden rounded-md border">
+                            {group.rows.length === 0 ? (
+                              <div className="p-4 text-sm text-muted-foreground">Nenhuma vigência cadastrada para este regime.</div>
+                            ) : (
+                              <div className="divide-y">
+                                {group.rows.map((parameter) => {
+                                  const status = parameterStatus(parameter, currentDate);
+                                  return (
+                                    <div key={parameter.id} className="grid gap-3 p-4 md:grid-cols-[minmax(160px,1fr)_minmax(0,2fr)]">
+                                      <div className="flex flex-col gap-2">
+                                        <Badge variant={status.variant} className="w-fit">{status.label}</Badge>
+                                        <span className="font-mono text-xs text-muted-foreground">
+                                          {formatDate(parameter.valid_from)} até {formatDate(parameter.valid_until)}
+                                        </span>
+                                      </div>
+                                      <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                                        <span>Alíquota: <span className="font-mono">{formatPercent(parameter.tax_rate)}</span></span>
+                                        <span>IRRF: <span className="font-mono">{formatPercent(parameter.withholding_rate)}</span></span>
+                                        <span>DARF mensal: {formatBoolean(parameter.monthly_darf_enabled)}</span>
+                                        <span>Código DARF: <span className="font-mono">{parameter.darf_code || '-'}</span></span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })
+              )}
+            </TabsContent>
+
+            <TabsContent value="advanced" className="flex flex-col gap-4">
+              <Alert>
+                <AlertTriangle className="shrink-0" />
+                <AlertDescription>
+                  Alterações avançadas podem afetar relatórios históricos, compensação de prejuízo, cálculo mensal de imposto e sugestão de DARF.
+                </AlertDescription>
+              </Alert>
+
+              <Card className="overflow-hidden">
+                <CardHeader>
+                  <CardTitle>Registros fiscais reais</CardTitle>
+                  <CardDescription>Edição direta das linhas persistidas em parâmetros fiscais.</CardDescription>
+                  <CardAction className="col-span-full row-start-auto justify-self-start sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:justify-self-end">
+                    <Button onClick={openCreateParameter}>
+                      <Plus data-icon="inline-start" />
+                      Novo registro avançado
+                    </Button>
+                  </CardAction>
+                </CardHeader>
+                <div className="overflow-x-auto">
+                  <Table className="table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-44">Regime</TableHead>
+                        <TableHead className="w-28">Início</TableHead>
+                        <TableHead className="w-28">Fim</TableHead>
+                        <TableHead className="w-24 text-right">Alíquota</TableHead>
+                        <TableHead className="w-24 text-right">IRRF</TableHead>
+                        <TableHead className="w-32 text-right">Isenção</TableHead>
+                        <TableHead className="w-20">DARF</TableHead>
+                        <TableHead className="w-28 text-right">Mínima</TableHead>
+                        <TableHead className="w-24">Mensal</TableHead>
+                        <TableHead className="w-40">Compensação</TableHead>
+                        <TableHead className="w-24">Status</TableHead>
+                        <TableHead className="w-16 text-right">Ações</TableHead>
                       </TableRow>
-                    ))
-                  ) : parameterLoadError ? (
-                    <TableRow>
-                      <TableCell colSpan={11} className="py-10 text-center text-muted-foreground">
-                        Parâmetros fiscais indisponíveis.
-                      </TableCell>
-                    </TableRow>
-                  ) : parameters.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={11} className="py-10 text-center text-muted-foreground">
-                        Nenhum parâmetro fiscal cadastrado.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    parameters.map((parameter) => {
-                      const status = parameterStatus(parameter, currentDate);
-                      return (
-                        <TableRow key={parameter.id}>
-                          <TableCell className="truncate font-medium" title={parameter.regime}>{parameter.regime}</TableCell>
-                          <TableCell className="font-mono text-xs">{formatDate(parameter.valid_from)}</TableCell>
-                          <TableCell className="font-mono text-xs">{formatDate(parameter.valid_until)}</TableCell>
-                          <TableCell className="text-right font-mono">{formatPercent(parameter.tax_rate)}</TableCell>
-                          <TableCell className="text-right font-mono">{formatPercent(parameter.withholding_rate)}</TableCell>
-                          <TableCell className="text-right font-mono">
-                            {parameter.exemption_limit ? `R$ ${formatMoney(parameter.exemption_limit)}` : '-'}
-                          </TableCell>
-                          <TableCell className="font-mono">{parameter.darf_code || '-'}</TableCell>
-                          <TableCell className="text-right font-mono">R$ {formatMoney(parameter.minimum_darf_amount)}</TableCell>
-                          <TableCell className="truncate" title={parameter.loss_bucket || '-'}>{parameter.loss_bucket || '-'}</TableCell>
-                          <TableCell>
-                            <Badge variant={status.variant}>{status.label}</Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button size="icon-sm" variant="ghost" onClick={() => openEditParameter(parameter)} aria-label="Editar parâmetro fiscal">
-                              <Edit2 />
-                            </Button>
+                    </TableHeader>
+                    <TableBody>
+                      {loadingParameters ? (
+                        Array.from({ length: 4 }).map((_, index) => (
+                          <TableRow key={index}>
+                            <TableCell colSpan={12}><Skeleton className="h-9" /></TableCell>
+                          </TableRow>
+                        ))
+                      ) : parameterLoadError ? (
+                        <TableRow>
+                          <TableCell colSpan={12} className="py-10 text-center text-muted-foreground">
+                            Parâmetros fiscais indisponíveis.
                           </TableCell>
                         </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
+                      ) : parameters.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={12} className="py-10 text-center text-muted-foreground">
+                            Nenhum parâmetro fiscal cadastrado.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        parameters.map((parameter) => {
+                          const status = parameterStatus(parameter, currentDate);
+                          return (
+                            <TableRow key={parameter.id}>
+                              <TableCell className="truncate font-medium" title={parameter.regime}>{parameter.regime}</TableCell>
+                              <TableCell className="font-mono text-xs">{formatDate(parameter.valid_from)}</TableCell>
+                              <TableCell className="font-mono text-xs">{formatDate(parameter.valid_until)}</TableCell>
+                              <TableCell className="text-right font-mono">{formatPercent(parameter.tax_rate)}</TableCell>
+                              <TableCell className="text-right font-mono">{formatPercent(parameter.withholding_rate)}</TableCell>
+                              <TableCell className="text-right font-mono">{formatCurrencyValue(parameter.exemption_limit)}</TableCell>
+                              <TableCell className="font-mono">{parameter.darf_code || '-'}</TableCell>
+                              <TableCell className="text-right font-mono">{formatCurrencyValue(parameter.minimum_darf_amount)}</TableCell>
+                              <TableCell>{formatBoolean(parameter.monthly_darf_enabled)}</TableCell>
+                              <TableCell className="truncate" title={parameter.loss_bucket || '-'}>{parameter.loss_bucket || '-'}</TableCell>
+                              <TableCell>
+                                <Badge variant={status.variant}>{status.label}</Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button size="icon-sm" variant="ghost" onClick={() => openEditParameter(parameter)} aria-label="Editar registro fiscal">
+                                  <Edit2 />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={successorDialogOpen}
+        onOpenChange={(open) => {
+          setSuccessorDialogOpen(open);
+          if (!open) {
+            setSuccessorBaseParameter(null);
+            setSuccessorForm(EMPTY_SUCCESSOR_FORM);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Alterar regra a partir de uma data</DialogTitle>
+            <DialogDescription>
+              A nova vigência será criada a partir da configuração vigente e a regra anterior será encerrada automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          {successorBaseParameter && (
+            <form onSubmit={saveSuccessor} className="flex flex-col gap-5">
+              <div className="rounded-md border p-3">
+                <p className="text-sm font-medium">
+                  {SUPPORTED_TAX_REGIMES.find((regime) => regime.code === successorBaseParameter.regime)?.label || successorBaseParameter.regime}
+                </p>
+                <p className="font-mono text-xs text-muted-foreground">Código técnico: {successorBaseParameter.regime}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Vigência atual: {formatDate(successorBaseParameter.valid_from)}
+                  {successorBaseParameter.valid_until ? ` até ${formatDate(successorBaseParameter.valid_until)}` : ' em diante'}
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Data inicial da nova regra
+                  <Input
+                    type="date"
+                    value={successorForm.valid_from}
+                    onChange={(e) => updateSuccessorForm('valid_from', e.target.value)}
+                    required
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Alíquota (%)
+                  <Input
+                    value={successorForm.tax_rate_percent}
+                    onChange={(e) => updateSuccessorForm('tax_rate_percent', e.target.value)}
+                    placeholder="15"
+                    inputMode="decimal"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  IRRF (%)
+                  <Input
+                    value={successorForm.withholding_rate_percent}
+                    onChange={(e) => updateSuccessorForm('withholding_rate_percent', e.target.value)}
+                    placeholder="0,005"
+                    inputMode="decimal"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Limite isenção
+                  <Input
+                    value={successorForm.exemption_limit}
+                    onChange={(e) => updateSuccessorForm('exemption_limit', e.target.value)}
+                    placeholder="20000"
+                    inputMode="decimal"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Código DARF
+                  <Input
+                    value={successorForm.darf_code}
+                    onChange={(e) => updateSuccessorForm('darf_code', e.target.value)}
+                    placeholder="6015"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  DARF mínima
+                  <Input
+                    value={successorForm.minimum_darf_amount}
+                    onChange={(e) => updateSuccessorForm('minimum_darf_amount', e.target.value)}
+                    placeholder="10,00"
+                    inputMode="decimal"
+                  />
+                </label>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <div>
+                  <p className="text-sm font-medium">DARF mensal</p>
+                  <p className="text-xs text-muted-foreground">Habilita cálculo mensal quando aplicável.</p>
+                </div>
+                <Switch
+                  checked={successorForm.monthly_darf_enabled}
+                  onCheckedChange={(value) => updateSuccessorForm('monthly_darf_enabled', value)}
+                />
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setSuccessorDialogOpen(false)} disabled={savingSuccessor}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={savingSuccessor}>
+                  {savingSuccessor ? (
+                    <><Loader2 data-icon="inline-start" className="animate-spin" /> Salvando...</>
+                  ) : (
+                    <><Check data-icon="inline-start" /> Criar nova vigência</>
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={parameterDialogOpen} onOpenChange={setParameterDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{editingParameter ? 'Editar parâmetro fiscal' : 'Novo parâmetro fiscal'}</DialogTitle>
+            <DialogTitle>{editingParameter ? 'Editar registro fiscal avançado' : 'Novo registro fiscal avançado'}</DialogTitle>
             <DialogDescription>
-              A vigência ativa não pode sobrepor outro registro ativo do mesmo regime.
+              Edição direta da tabela fiscal. A vigência ativa não pode sobrepor outro registro ativo do mesmo regime.
             </DialogDescription>
           </DialogHeader>
 
@@ -560,12 +979,20 @@ export default function Settings() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="flex flex-col gap-1.5 text-sm font-medium">
                   Regime
-                  <Input
-                    value={parameterForm.regime}
-                    onChange={(e) => updateParameterForm('regime', e.target.value)}
-                    placeholder="B3_COMMON_15"
-                    required
-                  />
+                  <Select value={parameterForm.regime} onValueChange={(value) => updateParameterForm('regime', value)}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Selecione o regime" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {SUPPORTED_TAX_REGIMES.map((regime) => (
+                          <SelectItem key={regime.code} value={regime.code}>
+                            {regime.label} · {regime.code}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
                 </label>
                 <label className="flex flex-col gap-1.5 text-sm font-medium">
                   Regra de compensação

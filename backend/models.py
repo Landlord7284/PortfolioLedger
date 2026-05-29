@@ -584,6 +584,21 @@ class FiscalTaxParameterUpdate(BaseModel):
         return v.strip() if v else v
 
 
+class FiscalTaxParameterSuccessorCreate(BaseModel):
+    valid_from: str
+    tax_rate: Optional[str] = None
+    withholding_rate: Optional[str] = None
+    exemption_limit: Optional[str] = None
+    darf_code: Optional[str] = None
+    minimum_darf_amount: Optional[str] = None
+    monthly_darf_enabled: Optional[bool] = None
+
+    @field_validator("darf_code")
+    @classmethod
+    def strip_successor_text(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if v else v
+
+
 class FiscalTaxParameterResponse(BaseModel):
     id: int
     regime: str

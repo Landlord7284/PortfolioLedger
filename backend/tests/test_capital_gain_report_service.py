@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -1223,3 +1225,58 @@ def test_fiscal_tax_parameter_api_lifecycle_and_overlap_validation(tmp_path, mon
     )
     assert deactivate_response.status_code == 200
     assert deactivate_response.json()["active"] is False
+
+
+def test_fiscal_tax_parameter_successor_closes_current_row_atomically(tmp_path, monkeypatch):
+    db_path, ctx, _conn, _ = _setup(tmp_path)
+    _close(ctx)
+
+    monkeypatch.setattr("backend.routers.tax.get_db", lambda: get_db(db_path))
+    client = TestClient(app)
+
+    parameters = client.get("/api/tax/parameters").json()
+    common_default = next(item for item in parameters if item["regime"] == "B3_COMMON_15")
+    start_date = date.today() + timedelta(days=365)
+    start = start_date.isoformat()
+    previous_until = (start_date - timedelta(days=1)).isoformat()
+
+    response = client.post(
+        f"/api/tax/parameters/{common_default['id']}/successor",
+        json={
+            "valid_from": start,
+            "tax_rate": "0.175",
+            "withholding_rate": "0.00005",
+            "exemption_limit": "25000",
+            "darf_code": "6015",
+            "minimum_darf_amount": "10.00",
+            "monthly_darf_enabled": True,
+        },
+    )
+    assert response.status_code == 200
+    successor = response.json()
+    assert successor["regime"] == "B3_COMMON_15"
+    assert successor["valid_from"] == start
+    assert successor["valid_until"] is None
+    assert successor["tax_rate"] == "0.175"
+    assert successor["loss_bucket"] == common_default["loss_bucket"]
+    assert successor["active"] is True
+
+    updated_parameters = client.get("/api/tax/parameters").json()
+    closed_default = next(item for item in updated_parameters if item["id"] == common_default["id"])
+    assert closed_default["valid_until"] == previous_until
+
+    rollback_start = (date.today() + timedelta(days=30)).isoformat()
+    rollback_response = client.post(
+        f"/api/tax/parameters/{common_default['id']}/successor",
+        json={
+            "valid_from": rollback_start,
+            "tax_rate": "0.18",
+            "minimum_darf_amount": "-1",
+        },
+    )
+    assert rollback_response.status_code == 400
+    assert "DARF minima" in rollback_response.json()["detail"]
+
+    after_rollback_parameters = client.get("/api/tax/parameters").json()
+    after_rollback_default = next(item for item in after_rollback_parameters if item["id"] == common_default["id"])
+    assert after_rollback_default["valid_until"] == previous_until

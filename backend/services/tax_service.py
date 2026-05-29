@@ -5,7 +5,7 @@ Fiscal tax calculation service for USD assets.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -606,6 +606,39 @@ def update_tax_parameter(conn: sqlite3.Connection, parameter_id: int, updates: d
         ),
     )
     return _tax_parameter_row(conn, parameter_id)
+
+
+def create_tax_parameter_successor(conn: sqlite3.Connection, parameter_id: int, values: dict[str, Any]) -> dict:
+    current = _tax_parameter_row(conn, parameter_id)
+    today = date.today().isoformat()
+    if not current["active"]:
+        raise ValueError("Parametro base precisa estar ativo para criar nova vigencia.")
+    if current["valid_from"] > today or (current["valid_until"] and current["valid_until"] < today):
+        raise ValueError("Parametro base precisa ser a configuracao vigente.")
+
+    new_valid_from = _validate_iso_date(values.get("valid_from") or "", "Vigencia inicial")
+    if new_valid_from <= current["valid_from"]:
+        raise ValueError("Nova vigencia deve iniciar depois da vigencia inicial atual.")
+    if current["valid_until"] and new_valid_from > current["valid_until"]:
+        raise ValueError("Nova vigencia deve iniciar dentro da vigencia atual.")
+
+    previous_until = (date.fromisoformat(new_valid_from) - timedelta(days=1)).isoformat()
+    successor_values = {
+        "regime": current["regime"],
+        "valid_from": new_valid_from,
+        "valid_until": current["valid_until"],
+        "tax_rate": values.get("tax_rate", current["tax_rate"]),
+        "withholding_rate": values.get("withholding_rate", current["withholding_rate"]),
+        "exemption_limit": values.get("exemption_limit", current["exemption_limit"]),
+        "darf_code": values.get("darf_code", current["darf_code"]),
+        "minimum_darf_amount": values.get("minimum_darf_amount", current["minimum_darf_amount"]),
+        "loss_bucket": current["loss_bucket"],
+        "active": True,
+        "monthly_darf_enabled": values.get("monthly_darf_enabled", current["monthly_darf_enabled"]),
+    }
+
+    update_tax_parameter(conn, parameter_id, {"valid_until": previous_until})
+    return create_tax_parameter(conn, successor_values)
 
 
 def list_irrf_overrides(

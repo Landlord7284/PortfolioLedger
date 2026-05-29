@@ -14,6 +14,7 @@ from backend.models import (
     TaxSaleApuracaoResponse,
     FiscalTaxParameterCreate,
     FiscalTaxParameterResponse,
+    FiscalTaxParameterSuccessorCreate,
     FiscalTaxParameterUpdate,
     CapitalGainDarfPaymentConfirmationResponse,
     CapitalGainDarfPaymentConfirmationUpsert,
@@ -108,6 +109,21 @@ def create_tax_parameter(body: FiscalTaxParameterCreate):
             return tax_service.create_tax_parameter(conn, body.model_dump())
         except ValueError as e:
             raise HTTPException(400, str(e))
+
+
+@router.post("/parameters/{parameter_id}/successor", response_model=FiscalTaxParameterResponse)
+def create_tax_parameter_successor(parameter_id: int, body: FiscalTaxParameterSuccessorCreate):
+    with get_db() as conn:
+        try:
+            return tax_service.create_tax_parameter_successor(
+                conn,
+                parameter_id,
+                body.model_dump(exclude_unset=True),
+            )
+        except ValueError as e:
+            message = str(e)
+            status = 404 if "nao encontrado" in message else 400
+            raise HTTPException(status, message)
 
 
 @router.patch("/parameters/{parameter_id}", response_model=FiscalTaxParameterResponse)

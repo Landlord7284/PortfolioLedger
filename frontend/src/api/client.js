@@ -192,6 +192,8 @@ export const tax = {
   parameters: () => request('/tax/parameters'),
   createParameter: (data) =>
     request('/tax/parameters', { method: 'POST', body: JSON.stringify(data) }),
+  createParameterSuccessor: (id, data) =>
+    request(`/tax/parameters/${id}/successor`, { method: 'POST', body: JSON.stringify(data) }),
   updateParameter: (id, data) =>
     request(`/tax/parameters/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   irrfOverrides: ({ portfolioId, year }) => {
