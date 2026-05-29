@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, Pie, PieChart, XAxis, YAxis } from 'recharts';
 import { AppContext } from '../App';
 import { dashboard as dashboardApi, positions as posApi } from '../api/client';
 import EventForm from '../components/EventForm';
@@ -16,19 +16,18 @@ import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ChartContainer, ChartTooltip } from '@/components/ui/chart';
 import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
 
-const ALL_FILTER_VALUE = 'all';
 const DASHBOARD_FILTER_STORAGE_KEY = 'ledger.dashboard.filters';
 const PERIOD_OPTIONS = [
-  { value: '12m', label: '12M' },
-  { value: 'ytd', label: 'YTD' },
-  { value: '3y', label: '3A' },
+  { value: 'year', label: 'Ano' },
+  { value: '12m', label: '12m' },
+  { value: '24m', label: '24m' },
+  { value: '36m', label: '36m' },
   { value: 'all', label: 'Tudo' },
 ];
 const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--primary)'];
@@ -37,11 +36,11 @@ function getStoredDashboardFilters() {
   try {
     const parsed = JSON.parse(localStorage.getItem(DASHBOARD_FILTER_STORAGE_KEY) || '{}');
     return {
-      period: PERIOD_OPTIONS.some((option) => option.value === parsed.period) ? parsed.period : '12m',
+      period: PERIOD_OPTIONS.some((option) => option.value === parsed.period) ? parsed.period : 'year',
       assetClass: parsed.assetClass || '',
     };
   } catch {
-    return { period: '12m', assetClass: '' };
+    return { period: 'year', assetClass: '' };
   }
 }
 
@@ -66,7 +65,7 @@ function formatPercent(value, hideValues = false) {
 
 function formatCurrency(value, hideValues = false) {
   if (hideValues) return '•••••';
-  return `R$ ${formatMoney(value)}`;
+  return formatMoney(value);
 }
 
 function formatSignedCurrency(value, hideValues = false) {
@@ -101,9 +100,9 @@ function formatMonth(value) {
 function formatCompactMoney(value, hideValues = false) {
   if (hideValues) return '';
   const abs = Math.abs(Number(value || 0));
-  if (abs >= 1000000) return `R$ ${(value / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
-  if (abs >= 1000) return `R$ ${(value / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`;
-  return `R$ ${Number(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
+  if (abs >= 1000000) return `${(value / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
+  if (abs >= 1000) return `${(value / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`;
+  return Number(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 }
 
 function compareText(a, b) {
@@ -220,6 +219,11 @@ function MoneyTooltip({ active, payload, label, hideValues, labelFormatter }) {
           {payload[0].payload.missing_quote_count} ativo(s) usando custo como fallback neste mês.
         </p>
       )}
+      {payload[0]?.payload?.unsupported_market_value_count > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {payload[0].payload.unsupported_market_value_count} ativo(s) sem valor de mercado suportado nesta etapa.
+        </p>
+      )}
     </div>
   );
 }
@@ -231,15 +235,22 @@ function AllocationTooltip({ active, payload, hideValues }) {
   return (
     <div className="rounded-lg border bg-background p-3 text-sm shadow-xl">
       <div className="font-medium">{row.asset_class}</div>
-      <div className="mt-1 font-mono tabular-nums">{formatCurrency(row.value, hideValues)}</div>
+      <div className="mt-1 font-mono tabular-nums">
+        {row.market_value_supported ? formatCurrency(row.value, hideValues) : 'Sem valor de mercado'}
+      </div>
       <div className="text-xs text-muted-foreground">{formatPercent(row.weight_pct, hideValues)} da carteira</div>
       {row.uses_cost_fallback && <div className="mt-1 text-xs text-muted-foreground">Inclui fallback para custo.</div>}
+      {!row.market_value_supported && <div className="mt-1 text-xs text-muted-foreground">Classe sem regra de valor de mercado nesta etapa.</div>}
     </div>
   );
 }
 
 function OperationalAlert({ alerts, hideValues }) {
-  const hasAlert = alerts && ((alerts.missing_recent_quotes_count || 0) > 0 || (alerts.no_quotes && !alerts.no_events));
+  const hasAlert = alerts && (
+    (alerts.missing_recent_quotes_count || 0) > 0
+    || (alerts.unsupported_market_value_count || 0) > 0
+    || (alerts.no_quotes && !alerts.no_events)
+  );
   if (!hasAlert) return null;
 
   return (
@@ -261,12 +272,21 @@ function OperationalAlert({ alerts, hideValues }) {
           {alerts.missing_recent_quotes_summary?.length > 0 && (
             <div className="text-muted-foreground">Ativos: {alerts.missing_recent_quotes_summary.join(', ')}</div>
           )}
+          {alerts.unsupported_market_value_count > 0 && (
+            <div>
+              {alerts.unsupported_market_value_count} ativo(s) sem regra de valor de mercado nesta etapa.
+            </div>
+          )}
+          {alerts.unsupported_market_value_summary?.length > 0 && (
+            <div className="text-muted-foreground">Sem valor de mercado: {alerts.unsupported_market_value_summary.join(', ')}</div>
+          )}
           {alerts.uses_cost_fallback && (
             <div className="text-muted-foreground">
               Fallback explícito para custo: {formatCurrency(alerts.cost_fallback_amount, hideValues)}.
             </div>
           )}
           <div className="text-muted-foreground">Última importação B3: {formatDateTime(alerts.last_b3_import_at)}</div>
+          <div className="text-muted-foreground">Última competência de cotação: {formatMonth(alerts.latest_quote_month)}</div>
           <div className="text-muted-foreground">Última cotação: {alerts.latest_quote_date ? formatDate(alerts.latest_quote_date) : '—'}</div>
         </div>
       </TooltipContent>
@@ -275,7 +295,7 @@ function OperationalAlert({ alerts, hideValues }) {
 }
 
 export default function Dashboard() {
-  const { activePortfolioId, portfolioList, setActivePortfolioId, hideValues } = useContext(AppContext);
+  const { activePortfolioId, hideValues } = useContext(AppContext);
   const [positionList, setPositionList] = useState([]);
   const [positionsLoading, setPositionsLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState(null);
@@ -339,7 +359,6 @@ export default function Dashboard() {
         portfolioId: activePortfolioId,
         period: dashboardPeriod,
         assetClass: dashboardAssetClass || null,
-        grouping: 'monthly',
       });
       setDashboardData(data);
     } catch (err) {
@@ -438,7 +457,8 @@ export default function Dashboard() {
       monthLabel: formatMonth(row.year_month),
       market_value: toNumber(row.market_value),
       cost_basis: toNumber(row.cost_basis),
-      net_contributions: toNumber(row.net_contributions),
+      net_contribution: toNumber(row.net_contribution),
+      net_contributions_accumulated: toNumber(row.net_contributions_accumulated),
     }))
   ), [dashboardData]);
 
@@ -466,12 +486,15 @@ export default function Dashboard() {
   ), [dashboardData]);
 
   const hasDashboardEvents = !alerts?.no_events;
-  const hasEquityData = equityData.some((row) => row.market_value !== 0 || row.cost_basis !== 0 || row.net_contributions !== 0);
+  const hasEquityData = equityData.some((row) => row.market_value !== 0 || row.cost_basis !== 0 || row.net_contribution !== 0 || row.net_contributions_accumulated !== 0);
   const resultTone = toNumber(summary?.unrealized_result) > 0 ? 'positive' : toNumber(summary?.unrealized_result) < 0 ? 'negative' : 'default';
   const realizedTone = toNumber(summary?.realized_result) > 0 ? 'positive' : toNumber(summary?.realized_result) < 0 ? 'negative' : 'default';
   const realizedPeriodDetail = summary?.realized_result_period_start
     ? `${formatDate(summary.realized_result_period_start)} a ${formatDate(summary.realized_result_period_end)}`
     : `Até ${formatDate(summary?.realized_result_period_end)}`;
+  const incomeSubtitle = summary?.income_month_count > 1
+    ? `Média mensal ${formatCurrency(summary.income_monthly_avg, hideValues)}`
+    : 'No período selecionado';
 
   if (!activePortfolioId) {
     return (
@@ -525,77 +548,45 @@ export default function Dashboard() {
         </div>
 
         <TabsContent value="dashboard" className="flex flex-col gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs text-muted-foreground">Carteira</Label>
-                  <Select value={String(activePortfolioId)} onValueChange={(value) => setActivePortfolioId(Number(value))}>
-                    <SelectTrigger aria-label="Carteira atual">
-                      <SelectValue placeholder="Carteira" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {portfolioList.map((portfolio) => (
-                          <SelectItem key={portfolio.id} value={String(portfolio.id)}>{portfolio.name}</SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs text-muted-foreground">Período</Label>
-                  <Select
-                    value={dashboardPeriod}
-                    onValueChange={(value) => setDashboardFilters((current) => ({ ...current, period: value }))}
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap gap-2" aria-label="Período do Dashboard">
+              {PERIOD_OPTIONS.map((option) => (
+                <Button
+                  key={option.value}
+                  type="button"
+                  variant={dashboardPeriod === option.value ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 rounded-full px-3"
+                  onClick={() => setDashboardFilters((current) => ({ ...current, period: option.value }))}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+            {dashboardClassOptions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5" aria-label="Classe do Dashboard">
+                <Button
+                  variant={!dashboardAssetClass ? 'default' : 'outline'}
+                  size="sm"
+                  className="text-sm"
+                  onClick={() => setDashboardFilters((current) => ({ ...current, assetClass: '' }))}
+                >
+                  Todos
+                </Button>
+                {dashboardClassOptions.map((assetClass) => (
+                  <Button
+                    key={assetClass}
+                    variant={dashboardAssetClass === assetClass ? 'default' : 'outline'}
+                    size="sm"
+                    className="text-sm"
+                    onClick={() => setDashboardFilters((current) => ({ ...current, assetClass }))}
                   >
-                    <SelectTrigger aria-label="Período do Dashboard">
-                      <SelectValue placeholder="Período" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {PERIOD_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs text-muted-foreground">Classe</Label>
-                  <Select
-                    value={dashboardAssetClass || ALL_FILTER_VALUE}
-                    onValueChange={(value) => setDashboardFilters((current) => ({ ...current, assetClass: value === ALL_FILTER_VALUE ? '' : value }))}
-                  >
-                    <SelectTrigger aria-label="Classe do Dashboard">
-                      <SelectValue placeholder="Classe" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value={ALL_FILTER_VALUE}>Todas</SelectItem>
-                        {dashboardClassOptions.map((assetClass) => (
-                          <SelectItem key={assetClass} value={assetClass}>{assetClass}</SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs text-muted-foreground">Agrupamento</Label>
-                  <Select value="monthly" disabled>
-                    <SelectTrigger aria-label="Agrupamento do Dashboard">
-                      <SelectValue placeholder="Mensal" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="monthly">Mensal</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </div>
+                    {assetClass}
+                  </Button>
+                ))}
               </div>
-            </CardContent>
-          </Card>
+            )}
+          </div>
 
           {dashboardLoading && !dashboardData ? (
             <DashboardSkeleton />
@@ -615,20 +606,20 @@ export default function Dashboard() {
                   value={formatCurrency(summary.market_value, hideValues)}
                   subtitle={summary.market_value_date ? `Base ${formatDate(summary.market_value_date)}` : 'Sem cotação B3'}
                   badge={summary.market_value_uses_cost_fallback ? 'Fallback custo' : null}
-                  tooltip="Valor de mercado usa a cotação mensal B3 do mês-base. Quando a cotação do ativo não existe nesse mês, a API usa o custo como fallback explícito e sinalizado."
+                  tooltip="Valor de mercado usa a cotação mensal B3 do mês-base. Quando a cotação do ativo não existe nesse mês, a API usa o custo como fallback explícito e sinalizado. Criptomoedas ficam fora nesta etapa."
                 />
                 <MetricCard
-                  title="Custo Total"
+                  title="Valor Patrimonial"
                   value={formatCurrency(summary.cost_basis, hideValues)}
                   subtitle="Valor patrimonial atual"
                   tooltip="Custo patrimonial atual das posições abertas, derivado do replay do ledger."
                 />
                 <MetricCard
-                  title="Resultado Não Realizado"
+                  title="Diferença de Mercado"
                   value={formatSignedCurrency(summary.unrealized_result, hideValues)}
                   subtitle={formatPercent(summary.unrealized_result_pct, hideValues)}
                   tone={resultTone}
-                  tooltip="Valor de mercado menos custo atual em carteira. Não inclui vendas já realizadas nem proventos."
+                  tooltip="Valor de mercado menos valor patrimonial dos ativos com valor de mercado suportado. Não inclui vendas realizadas, proventos nem criptomoedas nesta etapa."
                 />
                 <MetricCard
                   title="Resultado Realizado"
@@ -639,10 +630,10 @@ export default function Dashboard() {
                   tooltip="Resultado consolidado de vendas e resgates realizados no período selecionado. Separado do resultado não realizado."
                 />
                 <MetricCard
-                  title="Proventos 12M"
-                  value={formatCurrency(summary.income_12m, hideValues)}
-                  subtitle={`Média mensal ${formatCurrency(summary.income_12m_monthly_avg, hideValues)}`}
-                  tooltip="Resumo dos proventos importados da B3 nos últimos 12 meses. O detalhamento continua na tela Proventos."
+                  title="Proventos"
+                  value={formatCurrency(summary.income, hideValues)}
+                  subtitle={incomeSubtitle}
+                  tooltip="Resumo dos proventos importados da B3 no período e classe selecionados. O detalhamento continua na tela Proventos."
                 />
               </div>
 
@@ -663,21 +654,24 @@ export default function Dashboard() {
                   ) : (
                     <ChartContainer
                       config={{
-                        market_value: { label: 'Valor de mercado', color: 'var(--chart-1)' },
-                        cost_basis: { label: 'Custo em carteira', color: 'var(--chart-2)' },
-                        net_contributions: { label: 'Aportes líquidos acumulados', color: 'var(--chart-5)' },
+                        market_value: { label: 'Valor de Mercado', color: 'var(--chart-1)' },
+                        cost_basis: { label: 'Valor Patrimonial', color: 'var(--chart-2)' },
+                        net_contributions_accumulated: { label: 'Aporte líquido acumulado', color: 'var(--chart-4)' },
+                        net_contribution: { label: 'Aporte líquido mensal', color: 'var(--muted-foreground)' },
                       }}
                       className="h-[340px] w-full aspect-auto"
                     >
-                      <LineChart data={equityData} margin={{ left: 8, right: 16, top: 16, bottom: 8 }}>
+                      <ComposedChart data={equityData} margin={{ left: 8, right: 16, top: 16, bottom: 8 }}>
                         <CartesianGrid vertical={false} />
                         <XAxis dataKey="monthLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={18} />
-                        <YAxis tickLine={false} axisLine={false} tickMargin={8} width={86} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
+                        <YAxis yAxisId="value" tickLine={false} axisLine={false} tickMargin={8} width={86} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
+                        <YAxis yAxisId="flow" orientation="right" tickLine={false} axisLine={false} tickMargin={8} width={72} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
                         <ChartTooltip content={<MoneyTooltip hideValues={hideValues} labelFormatter={formatMonth} />} />
-                        <Line name="Valor de mercado" type="monotone" dataKey="market_value" stroke="var(--color-market_value)" strokeWidth={2.5} dot={false} />
-                        <Line name="Custo em carteira" type="monotone" dataKey="cost_basis" stroke="var(--color-cost_basis)" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                        <Line name="Aportes líquidos acumulados" type="monotone" dataKey="net_contributions" stroke="var(--color-net_contributions)" strokeWidth={1.5} dot={false} />
-                      </LineChart>
+                        <Bar yAxisId="flow" name="Aporte líquido mensal" dataKey="net_contribution" fill="var(--color-net_contribution)" opacity={0.42} radius={[3, 3, 0, 0]} />
+                        <Line yAxisId="value" name="Valor de Mercado" type="monotone" dataKey="market_value" stroke="var(--color-market_value)" strokeWidth={2.5} dot={false} />
+                        <Line yAxisId="value" name="Valor Patrimonial" type="monotone" dataKey="cost_basis" stroke="var(--color-cost_basis)" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                        <Line yAxisId="value" name="Aporte líquido acumulado" type="monotone" dataKey="net_contributions_accumulated" stroke="var(--color-net_contributions_accumulated)" strokeWidth={1.75} strokeDasharray="6 3 1 3" dot={false} />
+                      </ComposedChart>
                     </ChartContainer>
                   )}
                 </CardContent>
@@ -714,7 +708,9 @@ export default function Dashboard() {
                                 {row.uses_cost_fallback && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
                               </div>
                               <div className="text-right">
-                                <div className="font-mono text-sm font-medium tabular-nums">{formatCurrency(row.market_value, hideValues)}</div>
+                                <div className="font-mono text-sm font-medium tabular-nums">
+                                  {row.market_value_supported ? formatCurrency(row.market_value, hideValues) : 'Sem valor de mercado'}
+                                </div>
                                 <div className="text-xs text-muted-foreground">{formatPercent(row.weight_pct, hideValues)}</div>
                               </div>
                             </div>
@@ -755,12 +751,12 @@ export default function Dashboard() {
 
               <Card className="overflow-hidden">
                 <CardHeader className="border-b">
-                  <CardTitle className="text-base">Proventos Mensais 12M</CardTitle>
+                  <CardTitle className="text-base">Proventos Mensais</CardTitle>
                 </CardHeader>
                 <CardContent className="p-4">
                   {incomeData.every((row) => row.amount === 0) ? (
                     <div className="flex h-[240px] items-center justify-center text-center text-sm text-muted-foreground">
-                      Nenhum provento encontrado nos últimos 12 meses.
+                      Nenhum provento encontrado no período selecionado.
                     </div>
                   ) : (
                     <ChartContainer config={{ amount: { label: 'Proventos', color: 'var(--chart-3)' } }} className="h-[240px] w-full aspect-auto">

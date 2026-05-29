@@ -23,7 +23,7 @@ from backend.domain.engine import (
     replay_events,
     to_decimal,
 )
-from backend.domain.enums import EventType
+from backend.domain.enums import AssetClass, EventType
 
 
 date = dt.date
@@ -31,7 +31,9 @@ date = dt.date
 ZERO = Decimal("0")
 CENTS = Decimal("0.01")
 PCT = Decimal("0.01")
-PERIODS = {"12m", "ytd", "3y", "all"}
+PERIODS = {"year", "12m", "24m", "36m", "all"}
+UNSUPPORTED_MARKET_VALUE_CLASSES: set[str] = set()
+FORCED_COST_FALLBACK_CLASSES = {AssetClass.CRIPTOMOEDA.value}
 
 
 @dataclass(frozen=True)
@@ -91,12 +93,15 @@ def _period_start_month(
     asset_class: str | None,
 ) -> str:
     year, month = (int(part) for part in end_month.split("-"))
+    if period == "year":
+        return f"{year:04d}-01"
     if period == "12m":
         y, m = _add_months(year, month, -11)
         return f"{y:04d}-{m:02d}"
-    if period == "ytd":
-        return f"{year:04d}-01"
-    if period == "3y":
+    if period == "24m":
+        y, m = _add_months(year, month, -23)
+        return f"{y:04d}-{m:02d}"
+    if period == "36m":
         y, m = _add_months(year, month, -35)
         return f"{y:04d}-{m:02d}"
 
@@ -164,6 +169,9 @@ def _latest_quote_info(
         "mp.status = 'imported'",
     ]
     params: list[Any] = [portfolio_id]
+    if FORCED_COST_FALLBACK_CLASSES:
+        conditions.append(f"a.asset_class NOT IN ({','.join('?' for _ in FORCED_COST_FALLBACK_CLASSES)})")
+        params.extend(sorted(FORCED_COST_FALLBACK_CLASSES))
     if asset_class:
         conditions.append("a.asset_class = ?")
         params.append(asset_class)
@@ -393,6 +401,10 @@ def _market_value_for_position(position: dict[str, Any], price: PricePoint | Non
     return price.value, False
 
 
+def _supports_market_value(asset_class: str | None) -> bool:
+    return (asset_class or "") not in UNSUPPORTED_MARKET_VALUE_CLASSES
+
+
 def _cash_flow(event: EventRecord) -> Decimal:
     if event.is_cancelled or event.is_storno:
         return ZERO
@@ -428,14 +440,23 @@ def _build_current_snapshot(
     positions: list[dict[str, Any]],
     price_lookup: dict[tuple[int, str], PricePoint],
     latest_quote_month: str | None,
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[str], Decimal, int]:
+) -> dict[str, Any]:
     market_total = ZERO
     cost_total = ZERO
+    market_supported_cost_total = ZERO
     fallback_amount = ZERO
     fallback_count = 0
     missing_labels: list[str] = []
+    unsupported_count = 0
+    unsupported_labels: list[str] = []
+    supported_count = 0
     by_class: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"market_value": ZERO, "cost_basis": ZERO, "uses_cost_fallback": False}
+        lambda: {
+            "market_value": ZERO,
+            "cost_basis": ZERO,
+            "uses_cost_fallback": False,
+            "market_value_supported": True,
+        }
     )
 
     for position in positions:
@@ -445,31 +466,43 @@ def _build_current_snapshot(
         asset_id = position["asset_id"]
         asset_class = position["asset_class"] or "Sem classe"
         cost = _d(position["total_cost"])
-        price = price_lookup.get((asset_id, latest_quote_month)) if latest_quote_month else None
+        label = position.get("current_ticker") or position.get("name") or f"Ativo #{asset_id}"
+        cost_total += cost
+        by_class[asset_class]["cost_basis"] += cost
+
+        if not _supports_market_value(asset_class):
+            unsupported_count += 1
+            unsupported_labels.append(label)
+            by_class[asset_class]["market_value_supported"] = False
+            continue
+
+        supported_count += 1
+        price = None if asset_class in FORCED_COST_FALLBACK_CLASSES else price_lookup.get((asset_id, latest_quote_month)) if latest_quote_month else None
         market_value, used_fallback = _market_value_for_position(position, price)
 
         market_total += market_value
-        cost_total += cost
+        market_supported_cost_total += cost
         by_class[asset_class]["market_value"] += market_value
-        by_class[asset_class]["cost_basis"] += cost
         if used_fallback:
             fallback_count += 1
             fallback_amount += market_value
             by_class[asset_class]["uses_cost_fallback"] = True
-            missing_labels.append(position.get("current_ticker") or position.get("name") or f"Ativo #{asset_id}")
+            missing_labels.append(label)
 
     allocation = []
     result_by_class = []
     for asset_class, values in by_class.items():
         class_market = values["market_value"]
         class_cost = values["cost_basis"]
-        unrealized = class_market - class_cost
+        market_supported = values["market_value_supported"]
+        unrealized = class_market - class_cost if market_supported else ZERO
         allocation.append(
             {
                 "asset_class": asset_class,
                 "market_value": _money(class_market),
                 "weight_pct": _percent((class_market / market_total * Decimal("100")) if market_total else ZERO),
                 "uses_cost_fallback": values["uses_cost_fallback"],
+                "market_value_supported": market_supported,
             }
         )
         result_by_class.append(
@@ -478,8 +511,9 @@ def _build_current_snapshot(
                 "market_value": _money(class_market),
                 "cost_basis": _money(class_cost),
                 "unrealized_result": _money(unrealized),
-                "unrealized_result_pct": _percent((unrealized / class_cost * Decimal("100")) if class_cost else ZERO),
+                "unrealized_result_pct": _percent((unrealized / class_cost * Decimal("100")) if class_cost and market_supported else ZERO),
                 "uses_cost_fallback": values["uses_cost_fallback"],
+                "market_value_supported": market_supported,
             }
         )
 
@@ -489,16 +523,28 @@ def _build_current_snapshot(
     summary_values = {
         "market_value": market_total,
         "cost_basis": cost_total,
-        "unrealized_result": market_total - cost_total,
-        "unrealized_result_pct": (market_total - cost_total) / cost_total * Decimal("100") if cost_total else ZERO,
+        "unrealized_result": market_total - market_supported_cost_total,
+        "unrealized_result_pct": (market_total - market_supported_cost_total) / market_supported_cost_total * Decimal("100") if market_supported_cost_total else ZERO,
+        "unrealized_cost_basis": market_supported_cost_total,
     }
-    return summary_values, allocation, result_by_class, missing_labels, fallback_amount, fallback_count
+    return {
+        "summary_values": summary_values,
+        "allocation": allocation,
+        "result_by_class": result_by_class,
+        "missing_labels": missing_labels,
+        "fallback_amount": fallback_amount,
+        "fallback_count": fallback_count,
+        "unsupported_labels": unsupported_labels,
+        "unsupported_count": unsupported_count,
+        "supported_count": supported_count,
+    }
 
 
 def _build_equity_curve(
     grouped_records: dict[int, list[EventRecord]],
     months: list[str],
     price_lookup: dict[tuple[int, str], PricePoint],
+    asset_meta: dict[int, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     all_events = sorted(
         (event for records in grouped_records.values() for event in records),
@@ -506,19 +552,27 @@ def _build_equity_curve(
     )
     result = []
     for month in months:
+        start = _month_start(month)
         cutoff = _month_end(month)
         market_total = ZERO
         cost_total = ZERO
         missing_count = 0
-        net_contributions = sum((_cash_flow(event) for event in all_events if event.event_date <= cutoff), ZERO)
+        unsupported_count = 0
+        net_contribution = sum((_cash_flow(event) for event in all_events if start <= event.event_date <= cutoff), ZERO)
+        net_contributions_accumulated = sum((_cash_flow(event) for event in all_events if event.event_date <= cutoff), ZERO)
 
         for asset_id, records in grouped_records.items():
             state = _replay([event for event in records if event.event_date <= cutoff])
             if state.quantity <= ZERO:
                 continue
-            market_value, used_fallback = _market_value_for_state(state, price_lookup.get((asset_id, month)))
-            market_total += market_value
             cost_total += state.total_cost
+            asset_class = asset_meta.get(asset_id, {}).get("asset_class")
+            if not _supports_market_value(asset_class):
+                unsupported_count += 1
+                continue
+            price = None if asset_class in FORCED_COST_FALLBACK_CLASSES else price_lookup.get((asset_id, month))
+            market_value, used_fallback = _market_value_for_state(state, price)
+            market_total += market_value
             if used_fallback:
                 missing_count += 1
 
@@ -527,23 +581,23 @@ def _build_equity_curve(
                 "year_month": month,
                 "market_value": _money(market_total),
                 "cost_basis": _money(cost_total),
-                "net_contributions": _money(net_contributions),
+                "net_contribution": _money(net_contribution),
+                "net_contributions_accumulated": _money(net_contributions_accumulated),
                 "uses_cost_fallback": missing_count > 0,
                 "missing_quote_count": missing_count,
+                "unsupported_market_value_count": unsupported_count,
             }
         )
     return result
 
 
-def _income_12m(
+def _income_period(
     conn: sqlite3.Connection,
     portfolio_id: int,
     asset_class: str | None,
-    today: dt.date,
-) -> tuple[Decimal, list[dict[str, str]]]:
-    end_month = _month_key(today)
-    start_year, start_month_num = _add_months(today.year, today.month, -11)
-    start_month = f"{start_year:04d}-{start_month_num:02d}"
+    start_month: str,
+    end_month: str,
+) -> tuple[Decimal, list[dict[str, str]], int]:
     months = _month_range(start_month, end_month)
     totals: dict[str, Decimal] = defaultdict(Decimal)
 
@@ -566,13 +620,13 @@ def _income_12m(
         totals[_month_key(row["payment_date"])] += _d(row["net_value"])
 
     total = sum(totals.values(), ZERO)
-    return total, [{"year_month": month, "amount": _money(totals[month])} for month in months]
+    return total, [{"year_month": month, "amount": _money(totals[month])} for month in months], len(months)
 
 
 def get_dashboard(
     conn: sqlite3.Connection,
     portfolio_id: int,
-    period: str = "12m",
+    period: str = "year",
     asset_class: str | None = None,
     grouping: str = "monthly",
 ) -> dict[str, Any]:
@@ -583,10 +637,10 @@ def get_dashboard(
 
     today = date.today()
     latest_quote_month, latest_quote_date = _latest_quote_info(conn, portfolio_id, asset_class)
-    end_month = latest_quote_month or _month_key(today)
+    end_month = _month_key(today)
     start_month = _period_start_month(period, end_month, conn, portfolio_id, asset_class)
     months = _month_range(start_month, end_month)
-    period_start = None if period == "all" else _month_start(start_month)
+    period_start = _month_start(start_month)
     period_end = _month_end(end_month)
 
     classes = _asset_classes(conn, portfolio_id)
@@ -598,19 +652,21 @@ def get_dashboard(
         [latest_quote_month] if latest_quote_month else [],
         active_asset_ids,
     )
-    summary_values, allocation, result_by_class, missing_labels, fallback_amount, fallback_count = _build_current_snapshot(
+    snapshot = _build_current_snapshot(
         positions,
         current_price_lookup,
         latest_quote_month,
     )
+    summary_values = snapshot["summary_values"]
 
     rows = _event_rows(conn, portfolio_id, asset_class)
     grouped = _records_by_asset(rows)
+    asset_meta = _asset_meta(rows)
     asset_ids = sorted(grouped)
     price_lookup = _price_lookup(conn, portfolio_id, months, asset_ids)
-    equity_curve = _build_equity_curve(grouped, months, price_lookup)
+    equity_curve = _build_equity_curve(grouped, months, price_lookup, asset_meta)
     realized_result = _realized_result(grouped, period_start, period_end)
-    income_total, income_series = _income_12m(conn, portfolio_id, asset_class, today)
+    income_total, income_series, income_month_count = _income_period(conn, portfolio_id, asset_class, start_month, end_month)
 
     market_value = summary_values["market_value"]
     cost_basis = summary_values["cost_basis"]
@@ -629,31 +685,38 @@ def get_dashboard(
             "market_value": _money(market_value),
             "market_value_month": latest_quote_month,
             "market_value_date": latest_quote_date,
-            "market_value_uses_cost_fallback": fallback_count > 0,
-            "market_value_cost_fallback_count": fallback_count,
-            "market_value_cost_fallback_amount": _money(fallback_amount),
+            "market_value_uses_cost_fallback": snapshot["fallback_count"] > 0,
+            "market_value_cost_fallback_count": snapshot["fallback_count"],
+            "market_value_cost_fallback_amount": _money(snapshot["fallback_amount"]),
+            "market_value_unsupported_count": snapshot["unsupported_count"],
             "cost_basis": _money(cost_basis),
             "unrealized_result": _money(unrealized_result),
             "unrealized_result_pct": _percent(summary_values["unrealized_result_pct"]),
+            "unrealized_cost_basis": _money(summary_values["unrealized_cost_basis"]),
             "realized_result": _money(realized_result),
             "realized_result_period_start": period_start,
             "realized_result_period_end": period_end,
-            "income_12m": _money(income_total),
-            "income_12m_monthly_avg": _money(income_total / Decimal("12")),
+            "income": _money(income_total),
+            "income_monthly_avg": _money(income_total / Decimal(income_month_count or 1)),
+            "income_month_count": income_month_count,
+            "income_period_start": period_start,
+            "income_period_end": period_end,
         },
         "equity_curve": equity_curve,
-        "allocation": allocation,
-        "result_by_class": result_by_class,
+        "allocation": snapshot["allocation"],
+        "result_by_class": snapshot["result_by_class"],
         "income_series": income_series,
         "operational_alerts": {
-            "missing_recent_quotes_count": fallback_count,
-            "missing_recent_quotes_summary": missing_labels[:8],
+            "missing_recent_quotes_count": snapshot["fallback_count"],
+            "missing_recent_quotes_summary": snapshot["missing_labels"][:8],
+            "unsupported_market_value_count": snapshot["unsupported_count"],
+            "unsupported_market_value_summary": snapshot["unsupported_labels"][:8],
             "last_b3_import_at": _last_b3_import_at(conn, portfolio_id),
             "latest_quote_month": latest_quote_month,
             "latest_quote_date": latest_quote_date,
             "no_events": len(rows) == 0,
-            "no_quotes": latest_quote_month is None,
-            "uses_cost_fallback": fallback_count > 0,
-            "cost_fallback_amount": _money(fallback_amount),
+            "no_quotes": latest_quote_month is None and snapshot["supported_count"] > 0,
+            "uses_cost_fallback": snapshot["fallback_count"] > 0,
+            "cost_fallback_amount": _money(snapshot["fallback_amount"]),
         },
     }

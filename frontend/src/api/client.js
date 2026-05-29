@@ -116,8 +116,8 @@ export const positions = {
 };
 
 export const dashboard = {
-  get: ({ portfolioId, period, assetClass, grouping = 'monthly' }) => {
-    const params = new URLSearchParams({ portfolio_id: portfolioId, period, grouping });
+  get: ({ portfolioId, period, assetClass }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, period });
     if (assetClass) params.set('asset_class', assetClass);
     return request(`/dashboard?${params.toString()}`);
   },

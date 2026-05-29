@@ -76,16 +76,17 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
         _price(conn, import_id, stock["id"], value="12", row=1)
         _income(conn, import_id, portfolio["id"], stock["id"], payment_date="2026-04-10", value="120.00")
 
-        report = dashboard_service.get_dashboard(conn, portfolio["id"], period="ytd")
-        stock_only = dashboard_service.get_dashboard(conn, portfolio["id"], period="ytd", asset_class=AssetClass.ACAO.value)
+        report = dashboard_service.get_dashboard(conn, portfolio["id"], period="year")
+        stock_only = dashboard_service.get_dashboard(conn, portfolio["id"], period="year", asset_class=AssetClass.ACAO.value)
 
     assert report["summary"]["market_value"] == "1620.00"
     assert report["summary"]["cost_basis"] == "1500.00"
     assert report["summary"]["unrealized_result"] == "120.00"
     assert report["summary"]["unrealized_result_pct"] == "8.00"
     assert report["summary"]["realized_result"] == "200.00"
-    assert report["summary"]["income_12m"] == "120.00"
-    assert report["summary"]["income_12m_monthly_avg"] == "10.00"
+    assert report["summary"]["income"] == "120.00"
+    assert report["summary"]["income_monthly_avg"] == "24.00"
+    assert report["summary"]["income_month_count"] == 5
     assert report["summary"]["market_value_month"] == "2026-05"
     assert report["summary"]["market_value_uses_cost_fallback"] is True
     assert report["summary"]["market_value_cost_fallback_count"] == 1
@@ -95,8 +96,11 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
     assert may["year_month"] == "2026-05"
     assert may["market_value"] == "1620.00"
     assert may["cost_basis"] == "1500.00"
-    assert may["net_contributions"] == "1300.00"
+    assert may["net_contribution"] == "0.00"
+    assert may["net_contributions_accumulated"] == "1300.00"
     assert may["uses_cost_fallback"] is True
+    march = next(month for month in report["equity_curve"] if month["year_month"] == "2026-03")
+    assert march["net_contribution"] == "-600.00"
 
     assert stock_only["summary"]["market_value"] == "720.00"
     assert stock_only["summary"]["cost_basis"] == "600.00"
@@ -108,6 +112,7 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
             "market_value": "720.00",
             "weight_pct": "100.00",
             "uses_cost_fallback": False,
+            "market_value_supported": True,
         }
     ]
 
@@ -143,7 +148,7 @@ def test_dashboard_falls_back_to_cost_when_no_quotes_exist(tmp_path, monkeypatch
         asset = asset_service.create_asset(conn, AssetClass.FII.value, "XPTO11", market="BR")
         event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2026-01-10", "10", "1000")
 
-        report = dashboard_service.get_dashboard(conn, portfolio["id"], period="ytd")
+        report = dashboard_service.get_dashboard(conn, portfolio["id"], period="year")
 
     assert report["summary"]["market_value"] == "1000.00"
     assert report["summary"]["cost_basis"] == "1000.00"
@@ -152,3 +157,56 @@ def test_dashboard_falls_back_to_cost_when_no_quotes_exist(tmp_path, monkeypatch
     assert report["operational_alerts"]["no_quotes"] is True
     assert report["operational_alerts"]["missing_recent_quotes_count"] == 1
     assert report["operational_alerts"]["uses_cost_fallback"] is True
+
+
+def test_dashboard_uses_cost_fallback_for_crypto_market_value(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    monkeypatch.setattr(dashboard_service, "date", FixedDate)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        crypto = asset_service.create_asset(conn, AssetClass.CRIPTOMOEDA.value, "BTC", market="BR")
+        event_service.create_event(conn, portfolio["id"], crypto["id"], EventType.COMPRA.value, "2026-01-10", "0.5", "1000")
+        import_id = _import_id(conn, portfolio["id"], "2026-05")
+        _price(conn, import_id, crypto["id"], value="5000", row=1)
+
+        report = dashboard_service.get_dashboard(conn, portfolio["id"], period="year")
+
+    assert report["summary"]["market_value"] == "1000.00"
+    assert report["summary"]["cost_basis"] == "1000.00"
+    assert report["summary"]["unrealized_result"] == "0.00"
+    assert report["summary"]["market_value_uses_cost_fallback"] is True
+    assert report["summary"]["market_value_cost_fallback_count"] == 1
+    assert report["summary"]["market_value_unsupported_count"] == 0
+    assert report["summary"]["market_value_month"] is None
+    assert report["operational_alerts"]["no_quotes"] is True
+    assert report["operational_alerts"]["missing_recent_quotes_count"] == 1
+    assert report["operational_alerts"]["missing_recent_quotes_summary"] == ["BTC"]
+    assert report["allocation"][0]["market_value_supported"] is True
+
+
+def test_dashboard_net_contributions_ignore_non_cash_events(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    monkeypatch.setattr(dashboard_service, "date", FixedDate)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "CASH3", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2026-01-10", "100", "1000")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.BONIFICACAO.value, "2026-02-10", "10", "100")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.DESDOBRAMENTO.value, "2026-03-10", "110", "0")
+
+        report = dashboard_service.get_dashboard(conn, portfolio["id"], period="year")
+
+    january = next(month for month in report["equity_curve"] if month["year_month"] == "2026-01")
+    february = next(month for month in report["equity_curve"] if month["year_month"] == "2026-02")
+    march = next(month for month in report["equity_curve"] if month["year_month"] == "2026-03")
+    assert january["net_contribution"] == "1000.00"
+    assert january["net_contributions_accumulated"] == "1000.00"
+    assert february["net_contribution"] == "0.00"
+    assert february["net_contributions_accumulated"] == "1000.00"
+    assert march["net_contribution"] == "0.00"
+    assert march["net_contributions_accumulated"] == "1000.00"
+    assert march["cost_basis"] == "1100.00"

@@ -743,23 +743,30 @@ class DashboardSummary(BaseModel):
     market_value_uses_cost_fallback: bool = False
     market_value_cost_fallback_count: int = 0
     market_value_cost_fallback_amount: str
+    market_value_unsupported_count: int = 0
     cost_basis: str
     unrealized_result: str
     unrealized_result_pct: str
+    unrealized_cost_basis: str
     realized_result: str
     realized_result_period_start: Optional[str] = None
     realized_result_period_end: Optional[str] = None
-    income_12m: str
-    income_12m_monthly_avg: str
+    income: str
+    income_monthly_avg: str
+    income_month_count: int
+    income_period_start: Optional[str] = None
+    income_period_end: Optional[str] = None
 
 
 class DashboardEquityPoint(BaseModel):
     year_month: str
     market_value: str
     cost_basis: str
-    net_contributions: str
+    net_contribution: str
+    net_contributions_accumulated: str
     uses_cost_fallback: bool = False
     missing_quote_count: int = 0
+    unsupported_market_value_count: int = 0
 
 
 class DashboardAllocationRow(BaseModel):
@@ -767,6 +774,7 @@ class DashboardAllocationRow(BaseModel):
     market_value: str
     weight_pct: str
     uses_cost_fallback: bool = False
+    market_value_supported: bool = True
 
 
 class DashboardResultByClassRow(BaseModel):
@@ -776,6 +784,7 @@ class DashboardResultByClassRow(BaseModel):
     unrealized_result: str
     unrealized_result_pct: str
     uses_cost_fallback: bool = False
+    market_value_supported: bool = True
 
 
 class DashboardIncomePoint(BaseModel):
@@ -786,6 +795,8 @@ class DashboardIncomePoint(BaseModel):
 class DashboardOperationalAlerts(BaseModel):
     missing_recent_quotes_count: int = 0
     missing_recent_quotes_summary: list[str] = []
+    unsupported_market_value_count: int = 0
+    unsupported_market_value_summary: list[str] = []
     last_b3_import_at: Optional[str] = None
     latest_quote_month: Optional[str] = None
     latest_quote_date: Optional[str] = None
