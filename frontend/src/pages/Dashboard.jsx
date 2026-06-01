@@ -21,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ChartContainer, ChartTooltip } from '@/components/ui/chart';
 import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
+import { cn } from '@/lib/utils';
 
 const DASHBOARD_FILTER_STORAGE_KEY = 'ledger.dashboard.filters';
 const PERIOD_OPTIONS = [
@@ -31,6 +32,22 @@ const PERIOD_OPTIONS = [
   { value: 'all', label: 'Tudo' },
 ];
 const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--primary)'];
+const DETAIL_ASSET_LIMIT = 9;
+const CLASS_LEVEL = { type: 'class', field: 'asset_class', label: 'Classe', emptyLabel: 'Sem classe' };
+const ASSET_LEVEL = { type: 'asset', field: 'asset_id', label: 'Ativo' };
+const HIERARCHY_BY_CLASS = {
+  'Ação': [
+    { type: 'sector', field: 'sector', label: 'Setor', emptyLabel: 'Sem setor' },
+    { type: 'subsector', field: 'subsector', label: 'Subsetor', emptyLabel: 'Sem subsetor' },
+    { type: 'segment', field: 'segment', label: 'Segmento', emptyLabel: 'Sem segmento' },
+  ],
+  FII: [
+    { type: 'segment', field: 'segment', label: 'Segmento', emptyLabel: 'Sem segmento' },
+  ],
+  'FI-INFRA': [
+    { type: 'segment', field: 'segment', label: 'Segmento', emptyLabel: 'Sem segmento' },
+  ],
+};
 
 function getStoredDashboardFilters() {
   try {
@@ -51,6 +68,114 @@ function toNumber(value) {
 
 function getAssetLabel(position) {
   return position.current_ticker || `#${position.asset_id}`;
+}
+
+function hasText(value) {
+  return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+function getLevelValue(position, level) {
+  if (level.type === 'asset') return String(position.asset_id);
+  const value = position[level.field];
+  return hasText(value) ? String(value).trim() : level.emptyLabel;
+}
+
+function getLevelLabel(position, level) {
+  return level.type === 'asset' ? getAssetLabel(position) : getLevelValue(position, level);
+}
+
+function filterPositionsByPath(positions, path) {
+  if (path.length === 0) return positions;
+  return positions.filter((position) => path.every((node) => getLevelValue(position, node) === node.value));
+}
+
+function getHierarchyForClass(assetClass) {
+  return HIERARCHY_BY_CLASS[assetClass] || [];
+}
+
+function getNextAllocationLevel(path, scopedPositions) {
+  if (path.length === 0) return CLASS_LEVEL;
+
+  const hierarchy = getHierarchyForClass(path[0]?.value);
+  const selectedHierarchyDepth = path.length - 1;
+  for (let index = selectedHierarchyDepth; index < hierarchy.length; index += 1) {
+    const level = hierarchy[index];
+    if (scopedPositions.some((position) => hasText(position[level.field]))) return level;
+  }
+  return ASSET_LEVEL;
+}
+
+function buildAllocationGroups(positions, level) {
+  const groups = new Map();
+  positions.forEach((position) => {
+    const value = getLevelValue(position, level);
+    const key = level.type === 'asset' ? `asset:${position.asset_id}` : `${level.type}:${value}`;
+    const existing = groups.get(key) || {
+      key,
+      type: level.type,
+      field: level.field,
+      emptyLabel: level.emptyLabel,
+      value,
+      label: getLevelLabel(position, level),
+      assetId: level.type === 'asset' ? position.asset_id : null,
+      amount: 0,
+      costBasis: 0,
+      unrealized: 0,
+      uses_cost_fallback: false,
+      market_value_supported: true,
+      positions: [],
+    };
+
+    existing.amount += toNumber(position.market_value);
+    existing.costBasis += toNumber(position.cost_basis);
+    existing.unrealized += toNumber(position.unrealized_result);
+    existing.uses_cost_fallback = existing.uses_cost_fallback || Boolean(position.uses_cost_fallback);
+    existing.market_value_supported = existing.market_value_supported && position.market_value_supported !== false;
+    existing.positions.push(position);
+    groups.set(key, existing);
+  });
+
+  const total = Array.from(groups.values()).reduce((sum, row) => sum + row.amount, 0);
+  const sortedGroups = Array.from(groups.values())
+    .sort((a, b) => b.amount - a.amount || compareText(a.label, b.label));
+  const visibleGroups = level.type === 'asset' && sortedGroups.length > DETAIL_ASSET_LIMIT
+    ? [
+        ...sortedGroups.slice(0, DETAIL_ASSET_LIMIT),
+        sortedGroups.slice(DETAIL_ASSET_LIMIT).reduce((others, row) => ({
+          ...others,
+          amount: others.amount + row.amount,
+          costBasis: others.costBasis + row.costBasis,
+          unrealized: others.unrealized + row.unrealized,
+          uses_cost_fallback: others.uses_cost_fallback || row.uses_cost_fallback,
+          market_value_supported: others.market_value_supported && row.market_value_supported,
+          positions: [...others.positions, ...row.positions],
+        }), {
+          key: 'asset:others',
+          type: 'others',
+          field: level.field,
+          value: 'Outros',
+          label: 'Outros',
+          assetId: null,
+          amount: 0,
+          costBasis: 0,
+          unrealized: 0,
+          uses_cost_fallback: false,
+          market_value_supported: true,
+          positions: [],
+        }),
+      ]
+    : sortedGroups;
+
+  return visibleGroups
+    .map((row, index) => ({
+      ...row,
+      color: CHART_COLORS[index % CHART_COLORS.length],
+      weight_pct: total > 0 ? (row.amount / total) * 100 : 0,
+    }));
+}
+
+function getBreadcrumbLabel(path) {
+  return ['Carteira', ...path.map((node) => node.label)].join(' > ');
 }
 
 function formatPercent(value, hideValues = false) {
@@ -234,11 +359,11 @@ function AllocationTooltip({ active, payload, hideValues }) {
   const row = item.payload;
   return (
     <div className="rounded-lg border bg-background p-3 text-sm shadow-xl">
-      <div className="font-medium">{row.asset_class}</div>
+      <div className="font-medium">{row.label}</div>
       <div className="mt-1 font-mono tabular-nums">
-        {row.market_value_supported ? formatCurrency(row.value, hideValues) : 'Sem valor de mercado'}
+        {row.market_value_supported ? formatCurrency(row.amount, hideValues) : 'Sem valor de mercado'}
       </div>
-      <div className="text-xs text-muted-foreground">{formatPercent(row.weight_pct, hideValues)} da carteira</div>
+      <div className="text-xs text-muted-foreground">{formatPercent(row.weight_pct, hideValues)} da seleção</div>
       {row.uses_cost_fallback && <div className="mt-1 text-xs text-muted-foreground">Inclui fallback para custo.</div>}
       {!row.market_value_supported && <div className="mt-1 text-xs text-muted-foreground">Classe sem regra de valor de mercado nesta etapa.</div>}
     </div>
@@ -300,7 +425,10 @@ export default function Dashboard() {
   const [positionsLoading, setPositionsLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [portfolioDashboardData, setPortfolioDashboardData] = useState(null);
+  const [portfolioDashboardLoading, setPortfolioDashboardLoading] = useState(true);
   const [dashboardFilters, setDashboardFilters] = useState(getStoredDashboardFilters);
+  const [allocationPath, setAllocationPath] = useState([]);
   const [showEventForm, setShowEventForm] = useState(false);
   const [showB3Import, setShowB3Import] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -370,10 +498,34 @@ export default function Dashboard() {
     }
   }, [activePortfolioId, dashboardPeriod, dashboardAssetClass]);
 
+  const loadPortfolioDashboard = useCallback(async () => {
+    if (!activePortfolioId) {
+      setPortfolioDashboardData(null);
+      setPortfolioDashboardLoading(false);
+      return;
+    }
+    setPortfolioDashboardLoading(true);
+    try {
+      const data = await dashboardApi.get({
+        portfolioId: activePortfolioId,
+        period: 'year',
+        assetClass: null,
+      });
+      setPortfolioDashboardData(data);
+    } catch (err) {
+      console.error('Failed to load portfolio dashboard:', err);
+      setPortfolioDashboardData(null);
+      toast.error(err.message || 'Falha ao carregar alocação da carteira.');
+    } finally {
+      setPortfolioDashboardLoading(false);
+    }
+  }, [activePortfolioId]);
+
   const refreshData = useCallback(() => {
     loadPositions();
     loadDashboard();
-  }, [loadPositions, loadDashboard]);
+    loadPortfolioDashboard();
+  }, [loadPositions, loadDashboard, loadPortfolioDashboard]);
 
   useEffect(() => {
     let active = true;
@@ -395,6 +547,20 @@ export default function Dashboard() {
     };
   }, [loadDashboard]);
 
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => {
+      if (active) loadPortfolioDashboard();
+    });
+    return () => {
+      active = false;
+    };
+  }, [loadPortfolioDashboard]);
+
+  useEffect(() => {
+    setAllocationPath([]);
+  }, [activePortfolioId]);
+
   const handleSort = (key) => {
     setSort((current) => (
       current.key === key
@@ -402,6 +568,29 @@ export default function Dashboard() {
         : { key, direction: 'asc' }
     ));
   };
+
+  const handleAllocationItemClick = useCallback((row) => {
+    if (!row) return;
+    if (row.type === 'others') return;
+    if (row.type === 'asset' && row.assetId) {
+      navigate(`/assets/${row.assetId}`);
+      return;
+    }
+    setAllocationPath((current) => [
+      ...current,
+      {
+        type: row.type,
+        field: row.field,
+        value: row.value,
+        label: row.label,
+        emptyLabel: row.emptyLabel,
+      },
+    ]);
+  }, [navigate]);
+
+  const handleBreadcrumbClick = useCallback((index) => {
+    setAllocationPath((current) => (index < 0 ? [] : current.slice(0, index + 1)));
+  }, []);
 
   const positionsWithShare = useMemo(() => {
     const allocationBase = positionList.filter((p) => showRedeemed || toNumber(p.quantity) !== 0);
@@ -462,20 +651,74 @@ export default function Dashboard() {
     }))
   ), [dashboardData]);
 
-  const allocationData = useMemo(() => (
-    (dashboardData?.allocation || []).map((row, index) => ({
-      ...row,
-      value: toNumber(row.market_value),
-      color: CHART_COLORS[index % CHART_COLORS.length],
-    }))
-  ), [dashboardData]);
+  const portfolioStructureData = portfolioDashboardData || (!dashboardAssetClass && dashboardPeriod === 'year' ? dashboardData : null);
 
-  const resultByClassData = useMemo(() => (
-    (dashboardData?.result_by_class || []).map((row) => ({
-      ...row,
-      unrealized: toNumber(row.unrealized_result),
-    }))
-  ), [dashboardData]);
+  const portfolioCurrentPositions = useMemo(() => (
+    (portfolioStructureData?.current_positions || []).filter((position) => toNumber(position.quantity) > 0)
+  ), [portfolioStructureData]);
+
+  const portfolioMarketTotal = useMemo(() => (
+    portfolioCurrentPositions.reduce((sum, position) => sum + toNumber(position.market_value), 0)
+  ), [portfolioCurrentPositions]);
+
+  const allocationSelection = useMemo(() => {
+    const scopedPositions = filterPositionsByPath(portfolioCurrentPositions, allocationPath);
+    const level = getNextAllocationLevel(allocationPath, scopedPositions);
+    const groups = buildAllocationGroups(scopedPositions, level);
+    const total = scopedPositions.reduce((sum, position) => sum + toNumber(position.market_value), 0);
+    const unrealized = scopedPositions.reduce((sum, position) => sum + toNumber(position.unrealized_result), 0);
+    const sortedAssets = [...scopedPositions].sort((a, b) => (
+      toNumber(b.market_value) - toNumber(a.market_value) || compareText(getAssetLabel(a), getAssetLabel(b))
+    ));
+    const bestAsset = sortedAssets.length
+      ? [...sortedAssets].sort((a, b) => toNumber(b.unrealized_result) - toNumber(a.unrealized_result))[0]
+      : null;
+    const worstAsset = sortedAssets.length
+      ? [...sortedAssets].sort((a, b) => toNumber(a.unrealized_result) - toNumber(b.unrealized_result))[0]
+      : null;
+    const topAssets = sortedAssets.slice(0, DETAIL_ASSET_LIMIT);
+    const remainingAssets = sortedAssets.slice(DETAIL_ASSET_LIMIT);
+    const detailRows = topAssets.map((position) => ({
+      key: `asset:${position.asset_id}`,
+      type: 'asset',
+      assetId: position.asset_id,
+      label: getAssetLabel(position),
+      name: position.name,
+      marketValue: toNumber(position.market_value),
+      unrealized: toNumber(position.unrealized_result),
+      share: total > 0 ? (toNumber(position.market_value) / total) * 100 : 0,
+      usesCostFallback: Boolean(position.uses_cost_fallback),
+      marketValueSupported: position.market_value_supported !== false,
+    }));
+
+    if (remainingAssets.length > 0) {
+      const otherMarketValue = remainingAssets.reduce((sum, position) => sum + toNumber(position.market_value), 0);
+      detailRows.push({
+        key: 'others',
+        type: 'others',
+        label: 'Outros',
+        name: `${remainingAssets.length} ativo(s)`,
+        marketValue: otherMarketValue,
+        unrealized: remainingAssets.reduce((sum, position) => sum + toNumber(position.unrealized_result), 0),
+        share: total > 0 ? (otherMarketValue / total) * 100 : 0,
+        usesCostFallback: remainingAssets.some((position) => position.uses_cost_fallback),
+        marketValueSupported: remainingAssets.every((position) => position.market_value_supported !== false),
+      });
+    }
+
+    return {
+      scopedPositions,
+      level,
+      groups,
+      total,
+      unrealized,
+      bestAsset,
+      worstAsset,
+      detailRows,
+      label: getBreadcrumbLabel(allocationPath),
+      portfolioShare: portfolioMarketTotal > 0 ? (total / portfolioMarketTotal) * 100 : 0,
+    };
+  }, [allocationPath, portfolioCurrentPositions, portfolioMarketTotal]);
 
   const incomeData = useMemo(() => (
     (dashboardData?.income_series || []).map((row) => ({
@@ -495,6 +738,15 @@ export default function Dashboard() {
   const incomeSubtitle = summary?.income_month_count > 1
     ? `Média mensal ${formatCurrency(summary.income_monthly_avg, hideValues)}`
     : 'No período selecionado';
+  const allocationLoading = portfolioDashboardLoading && !portfolioStructureData;
+  const allocationResultTone = allocationSelection.unrealized > 0 ? 'text-emerald-500' : allocationSelection.unrealized < 0 ? 'text-red-500' : 'text-foreground';
+  const bestAssetLabel = allocationSelection.bestAsset
+    ? `${getAssetLabel(allocationSelection.bestAsset)} (${formatSignedCurrency(allocationSelection.bestAsset.unrealized_result, hideValues)})`
+    : '—';
+  const worstAssetLabel = allocationSelection.worstAsset
+    ? `${getAssetLabel(allocationSelection.worstAsset)} (${formatSignedCurrency(allocationSelection.worstAsset.unrealized_result, hideValues)})`
+    : '—';
+  const allocationPieData = allocationSelection.groups.filter((row) => row.amount > 0 && row.market_value_supported);
 
   if (!activePortfolioId) {
     return (
@@ -548,23 +800,9 @@ export default function Dashboard() {
         </div>
 
         <TabsContent value="dashboard" className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap gap-2" aria-label="Período do Dashboard">
-              {PERIOD_OPTIONS.map((option) => (
-                <Button
-                  key={option.value}
-                  type="button"
-                  variant={dashboardPeriod === option.value ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-8 rounded-full px-3"
-                  onClick={() => setDashboardFilters((current) => ({ ...current, period: option.value }))}
-                >
-                  {option.label}
-                </Button>
-              ))}
-            </div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             {dashboardClassOptions.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5" aria-label="Classe do Dashboard">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5" aria-label="Classe do Dashboard">
                 <Button
                   variant={!dashboardAssetClass ? 'default' : 'outline'}
                   size="sm"
@@ -586,6 +824,20 @@ export default function Dashboard() {
                 ))}
               </div>
             )}
+            <div className="flex flex-wrap gap-2 lg:ml-auto lg:justify-end" aria-label="Período do Dashboard">
+              {PERIOD_OPTIONS.map((option) => (
+                <Button
+                  key={option.value}
+                  type="button"
+                  variant={dashboardPeriod === option.value ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 rounded-full px-3"
+                  onClick={() => setDashboardFilters((current) => ({ ...current, period: option.value }))}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
           </div>
 
           {dashboardLoading && !dashboardData ? (
@@ -680,40 +932,102 @@ export default function Dashboard() {
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <Card className="overflow-hidden">
                   <CardHeader className="border-b">
-                    <CardTitle className="text-base">Alocação Atual por Classe</CardTitle>
+                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <CardTitle className="text-base">Alocação Atual por Classe</CardTitle>
+                        <p className="mt-1 text-xs text-muted-foreground">Visão estrutural da carteira atual.</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1 md:justify-end" aria-label="Navegação da alocação">
+                        <Button
+                          type="button"
+                          variant={allocationPath.length === 0 ? 'secondary' : 'ghost'}
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => handleBreadcrumbClick(-1)}
+                        >
+                          Carteira
+                        </Button>
+                        {allocationPath.map((node, index) => (
+                          <div key={`${node.type}:${node.value}:${index}`} className="flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground">&gt;</span>
+                            <Button
+                              type="button"
+                              variant={index === allocationPath.length - 1 ? 'secondary' : 'ghost'}
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => handleBreadcrumbClick(index)}
+                            >
+                              {node.label}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </CardHeader>
                   <CardContent className="p-4">
-                    {allocationData.length === 0 ? (
+                    {allocationLoading ? (
                       <div className="flex h-[280px] items-center justify-center text-center text-sm text-muted-foreground">
-                        Nenhuma posição aberta para os filtros selecionados.
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Carregando alocação atual...
+                      </div>
+                    ) : allocationSelection.groups.length === 0 ? (
+                      <div className="flex h-[280px] items-center justify-center text-center text-sm text-muted-foreground">
+                        Nenhuma posição aberta na carteira atual.
                       </div>
                     ) : (
                       <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-1 2xl:grid-cols-[220px_minmax(0,1fr)]">
                         <ChartContainer config={{}} className="h-[220px] w-full aspect-auto">
                           <PieChart>
                             <ChartTooltip content={<AllocationTooltip hideValues={hideValues} />} />
-                            <Pie data={allocationData} dataKey="value" nameKey="asset_class" innerRadius={58} outerRadius={88} paddingAngle={2}>
-                              {allocationData.map((entry) => (
-                                <Cell key={entry.asset_class} fill={entry.color} />
+                            <Pie
+                              data={allocationPieData}
+                              dataKey="amount"
+                              nameKey="label"
+                              innerRadius={58}
+                              outerRadius={88}
+                              paddingAngle={2}
+                              onClick={(entry) => handleAllocationItemClick(entry?.payload || entry)}
+                              className="cursor-pointer"
+                            >
+                              {allocationPieData.map((entry) => (
+                                <Cell key={entry.key} fill={entry.color} className="cursor-pointer" />
                               ))}
                             </Pie>
                           </PieChart>
                         </ChartContainer>
-                        <div className="flex flex-col gap-2">
-                          {allocationData.map((row) => (
-                            <div key={row.asset_class} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border p-3">
+                        <div className="flex flex-col gap-1.5">
+                          <div className="text-xs text-muted-foreground">
+                            Clique em uma fatia ou item para abrir {allocationSelection.level.label.toLowerCase()}.
+                          </div>
+                          {allocationSelection.groups.map((row) => (
+                            <button
+                              key={row.key}
+                              type="button"
+                              className={cn(
+                                'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted/50',
+                                row.positions.length === allocationSelection.scopedPositions.length && allocationPath.length > 0 && 'border-primary/40 bg-muted/30'
+                              )}
+                              onClick={() => handleAllocationItemClick(row)}
+                            >
                               <div className="flex min-w-0 items-center gap-2">
                                 <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: row.color }} />
-                                <span className="truncate text-sm font-medium">{row.asset_class}</span>
-                                {row.uses_cost_fallback && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
+                                <span className="truncate text-sm font-medium">{row.label}</span>
+                                {row.uses_cost_fallback && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>Inclui valor de custo como fallback.</TooltipContent>
+                                  </Tooltip>
+                                )}
                               </div>
                               <div className="text-right">
                                 <div className="font-mono text-sm font-medium tabular-nums">
-                                  {row.market_value_supported ? formatCurrency(row.market_value, hideValues) : 'Sem valor de mercado'}
+                                  {row.market_value_supported ? formatCurrency(row.amount, hideValues) : 'Sem valor de mercado'}
                                 </div>
                                 <div className="text-xs text-muted-foreground">{formatPercent(row.weight_pct, hideValues)}</div>
                               </div>
-                            </div>
+                            </button>
                           ))}
                         </div>
                       </div>
@@ -723,27 +1037,94 @@ export default function Dashboard() {
 
                 <Card className="overflow-hidden">
                   <CardHeader className="border-b">
-                    <CardTitle className="text-base">Resultado Não Realizado por Classe</CardTitle>
+                    <div className="flex flex-col gap-1">
+                      <CardTitle className="text-base">Detalhamento da Seleção</CardTitle>
+                      <p className="text-xs text-muted-foreground">{allocationSelection.label}</p>
+                    </div>
                   </CardHeader>
                   <CardContent className="p-4">
-                    {resultByClassData.length === 0 ? (
+                    {allocationLoading ? (
                       <div className="flex h-[280px] items-center justify-center text-center text-sm text-muted-foreground">
-                        Nenhum resultado por classe para os filtros selecionados.
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Carregando detalhamento...
+                      </div>
+                    ) : allocationSelection.scopedPositions.length === 0 ? (
+                      <div className="flex h-[280px] items-center justify-center text-center text-sm text-muted-foreground">
+                        Nenhum ativo para a seleção atual.
                       </div>
                     ) : (
-                      <ChartContainer config={{ result: { label: 'Resultado não realizado', color: 'var(--chart-1)' } }} className="h-[280px] w-full aspect-auto">
-                        <BarChart data={resultByClassData} layout="vertical" margin={{ left: 12, right: 18, top: 8, bottom: 8 }}>
-                          <CartesianGrid horizontal={false} />
-                          <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
-                          <YAxis dataKey="asset_class" type="category" width={108} tickLine={false} axisLine={false} />
-                          <ChartTooltip content={<MoneyTooltip hideValues={hideValues} />} />
-                          <Bar name="Resultado não realizado" dataKey="unrealized" radius={4}>
-                            {resultByClassData.map((row) => (
-                              <Cell key={row.asset_class} fill={row.unrealized >= 0 ? 'var(--chart-2)' : 'var(--chart-5)'} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ChartContainer>
+                      <div className="flex flex-col gap-4">
+                        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+                          <div className="rounded-lg border p-3">
+                            <div className="text-xs text-muted-foreground">Total da seleção</div>
+                            <div className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatCurrency(allocationSelection.total, hideValues)}</div>
+                          </div>
+                          <div className="rounded-lg border p-3">
+                            <div className="text-xs text-muted-foreground">% da carteira</div>
+                            <div className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatPercent(allocationSelection.portfolioShare, hideValues)}</div>
+                          </div>
+                          <div className="rounded-lg border p-3">
+                            <div className="text-xs text-muted-foreground">Resultado não realizado</div>
+                            <div className={cn('mt-1 font-mono text-sm font-semibold tabular-nums', !hideValues && allocationResultTone)}>
+                              {formatSignedCurrency(allocationSelection.unrealized, hideValues)}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border p-3 lg:col-span-1">
+                            <div className="text-xs text-muted-foreground">Melhor ativo</div>
+                            <div className="mt-1 truncate text-sm font-medium">{bestAssetLabel}</div>
+                          </div>
+                          <div className="rounded-lg border p-3 lg:col-span-2">
+                            <div className="text-xs text-muted-foreground">Pior ativo</div>
+                            <div className="mt-1 truncate text-sm font-medium">{worstAssetLabel}</div>
+                          </div>
+                        </div>
+
+                        <div className="overflow-hidden rounded-lg border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Ativo</TableHead>
+                                <TableHead className="text-right">Valor de mercado</TableHead>
+                                <TableHead className="text-right">% da seleção</TableHead>
+                                <TableHead className="text-right">Resultado não realizado</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {allocationSelection.detailRows.map((row) => (
+                                <TableRow
+                                  key={row.key}
+                                  className={row.type === 'asset' ? 'cursor-pointer' : undefined}
+                                  onClick={() => {
+                                    if (row.type === 'asset') navigate(`/assets/${row.assetId}`);
+                                  }}
+                                >
+                                  <TableCell>
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      <span className="truncate font-medium">{row.label}</span>
+                                      {row.usesCostFallback && (
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                                          </TooltipTrigger>
+                                          <TooltipContent>Inclui valor de custo como fallback.</TooltipContent>
+                                        </Tooltip>
+                                      )}
+                                    </div>
+                                    {row.name && <div className="mt-0.5 truncate text-xs text-muted-foreground">{row.name}</div>}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono text-sm tabular-nums">
+                                    {row.marketValueSupported ? formatCurrency(row.marketValue, hideValues) : 'Sem valor de mercado'}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono text-sm tabular-nums">{formatPercent(row.share, hideValues)}</TableCell>
+                                  <TableCell className={cn('text-right font-mono text-sm tabular-nums', !hideValues && row.unrealized > 0 && 'text-emerald-500', !hideValues && row.unrealized < 0 && 'text-red-500')}>
+                                    {formatSignedCurrency(row.unrealized, hideValues)}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
                     )}
                   </CardContent>
                 </Card>

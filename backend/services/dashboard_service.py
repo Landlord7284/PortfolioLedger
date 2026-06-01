@@ -232,6 +232,9 @@ def _current_positions(
             p.realized_result,
             a.asset_class,
             a.name,
+            a.sector,
+            a.subsector,
+            a.segment,
             (
                 SELECT ticker
                 FROM asset_tickers t
@@ -450,6 +453,7 @@ def _build_current_snapshot(
     unsupported_count = 0
     unsupported_labels: list[str] = []
     supported_count = 0
+    current_positions = []
     by_class: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "market_value": ZERO,
@@ -467,27 +471,49 @@ def _build_current_snapshot(
         asset_class = position["asset_class"] or "Sem classe"
         cost = _d(position["total_cost"])
         label = position.get("current_ticker") or position.get("name") or f"Ativo #{asset_id}"
+        market_supported = _supports_market_value(asset_class)
+        market_value = ZERO
+        used_fallback = False
         cost_total += cost
         by_class[asset_class]["cost_basis"] += cost
 
-        if not _supports_market_value(asset_class):
+        if not market_supported:
             unsupported_count += 1
             unsupported_labels.append(label)
             by_class[asset_class]["market_value_supported"] = False
-            continue
+        else:
+            supported_count += 1
+            price = None if asset_class in FORCED_COST_FALLBACK_CLASSES else price_lookup.get((asset_id, latest_quote_month)) if latest_quote_month else None
+            market_value, used_fallback = _market_value_for_position(position, price)
 
-        supported_count += 1
-        price = None if asset_class in FORCED_COST_FALLBACK_CLASSES else price_lookup.get((asset_id, latest_quote_month)) if latest_quote_month else None
-        market_value, used_fallback = _market_value_for_position(position, price)
+            market_total += market_value
+            market_supported_cost_total += cost
+            by_class[asset_class]["market_value"] += market_value
+            if used_fallback:
+                fallback_count += 1
+                fallback_amount += market_value
+                by_class[asset_class]["uses_cost_fallback"] = True
+                missing_labels.append(label)
 
-        market_total += market_value
-        market_supported_cost_total += cost
-        by_class[asset_class]["market_value"] += market_value
-        if used_fallback:
-            fallback_count += 1
-            fallback_amount += market_value
-            by_class[asset_class]["uses_cost_fallback"] = True
-            missing_labels.append(label)
+        unrealized = market_value - cost if market_supported else ZERO
+        current_positions.append(
+            {
+                "asset_id": asset_id,
+                "asset_class": asset_class,
+                "current_ticker": position.get("current_ticker"),
+                "name": position.get("name"),
+                "sector": position.get("sector"),
+                "subsector": position.get("subsector"),
+                "segment": position.get("segment"),
+                "quantity": str(quantity),
+                "market_value": _money(market_value),
+                "cost_basis": _money(cost),
+                "unrealized_result": _money(unrealized),
+                "unrealized_result_pct": _percent((unrealized / cost * Decimal("100")) if cost and market_supported else ZERO),
+                "uses_cost_fallback": used_fallback,
+                "market_value_supported": market_supported,
+            }
+        )
 
     allocation = []
     result_by_class = []
@@ -531,6 +557,7 @@ def _build_current_snapshot(
         "summary_values": summary_values,
         "allocation": allocation,
         "result_by_class": result_by_class,
+        "current_positions": current_positions,
         "missing_labels": missing_labels,
         "fallback_amount": fallback_amount,
         "fallback_count": fallback_count,
@@ -705,6 +732,7 @@ def get_dashboard(
         "equity_curve": equity_curve,
         "allocation": snapshot["allocation"],
         "result_by_class": snapshot["result_by_class"],
+        "current_positions": snapshot["current_positions"],
         "income_series": income_series,
         "operational_alerts": {
             "missing_recent_quotes_count": snapshot["fallback_count"],

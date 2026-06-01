@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { assets as assetsApi, b3 as b3Api } from '../api/client';
-import AssetMetadataCard, { getMissingAssetMetadata } from '../components/AssetMetadataCard';
+import AssetMetadataCard, { buildAssetMetadataSuggestions, getMissingAssetMetadata } from '../components/AssetMetadataCard';
 import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, Check, ChevronsUpDown, ExternalLink, GitMerge, Loader2, Search, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -329,6 +329,8 @@ export default function AssetManagement() {
       .map(({ asset }) => asset);
   }, [filtered, sort]);
 
+  const metadataSuggestions = useMemo(() => buildAssetMetadataSuggestions(assetList), [assetList]);
+
   const mergeOptions = assetList.filter((asset) => (
     selectedAsset &&
     asset.id !== selectedAsset.id &&
@@ -509,7 +511,7 @@ export default function AssetManagement() {
               </DialogHeader>
 
               <div className="space-y-5">
-                <AssetMetadataCard asset={selectedAsset} onSave={saveAssetMetadata} />
+                <AssetMetadataCard asset={selectedAsset} onSave={saveAssetMetadata} metadataSuggestions={metadataSuggestions} />
 
                 <div className="rounded-lg border">
                   <div className="border-b px-3 py-2 text-sm font-medium">Histórico de Tickers</div>

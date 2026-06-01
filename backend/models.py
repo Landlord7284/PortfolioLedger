@@ -802,6 +802,23 @@ class DashboardResultByClassRow(BaseModel):
     market_value_supported: bool = True
 
 
+class DashboardPositionRow(BaseModel):
+    asset_id: int
+    asset_class: str
+    current_ticker: Optional[str] = None
+    name: Optional[str] = None
+    sector: Optional[str] = None
+    subsector: Optional[str] = None
+    segment: Optional[str] = None
+    quantity: str
+    market_value: str
+    cost_basis: str
+    unrealized_result: str
+    unrealized_result_pct: str
+    uses_cost_fallback: bool = False
+    market_value_supported: bool = True
+
+
 class DashboardIncomePoint(BaseModel):
     year_month: str
     amount: str
@@ -836,6 +853,7 @@ class DashboardResponse(BaseModel):
     equity_curve: list[DashboardEquityPoint]
     allocation: list[DashboardAllocationRow]
     result_by_class: list[DashboardResultByClassRow]
+    current_positions: list[DashboardPositionRow]
     income_series: list[DashboardIncomePoint]
     operational_alerts: DashboardOperationalAlerts
 

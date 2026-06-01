@@ -141,6 +141,15 @@ def _xlsx_decimal(value: str) -> Decimal:
     return Decimal(value)
 
 
+def _format_cnpj(value: str | None) -> str | None:
+    digits = re.sub(r"\D", "", value or "")
+    if not digits:
+        return None
+    if len(digits) != 14:
+        return value
+    return f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/{digits[8:12]}-{digits[12:]}"
+
+
 def fiscal_report_filename(year: int, portfolio_name: str) -> str:
     normalized = unicodedata.normalize("NFKD", portfolio_name or "")
     ascii_name = normalized.encode("ascii", "ignore").decode("ascii").lower()
@@ -378,7 +387,7 @@ def list_income_report(conn: sqlite3.Connection, portfolio_id: int, year: int) -
         row = {
             "id": _income_row_id(table_key, income_type, asset_id, ticker),
             "ticker": ticker or None,
-            "payer_cnpj": payer_cnpj or None,
+            "payer_cnpj": _format_cnpj(payer_cnpj),
             "payer_name": payer_name or None,
             "income_type": income_type,
             "value": _money(value),
@@ -489,7 +498,7 @@ def list_assets_and_rights(conn: sqlite3.Connection, portfolio_id: int, year: in
                 "ticker": first["current_ticker"],
                 "quantity": _quantity(current_state.quantity),
                 "name": first["name"],
-                "cnpj": first["cnpj"],
+                "cnpj": _format_cnpj(first["cnpj"]),
                 "previous_year_cost": _money(previous_state.total_cost),
                 "current_year_cost": _money(current_state.total_cost),
             }

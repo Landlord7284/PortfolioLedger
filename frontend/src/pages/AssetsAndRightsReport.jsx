@@ -3,7 +3,7 @@ import { Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppContext } from '../App';
 import { reports as reportsApi } from '../api/client';
-import { formatMoney, formatQuantity } from '@/lib/formatters';
+import { formatCnpj, formatMoney, formatQuantity } from '@/lib/formatters';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -286,7 +286,7 @@ export default function AssetsAndRightsReport() {
                           {formatQuantity(row.quantity, row.asset_class, hideValues)}
                         </TableCell>
                         <TableCell className="min-w-[180px]">{row.name || '-'}</TableCell>
-                        <TableCell className="font-mono text-sm text-muted-foreground">{row.cnpj || '-'}</TableCell>
+                        <TableCell className="font-mono text-sm text-muted-foreground">{formatCnpj(row.cnpj) || '-'}</TableCell>
                         <TableCell className="text-right font-mono text-sm">
                           {formatMoney(row.previous_year_cost, hideValues)}
                         </TableCell>

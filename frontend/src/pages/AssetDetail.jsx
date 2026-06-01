@@ -1,9 +1,9 @@
-import { useState, useEffect, useContext, useCallback } from 'react';
+import { useState, useEffect, useContext, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { assets as assetsApi, events as eventsApi, positions as posApi } from '../api/client';
 import EventForm from '../components/EventForm';
-import SharedAssetMetadataCard from '../components/AssetMetadataCard';
+import SharedAssetMetadataCard, { buildAssetMetadataSuggestions } from '../components/AssetMetadataCard';
 import { ArrowLeft, Edit2, Check, X, Plus, Trash2, AlertCircle, HelpCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -166,6 +166,7 @@ export default function AssetDetail() {
   const navigate = useNavigate();
 
   const [asset, setAsset] = useState(null);
+  const [metadataAssetList, setMetadataAssetList] = useState([]);
   const [position, setPosition] = useState(null);
   const [eventList, setEventList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -181,12 +182,17 @@ export default function AssetDetail() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, evts] = await Promise.all([
+      const [a, evts, metadataAssets] = await Promise.all([
         assetsApi.get(assetId),
         eventsApi.list({ assetId, portfolioId: activePortfolioId }),
+        assetsApi.list().catch((listErr) => {
+          console.error(listErr);
+          return [];
+        }),
       ]);
       setAsset(a);
       setEventList(evts);
+      setMetadataAssetList(metadataAssets);
 
       try {
         const pos = await posApi.get(activePortfolioId, assetId);
@@ -205,6 +211,8 @@ export default function AssetDetail() {
   useEffect(() => {
     if (activePortfolioId) load();
   }, [activePortfolioId, load]);
+
+  const metadataSuggestions = useMemo(() => buildAssetMetadataSuggestions(metadataAssetList), [metadataAssetList]);
 
   const displayError = (msg) => {
     setError(msg);
@@ -378,6 +386,7 @@ export default function AssetDetail() {
       <SharedAssetMetadataCard
         asset={asset}
         onSave={(data) => assetsApi.updateMetadata(asset.id, data).then(setAsset)}
+        metadataSuggestions={metadataSuggestions}
       />
 
       {position && (

@@ -3,7 +3,7 @@ import { Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppContext } from '../App';
 import { reports as reportsApi } from '../api/client';
-import { formatMoney } from '@/lib/formatters';
+import { formatCnpj, formatMoney } from '@/lib/formatters';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -80,7 +80,7 @@ function IncomeTable({ table, markedRows, onToggle, hideValues }) {
                         />
                       </TableCell>
                       <TableCell className="font-medium">{row.ticker || '-'}</TableCell>
-                      <TableCell className="font-mono text-sm text-muted-foreground">{row.payer_cnpj || '-'}</TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground">{formatCnpj(row.payer_cnpj) || '-'}</TableCell>
                       <TableCell className="min-w-[240px]">{row.payer_name || '-'}</TableCell>
                       <TableCell className="text-muted-foreground">{row.income_type}</TableCell>
                       <TableCell className="text-right font-mono text-sm">

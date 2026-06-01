@@ -65,8 +65,17 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
 
     with get_db(db_path) as conn:
         portfolio = portfolio_service.create_portfolio(conn, "Principal")
-        stock = asset_service.create_asset(conn, AssetClass.ACAO.value, "ITSA4", market="BR", name="Itausa")
-        fii = asset_service.create_asset(conn, AssetClass.FII.value, "KNRI11", market="BR", name="Kinea")
+        stock = asset_service.create_asset(
+            conn,
+            AssetClass.ACAO.value,
+            "ITSA4",
+            market="BR",
+            name="Itausa",
+            sector="Financeiro",
+            subsector="Bancos",
+            segment="Banco",
+        )
+        fii = asset_service.create_asset(conn, AssetClass.FII.value, "KNRI11", market="BR", name="Kinea", segment="Logística")
 
         event_service.create_event(conn, portfolio["id"], stock["id"], EventType.COMPRA.value, "2025-01-10", "100", "1000")
         event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2025-02-10", "10", "900")
@@ -91,6 +100,16 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
     assert report["summary"]["market_value_uses_cost_fallback"] is True
     assert report["summary"]["market_value_cost_fallback_count"] == 1
     assert report["operational_alerts"]["missing_recent_quotes_summary"] == ["KNRI11"]
+    current_positions = {position["current_ticker"]: position for position in report["current_positions"]}
+    assert current_positions["ITSA4"]["sector"] == "Financeiro"
+    assert current_positions["ITSA4"]["subsector"] == "Bancos"
+    assert current_positions["ITSA4"]["segment"] == "Banco"
+    assert current_positions["ITSA4"]["market_value"] == "720.00"
+    assert current_positions["ITSA4"]["unrealized_result"] == "120.00"
+    assert current_positions["ITSA4"]["uses_cost_fallback"] is False
+    assert current_positions["KNRI11"]["segment"] == "Logística"
+    assert current_positions["KNRI11"]["market_value"] == "900.00"
+    assert current_positions["KNRI11"]["uses_cost_fallback"] is True
 
     may = report["equity_curve"][-1]
     assert may["year_month"] == "2026-05"
@@ -115,6 +134,7 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
             "market_value_supported": True,
         }
     ]
+    assert [position["asset_class"] for position in stock_only["current_positions"]] == [AssetClass.ACAO.value]
 
 
 def test_dashboard_uses_consolidated_b3_value_for_non_unit_prices(tmp_path, monkeypatch):

@@ -58,6 +58,33 @@ def test_asset_service_persists_fiscal_fields_on_create_update_and_response(tmp_
         assert asset_service.get_asset(conn, asset["id"])["fiscal_tax_treatment"] == "TAXABLE"
 
 
+def test_asset_service_normalizes_cnpj_on_create_update_and_response(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        asset = asset_service.create_asset(
+            conn,
+            AssetClass.ACAO.value,
+            "XPTO3",
+            market="BR",
+            cnpj="00.000.000/0001-00",
+        )
+        assert asset["cnpj"] == "00000000000100"
+
+        updated = asset_service.update_asset_metadata(
+            conn,
+            asset["id"],
+            cnpj="11.111.111/0001-11",
+        )
+
+        assert updated["cnpj"] == "11111111000111"
+        assert asset_service.get_asset(conn, asset["id"])["cnpj"] == "11111111000111"
+
+        with pytest.raises(ValueError, match="CNPJ"):
+            asset_service.update_asset_metadata(conn, asset["id"], cnpj="123")
+
+
 def test_asset_api_contract_exposes_fiscal_fields_on_create_get_and_patch(tmp_path, monkeypatch):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)

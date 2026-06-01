@@ -7,9 +7,15 @@ import { DatePicker } from '@/components/ui/date-picker';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
+import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/command';
+import { formatCnpj, normalizeCnpj } from '@/lib/formatters';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 const AUTO_VALUE = '__auto__';
+const CLASSIFICATION_FIELDS = ['sector', 'subsector', 'segment'];
+const AUTOCOMPLETE_METADATA_FIELDS = new Set(CLASSIFICATION_FIELDS);
 
 const FISCAL_REGIME_OPTIONS = [
   { value: 'B3_COMMON_15', label: 'B3 - Operacoes comuns 15%' },
@@ -83,6 +89,140 @@ function getEditableFields(assetClass) {
   ];
 }
 
+function getUniqueFieldValues(assets, fieldName) {
+  const seen = new Set();
+  return (assets || [])
+    .map((item) => String(item?.[fieldName] || '').trim())
+    .filter((value) => {
+      if (!value) return false;
+      const key = value.toLocaleLowerCase('pt-BR');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+}
+
+export function buildAssetMetadataSuggestions(assets = []) {
+  return Object.fromEntries(
+    CLASSIFICATION_FIELDS.map((fieldName) => [fieldName, getUniqueFieldValues(assets, fieldName)])
+  );
+}
+
+function MetadataAutocompleteInput({ name, value, suggestions = [], onValueChange }) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const normalizedValue = String(value || '').trim().toLocaleLowerCase('pt-BR');
+  const filteredSuggestions = suggestions
+    .filter((option) => {
+      const normalizedOption = option.toLocaleLowerCase('pt-BR');
+      return normalizedOption !== normalizedValue && normalizedOption.includes(normalizedValue);
+    })
+    .slice(0, 8);
+  const showSuggestions = open && filteredSuggestions.length > 0;
+  const activeSuggestion = filteredSuggestions[activeIndex] || filteredSuggestions[0];
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [normalizedValue, suggestions]);
+
+  const applySuggestion = (suggestion) => {
+    if (!suggestion) return;
+    onValueChange(name, suggestion);
+    setOpen(false);
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'ArrowDown') {
+      if (filteredSuggestions.length === 0) return;
+      event.preventDefault();
+      if (!showSuggestions) {
+        setOpen(true);
+        setActiveIndex(0);
+        return;
+      }
+      setActiveIndex((current) => (current + 1) % filteredSuggestions.length);
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      if (filteredSuggestions.length === 0) return;
+      event.preventDefault();
+      if (!showSuggestions) {
+        setOpen(true);
+        setActiveIndex(filteredSuggestions.length - 1);
+        return;
+      }
+      setActiveIndex((current) => (current - 1 + filteredSuggestions.length) % filteredSuggestions.length);
+      return;
+    }
+
+    if (event.key === 'Enter' && showSuggestions) {
+      event.preventDefault();
+      applySuggestion(activeSuggestion);
+      return;
+    }
+
+    if (event.key === 'Tab' && showSuggestions) {
+      applySuggestion(activeSuggestion);
+      return;
+    }
+
+    if (event.key === 'Escape' && showSuggestions) {
+      event.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  return (
+    <Popover open={showSuggestions} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <Input
+          className="h-9 text-sm"
+          name={name}
+          value={value}
+          onChange={(event) => {
+            onValueChange(name, event.target.value);
+            setOpen(true);
+          }}
+          onClick={() => setOpen(true)}
+          onFocus={() => setOpen(true)}
+          onKeyDown={handleKeyDown}
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={showSuggestions}
+        />
+      </PopoverAnchor>
+      <PopoverContent
+        className="w-[var(--radix-popover-trigger-width)] min-w-[220px] p-0"
+        align="start"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <Command shouldFilter={false}>
+          <CommandList className="max-h-52 overflow-y-auto">
+            <CommandGroup>
+              {filteredSuggestions.map((option, index) => (
+                <CommandItem
+                  key={option}
+                  value={option}
+                  className={cn(index === activeIndex && 'bg-accent text-accent-foreground')}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onSelect={() => {
+                    applySuggestion(option);
+                  }}
+                >
+                  {option}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function getMissingAssetMetadata(asset) {
   if (!asset) return [];
   return getMetadataFields(asset.asset_class).filter((field) => {
@@ -91,7 +231,7 @@ export function getMissingAssetMetadata(asset) {
   });
 }
 
-export default function AssetMetadataCard({ asset, onSave }) {
+export default function AssetMetadataCard({ asset, onSave, metadataSuggestions = {} }) {
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState({});
   const [saving, setSaving] = useState(false);
@@ -101,7 +241,7 @@ export default function AssetMetadataCard({ asset, onSave }) {
     if (asset) {
       setFormData({
         name: asset.name || '',
-        cnpj: asset.cnpj || '',
+        cnpj: formatCnpj(asset.cnpj),
         isin: asset.isin || '',
         sector: asset.sector || '',
         subsector: asset.subsector || '',
@@ -120,6 +260,10 @@ export default function AssetMetadataCard({ asset, onSave }) {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+    setFormData({ ...formData, [name]: name === 'cnpj' ? formatCnpj(value) : value });
+  };
+
+  const handleTextChange = (name, value) => {
     setFormData({ ...formData, [name]: value });
   };
 
@@ -135,7 +279,11 @@ export default function AssetMetadataCard({ asset, onSave }) {
     setSaving(true);
     setSaveError('');
     try {
-      await onSave({ ...formData });
+      const payload = { ...formData, cnpj: normalizeCnpj(formData.cnpj) };
+      if (payload.cnpj && payload.cnpj.length !== 14) {
+        throw new Error('CNPJ deve ter 14 dígitos.');
+      }
+      await onSave(payload);
       setEditing(false);
       toast.success('Informações cadastrais atualizadas.');
     } catch (err) {
@@ -158,6 +306,9 @@ export default function AssetMetadataCard({ asset, onSave }) {
     }
     if (field.type === 'select') {
       return field.options.find((option) => option.value === asset[field.name])?.label || field.placeholder;
+    }
+    if (field.name === 'cnpj') {
+      return formatCnpj(asset[field.name]) || '—';
     }
     return asset[field.name] || '—';
   };
@@ -211,12 +362,21 @@ export default function AssetMetadataCard({ asset, onSave }) {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                ) : AUTOCOMPLETE_METADATA_FIELDS.has(field.name) ? (
+                  <MetadataAutocompleteInput
+                    name={field.name}
+                    value={formData[field.name]}
+                    suggestions={metadataSuggestions[field.name] || []}
+                    onValueChange={handleTextChange}
+                  />
                 ) : (
                   <Input
                     className="h-9 text-sm"
                     name={field.name}
                     value={formData[field.name]}
                     onChange={handleChange}
+                    inputMode={field.name === 'cnpj' ? 'numeric' : undefined}
+                    maxLength={field.name === 'cnpj' ? 18 : undefined}
                   />
                 )
               ) : (

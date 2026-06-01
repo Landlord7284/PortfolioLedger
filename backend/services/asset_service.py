@@ -20,6 +20,17 @@ def _normalize_ticker(ticker: str) -> str:
     return ticker.strip().upper()
 
 
+def _normalize_cnpj(cnpj: Optional[str]) -> Optional[str]:
+    if cnpj is None:
+        return None
+    digits = "".join(ch for ch in str(cnpj) if ch.isdigit())
+    if not digits:
+        return ""
+    if len(digits) != 14:
+        raise ValueError("CNPJ deve ter 14 dígitos.")
+    return digits
+
+
 def _resolve_market(asset_class: str, market: Optional[str], ticker: Optional[str] = None, source: str = "manual") -> str | None:
     forced = default_market_for_class(asset_class)
     if forced:
@@ -256,6 +267,7 @@ def create_asset(
     allow_probable: bool = False,
 ) -> dict:
     ac = AssetClass(asset_class)
+    normalized_cnpj = _normalize_cnpj(cnpj)
     require_supported_capital_gain_regime(fiscal_regime_override)
     if currency:
         Currency(currency)
@@ -307,7 +319,7 @@ def create_asset(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (ac.value, resolved_market, resolved_currency, maturity_date, aux_id,
-         name, cnpj, isin, sector, subsector, segment,
+         name, normalized_cnpj, isin, sector, subsector, segment,
          fiscal_regime_override, fiscal_tax_treatment),
     )
     asset_id = cur.lastrowid
@@ -418,6 +430,7 @@ def update_asset_metadata(
     if not current:
         return None
     require_supported_capital_gain_regime(fiscal_regime_override)
+    normalized_cnpj = _normalize_cnpj(cnpj)
 
     next_class = AssetClass(asset_class).value if asset_class is not None else current["asset_class"]
     next_market = _resolve_market(next_class, market if market is not None else current["market"], ticker or current.get("current_ticker"), "manual")
@@ -435,7 +448,7 @@ def update_asset_metadata(
         ("asset_class", next_class if asset_class is not None else None),
         ("name", name),
         ("maturity_date", maturity_date),
-        ("cnpj", cnpj),
+        ("cnpj", normalized_cnpj),
         ("isin", isin),
         ("sector", sector),
         ("subsector", subsector),
