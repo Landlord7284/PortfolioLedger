@@ -1,5 +1,5 @@
 import * as React from "react"
-import { format } from "date-fns"
+import { addDays, format } from "date-fns"
 import { Calendar as CalendarIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -46,13 +46,29 @@ function parseInputDate(value) {
   return date;
 }
 
-export function DatePicker({ value, onChange, disabled }) {
+export function DatePicker({ value, onChange, disabled, presets = [] }) {
   const date = value ? new Date(`${value}T12:00:00`) : undefined;
   const formattedValue = formatInputValue(value);
   const [inputValue, setInputValue] = React.useState(formattedValue);
   const [isEditing, setIsEditing] = React.useState(false);
   const [open, setOpen] = React.useState(false);
+  const [currentMonth, setCurrentMonth] = React.useState(() => date || new Date());
   const displayedValue = isEditing ? inputValue : formattedValue;
+
+  const selectDate = (nextDate) => {
+    const nextValue = format(nextDate, "yyyy-MM-dd");
+    setInputValue(format(nextDate, "dd/MM/yyyy"));
+    setCurrentMonth(new Date(nextDate.getFullYear(), nextDate.getMonth(), 1));
+    onChange(nextValue);
+    setOpen(false);
+  };
+
+  const handleOpenChange = (nextOpen) => {
+    if (nextOpen) {
+      setCurrentMonth(date || new Date());
+    }
+    setOpen(nextOpen);
+  };
 
   const handleInputChange = (event) => {
     const nextValue = maskDateInput(event.target.value);
@@ -66,6 +82,7 @@ export function DatePicker({ value, onChange, disabled }) {
     if (nextValue.length === 10) {
       const parsedDate = parseInputDate(nextValue);
       if (parsedDate) {
+        setCurrentMonth(new Date(parsedDate.getFullYear(), parsedDate.getMonth(), 1));
         onChange(format(parsedDate, "yyyy-MM-dd"));
       }
     }
@@ -93,7 +110,7 @@ export function DatePicker({ value, onChange, disabled }) {
         maxLength={10}
         className="h-9 pr-9 bg-transparent"
       />
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
           <Button
             type="button"
@@ -113,12 +130,11 @@ export function DatePicker({ value, onChange, disabled }) {
           <Calendar
             mode="single"
             selected={date}
+            month={currentMonth}
+            onMonthChange={setCurrentMonth}
             onSelect={(d) => {
               if (d) {
-                const nextValue = format(d, "yyyy-MM-dd");
-                setInputValue(format(d, "dd/MM/yyyy"));
-                onChange(nextValue);
-                setOpen(false);
+                selectDate(d);
               } else {
                 setInputValue("");
                 onChange("");
@@ -126,6 +142,22 @@ export function DatePicker({ value, onChange, disabled }) {
             }}
             initialFocus
           />
+          {presets.length > 0 && (
+            <div className="flex flex-wrap gap-2 border-t p-3">
+              {presets.map((preset) => (
+                <Button
+                  key={preset.value}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => selectDate(addDays(new Date(), preset.value))}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </div>
+          )}
         </PopoverContent>
       </Popover>
     </div>

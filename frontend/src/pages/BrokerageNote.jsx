@@ -27,6 +27,11 @@ const emptyOperation = () => ({
   gross_value: '',
 });
 
+const NOTE_DATE_PRESETS = [
+  { label: 'Ontem', value: -1 },
+  { label: 'Hoje', value: 0 },
+];
+
 export default function BrokerageNote() {
   const { activePortfolioId } = useContext(AppContext);
   const today = new Date().toISOString().slice(0, 10);
@@ -127,7 +132,7 @@ export default function BrokerageNote() {
         <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="space-y-1.5">
             <Label className="text-xs font-medium uppercase text-muted-foreground">Data</Label>
-            <DatePicker value={noteDate} onChange={(v) => { setNoteDate(v); setCalculation(null); }} />
+            <DatePicker value={noteDate} onChange={(v) => { setNoteDate(v); setCalculation(null); }} presets={NOTE_DATE_PRESETS} />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-medium uppercase text-muted-foreground">D/C</Label>
