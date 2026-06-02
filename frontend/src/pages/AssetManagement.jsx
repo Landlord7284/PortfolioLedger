@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { assets as assetsApi, b3 as b3Api } from '../api/client';
@@ -17,6 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Kbd } from '@/components/ui/kbd';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
@@ -182,6 +183,7 @@ export default function AssetManagement() {
   const [sanitizeConfirm, setSanitizeConfirm] = useState('');
   const [sanitizing, setSanitizing] = useState(false);
   const navigate = useNavigate();
+  const searchInputRef = useRef(null);
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
 
   const load = useCallback(async () => {
@@ -203,6 +205,31 @@ export default function AssetManagement() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (event) => {
+      const target = event.target;
+      const isEditing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName) || target?.isContentEditable;
+
+      if (
+        event.key !== '/'
+        || event.ctrlKey
+        || event.metaKey
+        || event.altKey
+        || isEditing
+        || selectedAsset
+        || sanitizeOpen
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [selectedAsset, sanitizeOpen]);
 
   const openAsset = async (asset) => {
     setSelectedAsset(asset);
@@ -356,7 +383,10 @@ export default function AssetManagement() {
         <div className="flex w-full flex-wrap items-center gap-3 md:w-auto md:justify-end">
           <div className="relative w-full sm:w-auto">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input className="pl-8 w-full sm:w-[280px]" placeholder="Buscar ticker, nome ou id..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            <Input ref={searchInputRef} className="w-full pl-8 pr-12 sm:w-[280px]" placeholder="Buscar ticker, nome ou id..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
+              <Kbd>/</Kbd>
+            </div>
           </div>
           <Button
             variant="destructive"
