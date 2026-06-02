@@ -377,14 +377,14 @@ export default function Proventos() {
           <p className="mt-1 text-sm text-muted-foreground">{activePortfolio?.name || 'Carteira ativa'}</p>
         </div>
 
-        <div className="flex flex-wrap gap-2" aria-label="Periodo">
+        <div className="flex flex-wrap gap-1.5" aria-label="Periodo">
           {PERIOD_OPTIONS.map((option) => (
             <Button
               key={option.value}
               type="button"
               variant={period === option.value ? 'default' : 'outline'}
               size="sm"
-              className="h-8 rounded-full px-3"
+              className="text-sm"
               onClick={() => handlePeriodChange(option.value)}
             >
               {option.label}
@@ -431,7 +431,7 @@ export default function Proventos() {
         <CardHeader className="border-b">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <CardTitle className="text-base">Proventos mensais</CardTitle>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-sm font-medium">Agrupar por:</span>
               {CHART_GROUP_OPTIONS.map((option) => (
                 <Button
@@ -439,7 +439,7 @@ export default function Proventos() {
                   type="button"
                   variant={chartGroupBy === option.value ? 'default' : 'outline'}
                   size="sm"
-                  className="h-8 rounded-full px-3"
+                  className="text-sm"
                   onClick={() => setProventosFilters((current) => ({ ...current, chartGroupBy: option.value }))}
                 >
                   {option.label}

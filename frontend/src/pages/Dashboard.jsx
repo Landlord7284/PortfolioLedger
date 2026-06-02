@@ -995,14 +995,14 @@ export default function Dashboard() {
                 ))}
               </div>
             )}
-            <div className="flex flex-wrap gap-2 lg:ml-auto lg:justify-end" aria-label="Período do Dashboard">
+            <div className="flex flex-wrap gap-1.5 lg:ml-auto lg:justify-end" aria-label="Período do Dashboard">
               {PERIOD_OPTIONS.map((option) => (
                 <Button
                   key={option.value}
                   type="button"
                   variant={dashboardPeriod === option.value ? 'default' : 'outline'}
                   size="sm"
-                  className="h-8 rounded-full px-3"
+                  className="text-sm"
                   onClick={() => setDashboardFilters((current) => ({ ...current, period: option.value }))}
                 >
                   {option.label}
