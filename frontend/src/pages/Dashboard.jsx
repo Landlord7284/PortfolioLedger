@@ -797,12 +797,6 @@ export default function Dashboard() {
     const sortedAssets = [...scopedPositions].sort((a, b) => (
       toNumber(b.market_value) - toNumber(a.market_value) || compareText(getAssetLabel(a), getAssetLabel(b))
     ));
-    const bestAsset = sortedAssets.length
-      ? [...sortedAssets].sort((a, b) => toNumber(b.unrealized_result) - toNumber(a.unrealized_result))[0]
-      : null;
-    const worstAsset = sortedAssets.length
-      ? [...sortedAssets].sort((a, b) => toNumber(a.unrealized_result) - toNumber(b.unrealized_result))[0]
-      : null;
     const topAssets = sortedAssets.slice(0, DETAIL_ASSET_LIMIT);
     const remainingAssets = sortedAssets.slice(DETAIL_ASSET_LIMIT);
     const detailRows = topAssets.map((position) => ({
@@ -833,14 +827,21 @@ export default function Dashboard() {
       });
     }
 
+    const buildAllocationHighlight = (position) => position ? ({
+      label: getAssetLabel(position),
+      share: total > 0 ? (toNumber(position.market_value) / total) * 100 : 0,
+    }) : null;
+
     return {
       scopedPositions,
       level,
       groups,
       total,
       unrealized,
-      bestAsset,
-      worstAsset,
+      largestAllocation: buildAllocationHighlight(sortedAssets[0]),
+      smallestAllocation: buildAllocationHighlight([...sortedAssets].sort((a, b) => (
+        toNumber(a.market_value) - toNumber(b.market_value) || compareText(getAssetLabel(a), getAssetLabel(b))
+      ))[0]),
       detailRows,
       label: getBreadcrumbLabel(allocationPath),
       portfolioShare: portfolioMarketTotal > 0 ? (total / portfolioMarketTotal) * 100 : 0,
@@ -867,11 +868,11 @@ export default function Dashboard() {
     : 'No período selecionado';
   const allocationLoading = portfolioDashboardLoading && !portfolioStructureData;
   const allocationResultTone = allocationSelection.unrealized > 0 ? 'text-emerald-500' : allocationSelection.unrealized < 0 ? 'text-red-500' : 'text-foreground';
-  const bestAssetLabel = allocationSelection.bestAsset
-    ? `${getAssetLabel(allocationSelection.bestAsset)} (${formatSignedCurrency(allocationSelection.bestAsset.unrealized_result, hideValues)})`
+  const largestAllocationLabel = allocationSelection.largestAllocation
+    ? `${allocationSelection.largestAllocation.label} (${formatPercent(allocationSelection.largestAllocation.share, hideValues)})`
     : '—';
-  const worstAssetLabel = allocationSelection.worstAsset
-    ? `${getAssetLabel(allocationSelection.worstAsset)} (${formatSignedCurrency(allocationSelection.worstAsset.unrealized_result, hideValues)})`
+  const smallestAllocationLabel = allocationSelection.smallestAllocation
+    ? `${allocationSelection.smallestAllocation.label} (${formatPercent(allocationSelection.smallestAllocation.share, hideValues)})`
     : '—';
   const allocationPieData = allocationSelection.groups.filter((row) => row.amount > 0 && row.market_value_supported);
 
@@ -1225,39 +1226,14 @@ export default function Dashboard() {
                       </div>
                     ) : (
                       <div className="flex flex-col gap-4">
-                        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-                          <div className="rounded-lg border p-3">
-                            <div className="text-xs text-muted-foreground">Total da seleção</div>
-                            <div className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatCurrency(allocationSelection.total, hideValues)}</div>
-                          </div>
-                          <div className="rounded-lg border p-3">
-                            <div className="text-xs text-muted-foreground">% da carteira</div>
-                            <div className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatPercent(allocationSelection.portfolioShare, hideValues)}</div>
-                          </div>
-                          <div className="rounded-lg border p-3">
-                            <div className="text-xs text-muted-foreground">Resultado não realizado</div>
-                            <div className={cn('mt-1 font-mono text-sm font-semibold tabular-nums', !hideValues && allocationResultTone)}>
-                              {formatSignedCurrency(allocationSelection.unrealized, hideValues)}
-                            </div>
-                          </div>
-                          <div className="rounded-lg border p-3 lg:col-span-1">
-                            <div className="text-xs text-muted-foreground">Melhor ativo</div>
-                            <div className="mt-1 truncate text-sm font-medium">{bestAssetLabel}</div>
-                          </div>
-                          <div className="rounded-lg border p-3 lg:col-span-2">
-                            <div className="text-xs text-muted-foreground">Pior ativo</div>
-                            <div className="mt-1 truncate text-sm font-medium">{worstAssetLabel}</div>
-                          </div>
-                        </div>
-
                         <div className="overflow-hidden rounded-lg border">
                           <Table>
                             <TableHeader>
                               <TableRow>
-                                <TableHead>Ativo</TableHead>
+                                <TableHead className="w-[220px] max-w-[220px]">Ativo</TableHead>
                                 <TableHead className="text-right">Valor de mercado</TableHead>
-                                <TableHead className="text-right">% da seleção</TableHead>
-                                <TableHead className="text-right">Resultado não realizado</TableHead>
+                                <TableHead className="text-right">%</TableHead>
+                                <TableHead className="text-right">Resultado Aberto</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -1269,13 +1245,13 @@ export default function Dashboard() {
                                     if (row.type === 'asset') navigate(`/assets/${row.assetId}`);
                                   }}
                                 >
-                                  <TableCell>
+                                  <TableCell className="w-[220px] max-w-[220px]">
                                     <div className="flex min-w-0 items-center gap-2">
-                                      <span className="truncate font-medium">{row.label}</span>
+                                      <span className="min-w-0 truncate font-medium">{row.label}</span>
                                       {row.usesCostFallback && (
                                         <Tooltip>
                                           <TooltipTrigger asChild>
-                                            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                                            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
                                           </TooltipTrigger>
                                           <TooltipContent>Inclui valor de custo como fallback.</TooltipContent>
                                         </Tooltip>
@@ -1294,6 +1270,31 @@ export default function Dashboard() {
                               ))}
                             </TableBody>
                           </Table>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+                          <div className="rounded-lg border p-3">
+                            <div className="text-xs text-muted-foreground">Total da seleção</div>
+                            <div className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatCurrency(allocationSelection.total, hideValues)}</div>
+                          </div>
+                          <div className="rounded-lg border p-3">
+                            <div className="text-xs text-muted-foreground">% da carteira</div>
+                            <div className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatPercent(allocationSelection.portfolioShare, hideValues)}</div>
+                          </div>
+                          <div className="rounded-lg border p-3">
+                            <div className="text-xs text-muted-foreground">Resultado Aberto</div>
+                            <div className={cn('mt-1 font-mono text-sm font-semibold tabular-nums', !hideValues && allocationResultTone)}>
+                              {formatSignedCurrency(allocationSelection.unrealized, hideValues)}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border p-3 lg:col-span-1">
+                            <div className="text-xs text-muted-foreground">Maior Alocação</div>
+                            <div className="mt-1 truncate text-sm font-medium">{largestAllocationLabel}</div>
+                          </div>
+                          <div className="rounded-lg border p-3 lg:col-span-2">
+                            <div className="text-xs text-muted-foreground">Menor Alocação</div>
+                            <div className="mt-1 truncate text-sm font-medium">{smallestAllocationLabel}</div>
+                          </div>
                         </div>
                       </div>
                     )}
