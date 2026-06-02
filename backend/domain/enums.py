@@ -105,6 +105,12 @@ class Currency(str, Enum):
     USD = "USD"
 
 
+class ReitType(str, Enum):
+    EQUITY = "Equity"
+    MORTGAGE = "Mortgage"
+    HYBRID = "Hybrid"
+
+
 class TreasuryIndexer(str, Enum):
     SELIC = "SELIC"
     IPCA = "IPCA"
@@ -114,6 +120,29 @@ class TreasuryIndexer(str, Enum):
 class Market(str, Enum):
     BR = "BR"
     US = "US"
+
+
+class AssetMatchReviewStatus(str, Enum):
+    PENDING = "pending"
+    RESOLVED = "resolved"
+
+
+class B3MonthlyImportStatus(str, Enum):
+    PROCESSED = "processed"
+    PROCESSED_WITH_ERRORS = "processed_with_errors"
+
+
+class B3MarketPriceStatus(str, Enum):
+    IMPORTED = "imported"
+    REVIEW = "review"
+
+
+class B3IncomeEventStatus(str, Enum):
+    IMPORTED = "imported"
+    SUMMARY_ONLY = "summary_only"
+    REVIEW = "review"
+    LEDGER_EVENT_CREATED = "ledger_event_created"
+    LEDGER_ERROR = "ledger_error"
 
 
 def default_market_for_class(asset_class: str) -> Market | None:

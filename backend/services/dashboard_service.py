@@ -23,7 +23,7 @@ from backend.domain.engine import (
     replay_events,
     to_decimal,
 )
-from backend.domain.enums import AssetClass, EventType
+from backend.domain.enums import AssetClass, B3MarketPriceStatus, EventType
 
 
 date = dt.date
@@ -166,9 +166,9 @@ def _latest_quote_info(
         "mi.portfolio_id = ?",
         "mp.asset_id IS NOT NULL",
         "mp.value IS NOT NULL",
-        "mp.status = 'imported'",
+        "mp.status = ?",
     ]
-    params: list[Any] = [portfolio_id]
+    params: list[Any] = [portfolio_id, B3MarketPriceStatus.IMPORTED.value]
     if FORCED_COST_FALLBACK_CLASSES:
         conditions.append(f"a.asset_class NOT IN ({','.join('?' for _ in FORCED_COST_FALLBACK_CLASSES)})")
         params.extend(sorted(FORCED_COST_FALLBACK_CLASSES))
@@ -364,10 +364,10 @@ def _price_lookup(
           AND mp.asset_id IN ({asset_placeholders})
           AND mp.reference_month IN ({month_placeholders})
           AND mp.value IS NOT NULL
-          AND mp.status = 'imported'
+          AND mp.status = ?
         ORDER BY mp.asset_id, mp.reference_month, mp.reference_date DESC, mp.updated_at DESC, mp.id DESC
         """,
-        [portfolio_id, *asset_ids, *months],
+        [portfolio_id, *asset_ids, *months, B3MarketPriceStatus.IMPORTED.value],
     ).fetchall()
 
     result: dict[tuple[int, str], PricePoint] = {}

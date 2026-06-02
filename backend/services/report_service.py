@@ -25,7 +25,7 @@ from backend.domain.engine import (
     process_event,
     replay_events,
 )
-from backend.domain.enums import AssetClass, EventType
+from backend.domain.enums import AssetClass, B3IncomeEventStatus, EventType
 
 REPORT_ASSET_CLASSES = {
     AssetClass.ACAO.value,
@@ -349,13 +349,13 @@ def list_income_report(conn: sqlite3.Connection, portfolio_id: int, year: int) -
         WHERE i.portfolio_id = ?
           AND i.payment_date BETWEEN ? AND ?
           AND i.asset_id IS NOT NULL
-          AND i.status != 'review'
+          AND i.status != ?
           AND i.ledger_event_id IS NULL
           AND a.merged_into_asset_id IS NULL
           AND a.asset_class IN ({",".join("?" for _ in class_params)})
         ORDER BY current_ticker, i.payment_date, i.id
         """,
-        (portfolio_id, start_date, end_date, *class_params),
+        (portfolio_id, start_date, end_date, B3IncomeEventStatus.REVIEW.value, *class_params),
     ).fetchall()
 
     for row in b3_rows:

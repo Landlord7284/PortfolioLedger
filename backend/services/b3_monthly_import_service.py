@@ -22,7 +22,7 @@ from typing import Iterable
 import openpyxl
 
 from backend.domain.engine import to_decimal
-from backend.domain.enums import AssetClass, EventType
+from backend.domain.enums import AssetClass, B3IncomeEventStatus, B3MarketPriceStatus, B3MonthlyImportStatus, EventType
 from backend.services import asset_service, event_service
 
 
@@ -373,13 +373,13 @@ def _resolve_asset(
 
 def _upsert_import(conn: sqlite3.Connection, portfolio_id: int, filename: str, reference_month: str, reference_date: str) -> int:
     conn.execute(
-        """
+        f"""
         INSERT INTO b3_monthly_imports (portfolio_id, filename, reference_month, reference_date)
         VALUES (?, ?, ?, ?)
         ON CONFLICT(portfolio_id, filename) DO UPDATE SET
             reference_month = excluded.reference_month,
             reference_date = excluded.reference_date,
-            status = 'processed',
+            status = '{B3MonthlyImportStatus.PROCESSED.value}',
             total_rows = 0,
             imported_prices = 0,
             imported_incomes = 0,
@@ -723,7 +723,7 @@ def _process_market_sheet(
             event_date=reference_date,
         )
         review_id = None
-        status = "imported"
+        status = B3MarketPriceStatus.IMPORTED.value
         if not asset_id:
             if fixed_income_only and asset_class == AssetClass.DEBENTURE and ticker and not candidates:
                 asset = asset_service.create_asset(
@@ -749,7 +749,7 @@ def _process_market_sheet(
                 review_id = _create_review(conn, ticker, asset_class.value, reference_date, candidates, "Ativo B3 nao resolvido com seguranca.", payload)
                 result["review_count"] += 1
                 result["review_details"].append(f"{sheet_name} linha {row_idx}: {ticker or product} enviado para revisao")
-                status = "review"
+                status = B3MarketPriceStatus.REVIEW.value
         if fixed_income_only and fixed_income_positions is not None and asset_class == AssetClass.DEBENTURE and ticker and quantity:
             fixed_income_positions.append(
                 {
@@ -902,7 +902,7 @@ def _process_income_sheet(
                 event_date=payment_date,
             )
         review_id = None
-        status = "imported"
+        status = B3IncomeEventStatus.IMPORTED.value
         ledger_event_id = None
         prefix = _norm_text(product).split(" - ")[0].strip()
         summary_only = (
@@ -910,7 +910,7 @@ def _process_income_sheet(
             or (not ticker and inferred_class not in {AssetClass.DEBENTURE, AssetClass.TESOURO_DIRETO})
         )
         if not asset_id and summary_only:
-            status = "summary_only"
+            status = B3IncomeEventStatus.SUMMARY_ONLY.value
         elif not asset_id:
             payload = {
                 "sheet": "Proventos Recebidos",
@@ -926,7 +926,7 @@ def _process_income_sheet(
             review_id = _create_review(conn, ticker, inferred_class.value, payment_date, candidates, "Provento B3 nao resolvido com seguranca.", payload)
             result["review_count"] += 1
             result["review_details"].append(f"Proventos Recebidos linha {row_idx}: {ticker or product} enviado para revisao")
-            status = "review"
+            status = B3IncomeEventStatus.REVIEW.value
         elif _is_amortization(event_type):
             try:
                 existing = _existing_income(conn, import_id, row_idx)
@@ -937,16 +937,16 @@ def _process_income_sheet(
                     ledger_event_id, duplicate_reason = _auto_create_amortization(conn, portfolio_id, asset_id, payment_date, net_value)
                 if ledger_event_id and duplicate_reason != "import_duplicate":
                     result["auto_events_created"] += 1
-                    status = "ledger_event_created"
+                    status = B3IncomeEventStatus.LEDGER_EVENT_CREATED.value
                 elif ledger_event_id:
-                    status = existing["status"] if existing else "ledger_event_created"
+                    status = existing["status"] if existing else B3IncomeEventStatus.LEDGER_EVENT_CREATED.value
                 if duplicate_reason == "duplicate":
                     result["duplicates"] += 1
                     result["duplicate_details"].append(
                         f"Proventos Recebidos linha {row_idx}: amortizacao ja existia no ledger para {ticker or product} em {payment_date}"
                     )
             except Exception as exc:
-                status = "ledger_error"
+                status = B3IncomeEventStatus.LEDGER_ERROR.value
                 result["errors"].append(f"Proventos Recebidos linha {row_idx}: amortizacao nao lancada no ledger: {exc}")
         inserted = _upsert_income(
             conn,
@@ -1074,7 +1074,7 @@ def import_b3_monthly_file(conn: sqlite3.Connection, portfolio_id: int, source: 
             result["duplicates"],
             result["review_count"],
             _json_dumps(result["errors"]) if result["errors"] else None,
-            "processed_with_errors" if result["errors"] else "processed",
+            B3MonthlyImportStatus.PROCESSED_WITH_ERRORS.value if result["errors"] else B3MonthlyImportStatus.PROCESSED.value,
             import_id,
         ),
     )

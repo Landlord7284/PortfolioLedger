@@ -9,9 +9,43 @@ import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
 
+from backend.domain.enums import (
+    AssetClass,
+    AssetMatchReviewStatus,
+    B3IncomeEventStatus,
+    B3MarketPriceStatus,
+    B3MonthlyImportStatus,
+    Currency,
+    EventType,
+    Market,
+    ReitType,
+    TreasuryIndexer,
+)
+
 DB_PATH = Path(__file__).resolve().parent / "ledger.db"
 
-_SCHEMA = """
+
+def _sql_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _sql_in(values) -> str:
+    return "(" + ", ".join(_sql_quote(str(value)) for value in values) + ")"
+
+
+_ASSET_CLASS_VALUES = _sql_in(item.value for item in AssetClass)
+_ASSET_MATCH_REVIEW_STATUS_VALUES = _sql_in(item.value for item in AssetMatchReviewStatus)
+_B3_INCOME_EVENT_STATUS_VALUES = _sql_in(item.value for item in B3IncomeEventStatus)
+_B3_MARKET_PRICE_STATUS_VALUES = _sql_in(item.value for item in B3MarketPriceStatus)
+_B3_MONTHLY_IMPORT_STATUS_VALUES = _sql_in(item.value for item in B3MonthlyImportStatus)
+_CURRENCY_VALUES = _sql_in(item.value for item in Currency)
+_EVENT_TYPE_VALUES = _sql_in(item.value for item in EventType)
+_MARKET_VALUES = _sql_in(item.value for item in Market)
+_REIT_TYPE_VALUES = _sql_in(item.value for item in ReitType)
+_TREASURY_INDEXER_VALUES = _sql_in(item.value for item in TreasuryIndexer)
+
+
+_SCHEMA = f"""
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -21,7 +55,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS portfolios (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT    NOT NULL UNIQUE,
-    consolidated  INTEGER NOT NULL DEFAULT 1,
+    consolidated  INTEGER NOT NULL DEFAULT 1 CHECK (consolidated IN (0, 1)),
     created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -31,9 +65,9 @@ CREATE TABLE IF NOT EXISTS portfolios (
 -- ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS assets (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    asset_class     TEXT    NOT NULL,
-    market          TEXT    NOT NULL DEFAULT 'BR',
-    currency        TEXT    NOT NULL DEFAULT 'BRL',
+    asset_class     TEXT    NOT NULL CHECK (asset_class IN {_ASSET_CLASS_VALUES}),
+    market          TEXT    NOT NULL DEFAULT 'BR' CHECK (market IN {_MARKET_VALUES}),
+    currency        TEXT    NOT NULL DEFAULT 'BRL' CHECK (currency IN {_CURRENCY_VALUES}),
     maturity_date   TEXT,
     aux_id          TEXT,
     -- Metadata fields (v1.0.1)
@@ -47,15 +81,19 @@ CREATE TABLE IF NOT EXISTS assets (
     gics_industry_group TEXT,
     gics_industry   TEXT,
     gics_sub_industry TEXT,
-    reit_type       TEXT CHECK (reit_type IS NULL OR reit_type IN ('Equity', 'Mortgage', 'Hybrid')),
-    treasury_indexer TEXT CHECK (treasury_indexer IS NULL OR treasury_indexer IN ('SELIC', 'IPCA', 'PREFIXED')),
+    reit_type       TEXT CHECK (reit_type IS NULL OR reit_type IN {_REIT_TYPE_VALUES}),
+    treasury_indexer TEXT CHECK (treasury_indexer IS NULL OR treasury_indexer IN {_TREASURY_INDEXER_VALUES}),
     fiscal_regime_override TEXT,
     fiscal_tax_treatment   TEXT,
     merged_into_asset_id INTEGER REFERENCES assets(id),
     merged_at       TEXT,
-    duplicate_flag  INTEGER NOT NULL DEFAULT 0,
+    duplicate_flag  INTEGER NOT NULL DEFAULT 0 CHECK (duplicate_flag IN (0, 1)),
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_assets_active_class_market
+    ON assets(asset_class, market, id)
+    WHERE merged_into_asset_id IS NULL;
 
 -- ────────────────────────────────────────────────────────────
 -- Ticker history  (allows ticker changes without breaking the ledger)
@@ -71,7 +109,10 @@ CREATE TABLE IF NOT EXISTS asset_tickers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_asset_tickers_lookup
-    ON asset_tickers(ticker, valid_from, valid_until);
+    ON asset_tickers(ticker, valid_from, valid_until, asset_id);
+
+CREATE INDEX IF NOT EXISTS idx_asset_tickers_asset_current
+    ON asset_tickers(asset_id, valid_until, valid_from, id);
 
 -- ────────────────────────────────────────────────────────────
 -- Asset matching review queue
@@ -80,16 +121,20 @@ CREATE TABLE IF NOT EXISTS asset_match_reviews (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     source              TEXT    NOT NULL,
     ticker              TEXT    NOT NULL,
-    asset_class         TEXT    NOT NULL,
-    market              TEXT,
+    asset_class         TEXT    NOT NULL CHECK (asset_class IN {_ASSET_CLASS_VALUES}),
+    market              TEXT CHECK (market IS NULL OR market IN {_MARKET_VALUES}),
     event_date          TEXT,
     candidate_asset_ids TEXT,
     reason              TEXT,
     operation_payload   TEXT,
-    status              TEXT    NOT NULL DEFAULT 'pending',
+    status              TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN {_ASSET_MATCH_REVIEW_STATUS_VALUES}),
     created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
     resolved_at         TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_asset_match_reviews_pending_key
+    ON asset_match_reviews(status, source, ticker, asset_class, market, event_date, id)
+    WHERE status = 'pending';
 
 -- ────────────────────────────────────────────────────────────
 -- Event ledger  (source of truth)
@@ -98,7 +143,7 @@ CREATE TABLE IF NOT EXISTS events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     portfolio_id    INTEGER NOT NULL REFERENCES portfolios(id),
     asset_id        INTEGER NOT NULL REFERENCES assets(id),
-    event_type      TEXT    NOT NULL,
+    event_type      TEXT    NOT NULL CHECK (event_type IN {_EVENT_TYPE_VALUES}),
     event_date      TEXT    NOT NULL,
     quantity        TEXT    NOT NULL,
     event_value     TEXT    NOT NULL,
@@ -110,15 +155,18 @@ CREATE TABLE IF NOT EXISTS events (
     sequence_num    INTEGER NOT NULL,
     storno_of       INTEGER REFERENCES events(id),
     correction_of   INTEGER REFERENCES events(id),
-    is_storno       INTEGER NOT NULL DEFAULT 0,
-    is_cancelled    INTEGER NOT NULL DEFAULT 0,
-    duplicate_flag  INTEGER NOT NULL DEFAULT 0,
+    is_storno       INTEGER NOT NULL DEFAULT 0 CHECK (is_storno IN (0, 1)),
+    is_cancelled    INTEGER NOT NULL DEFAULT 0 CHECK (is_cancelled IN (0, 1)),
+    duplicate_flag  INTEGER NOT NULL DEFAULT 0 CHECK (duplicate_flag IN (0, 1)),
     notes           TEXT,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_asset_portfolio
     ON events(asset_id, portfolio_id, event_date, sequence_num);
+
+CREATE INDEX IF NOT EXISTS idx_events_portfolio_period
+    ON events(portfolio_id, event_date, sequence_num, asset_id);
 
 -- PTAX cache
 CREATE TABLE IF NOT EXISTS ptax_cache (
@@ -200,8 +248,8 @@ CREATE TABLE IF NOT EXISTS fiscal_tax_parameters (
     darf_code             TEXT,
     minimum_darf_amount   TEXT    NOT NULL DEFAULT '10.00',
     loss_bucket           TEXT,
-    active                INTEGER NOT NULL DEFAULT 1,
-    monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1,
+    active                INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1 CHECK (monthly_darf_enabled IN (0, 1)),
     created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at            TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -339,8 +387,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "assets", "gics_industry_group", "gics_industry_group TEXT")
     _add_column_if_missing(conn, "assets", "gics_industry", "gics_industry TEXT")
     _add_column_if_missing(conn, "assets", "gics_sub_industry", "gics_sub_industry TEXT")
-    _add_column_if_missing(conn, "assets", "reit_type", "reit_type TEXT CHECK (reit_type IS NULL OR reit_type IN ('Equity', 'Mortgage', 'Hybrid'))")
-    _add_column_if_missing(conn, "assets", "treasury_indexer", "treasury_indexer TEXT CHECK (treasury_indexer IS NULL OR treasury_indexer IN ('SELIC', 'IPCA', 'PREFIXED'))")
+    _add_column_if_missing(conn, "assets", "reit_type", f"reit_type TEXT CHECK (reit_type IS NULL OR reit_type IN {_REIT_TYPE_VALUES})")
+    _add_column_if_missing(conn, "assets", "treasury_indexer", f"treasury_indexer TEXT CHECK (treasury_indexer IS NULL OR treasury_indexer IN {_TREASURY_INDEXER_VALUES})")
     _add_column_if_missing(conn, "asset_match_reviews", "operation_payload", "operation_payload TEXT")
     _add_column_if_missing(conn, "events", "gross_value", "gross_value TEXT")
     _add_column_if_missing(conn, "events", "event_value_brl", "event_value_brl TEXT")
@@ -365,7 +413,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         """
         UPDATE assets
         SET asset_class = 'Ação'
-        WHERE asset_class IN ('A��o', 'Acao')
+        WHERE asset_class = 'Acao'
         """
     )
 
@@ -405,7 +453,19 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("DROP TABLE asset_tickers_old")
         conn.execute("PRAGMA foreign_keys = ON")
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_asset_tickers_lookup ON asset_tickers(ticker, valid_from, valid_until)"
+        "CREATE INDEX IF NOT EXISTS idx_asset_tickers_lookup ON asset_tickers(ticker, valid_from, valid_until, asset_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_asset_tickers_asset_current ON asset_tickers(asset_id, valid_until, valid_from, id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_assets_active_class_market ON assets(asset_class, market, id) WHERE merged_into_asset_id IS NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_asset_match_reviews_pending_key ON asset_match_reviews(status, source, ticker, asset_class, market, event_date, id) WHERE status = 'pending'"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_events_portfolio_period ON events(portfolio_id, event_date, sequence_num, asset_id)"
     )
     _ensure_fiscal_schema(conn)
 
@@ -424,8 +484,8 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
             darf_code             TEXT,
             minimum_darf_amount   TEXT    NOT NULL DEFAULT '10.00',
             loss_bucket           TEXT,
-            active                INTEGER NOT NULL DEFAULT 1,
-            monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1,
+            active                INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+            monthly_darf_enabled  INTEGER NOT NULL DEFAULT 1 CHECK (monthly_darf_enabled IN (0, 1)),
             created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
             updated_at            TEXT    NOT NULL DEFAULT (datetime('now'))
         );
@@ -522,20 +582,20 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
                 """,
                 row,
             )
-    _add_column_if_missing(conn, "fiscal_tax_parameters", "active", "active INTEGER NOT NULL DEFAULT 1")
+    _add_column_if_missing(conn, "fiscal_tax_parameters", "active", "active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))")
 
 
 def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
     """Create B3 import tables for fresh and existing local databases."""
     conn.executescript(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS b3_monthly_imports (
             id                    INTEGER PRIMARY KEY AUTOINCREMENT,
             portfolio_id          INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
             filename              TEXT    NOT NULL,
             reference_month       TEXT    NOT NULL,
             reference_date        TEXT    NOT NULL,
-            status                TEXT    NOT NULL DEFAULT 'processed',
+            status                TEXT    NOT NULL DEFAULT 'processed' CHECK (status IN {_B3_MONTHLY_IMPORT_STATUS_VALUES}),
             total_rows            INTEGER NOT NULL DEFAULT 0,
             imported_prices       INTEGER NOT NULL DEFAULT 0,
             imported_incomes      INTEGER NOT NULL DEFAULT 0,
@@ -547,6 +607,9 @@ def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
             updated_at            TEXT    NOT NULL DEFAULT (datetime('now')),
             UNIQUE(portfolio_id, filename)
         );
+
+        CREATE INDEX IF NOT EXISTS idx_b3_monthly_imports_portfolio_month
+            ON b3_monthly_imports(portfolio_id, reference_month, id);
 
         CREATE TABLE IF NOT EXISTS b3_market_prices (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -561,8 +624,8 @@ def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
             cnpj             TEXT,
             maturity_date    TEXT,
             value            TEXT,
-            is_unit_price    INTEGER NOT NULL DEFAULT 1,
-            status           TEXT    NOT NULL DEFAULT 'imported',
+            is_unit_price    INTEGER NOT NULL DEFAULT 1 CHECK (is_unit_price IN (0, 1)),
+            status           TEXT    NOT NULL DEFAULT 'imported' CHECK (status IN {_B3_MARKET_PRICE_STATUS_VALUES}),
             review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
             raw_payload      TEXT,
             created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -570,8 +633,11 @@ def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
             UNIQUE(import_id, source_sheet, source_row)
         );
 
+        CREATE INDEX IF NOT EXISTS idx_b3_market_prices_import
+            ON b3_market_prices(import_id);
+
         CREATE INDEX IF NOT EXISTS idx_b3_market_prices_asset_month
-            ON b3_market_prices(asset_id, reference_month);
+            ON b3_market_prices(asset_id, reference_month, reference_date, status);
 
         CREATE TABLE IF NOT EXISTS b3_income_events (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -586,7 +652,7 @@ def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
             quantity         TEXT,
             unit_price       TEXT,
             net_value        TEXT,
-            status           TEXT    NOT NULL DEFAULT 'imported',
+            status           TEXT    NOT NULL DEFAULT 'imported' CHECK (status IN {_B3_INCOME_EVENT_STATUS_VALUES}),
             ledger_event_id  INTEGER REFERENCES events(id) ON DELETE SET NULL,
             review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
             raw_payload      TEXT,
@@ -598,8 +664,11 @@ def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
             ON b3_income_events(import_id, source_row)
             WHERE source_row > 0;
 
+        CREATE INDEX IF NOT EXISTS idx_b3_income_events_import
+            ON b3_income_events(import_id);
+
         CREATE INDEX IF NOT EXISTS idx_b3_income_events_asset_date
-            ON b3_income_events(portfolio_id, asset_id, payment_date);
+            ON b3_income_events(portfolio_id, payment_date, asset_id, status);
         """
     )
     _migrate_b3_unique_constraints(conn)
@@ -613,7 +682,7 @@ def _migrate_b3_unique_constraints(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("ALTER TABLE b3_market_prices RENAME TO b3_market_prices_old")
         conn.execute(
-            """
+            f"""
             CREATE TABLE b3_market_prices (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 import_id        INTEGER NOT NULL REFERENCES b3_monthly_imports(id) ON DELETE CASCADE,
@@ -627,8 +696,8 @@ def _migrate_b3_unique_constraints(conn: sqlite3.Connection) -> None:
                 cnpj             TEXT,
                 maturity_date    TEXT,
                 value            TEXT,
-                is_unit_price    INTEGER NOT NULL DEFAULT 1,
-                status           TEXT    NOT NULL DEFAULT 'imported',
+                is_unit_price    INTEGER NOT NULL DEFAULT 1 CHECK (is_unit_price IN (0, 1)),
+                status           TEXT    NOT NULL DEFAULT 'imported' CHECK (status IN {_B3_MARKET_PRICE_STATUS_VALUES}),
                 review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
                 raw_payload      TEXT,
                 created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -652,14 +721,15 @@ def _migrate_b3_unique_constraints(conn: sqlite3.Connection) -> None:
         )
         conn.execute("DROP TABLE b3_market_prices_old")
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_market_prices_asset_month ON b3_market_prices(asset_id, reference_month)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_market_prices_import ON b3_market_prices(import_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_market_prices_asset_month ON b3_market_prices(asset_id, reference_month, reference_date, status)")
 
     income_indexes = conn.execute("PRAGMA index_list(b3_income_events)").fetchall()
     if sum(1 for row in income_indexes if row["unique"] and row["origin"] == "u") > 0:
         conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("ALTER TABLE b3_income_events RENAME TO b3_income_events_old")
         conn.execute(
-            """
+            f"""
             CREATE TABLE b3_income_events (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 import_id        INTEGER NOT NULL REFERENCES b3_monthly_imports(id) ON DELETE CASCADE,
@@ -673,7 +743,7 @@ def _migrate_b3_unique_constraints(conn: sqlite3.Connection) -> None:
                 quantity         TEXT,
                 unit_price       TEXT,
                 net_value        TEXT,
-                status           TEXT    NOT NULL DEFAULT 'imported',
+                status           TEXT    NOT NULL DEFAULT 'imported' CHECK (status IN {_B3_INCOME_EVENT_STATUS_VALUES}),
                 ledger_event_id  INTEGER REFERENCES events(id) ON DELETE SET NULL,
                 review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
                 raw_payload      TEXT,
@@ -699,7 +769,8 @@ def _migrate_b3_unique_constraints(conn: sqlite3.Connection) -> None:
         conn.execute("DROP TABLE b3_income_events_old")
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_b3_income_events_import_row ON b3_income_events(import_id, source_row) WHERE source_row > 0")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_income_events_asset_date ON b3_income_events(portfolio_id, asset_id, payment_date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_income_events_import ON b3_income_events(import_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_income_events_asset_date ON b3_income_events(portfolio_id, payment_date, asset_id, status)")
 
 
 @contextmanager

@@ -12,10 +12,10 @@ import json
 import sqlite3
 from typing import Optional
 
-from backend.domain.enums import AssetClass, Currency, Market, TreasuryIndexer, default_market_for_class, currency_for_market
+from backend.domain.enums import AssetClass, AssetMatchReviewStatus, Currency, Market, ReitType, TreasuryIndexer, default_market_for_class, currency_for_market
 from backend.services.fiscal_regime_service import require_supported_capital_gain_regime
 
-REIT_TYPES = {"Equity", "Mortgage", "Hybrid"}
+REIT_TYPES = {item.value for item in ReitType}
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -155,7 +155,7 @@ def create_match_review(
     existing = conn.execute(
         """
         SELECT * FROM asset_match_reviews
-        WHERE status = 'pending'
+        WHERE status = ?
           AND source = ?
           AND ticker = ?
           AND asset_class = ?
@@ -163,7 +163,7 @@ def create_match_review(
           AND COALESCE(event_date, '') = COALESCE(?, '')
         ORDER BY id DESC LIMIT 1
         """,
-        (source, normalized, ac, market, event_date),
+        (AssetMatchReviewStatus.PENDING.value, source, normalized, ac, market, event_date),
     ).fetchone()
     if existing:
         return dict(existing)
@@ -379,7 +379,7 @@ def create_asset_from_review(conn: sqlite3.Connection, review_id: int) -> dict:
     ).fetchone()
     if not review:
         raise ValueError("Revisão não encontrada.")
-    if review["status"] != "pending":
+    if review["status"] != AssetMatchReviewStatus.PENDING.value:
         raise ValueError("Revisão já foi resolvida.")
     if not review["market"]:
         raise ValueError("Informe o mercado antes de criar este ativo.")
@@ -395,8 +395,8 @@ def create_asset_from_review(conn: sqlite3.Connection, review_id: int) -> dict:
         allow_probable=True,
     )
     conn.execute(
-        "UPDATE asset_match_reviews SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?",
-        (review_id,),
+        "UPDATE asset_match_reviews SET status = ?, resolved_at = datetime('now') WHERE id = ?",
+        (AssetMatchReviewStatus.RESOLVED.value, review_id),
     )
     return asset
 
@@ -570,7 +570,7 @@ def list_asset_tickers(conn: sqlite3.Connection, asset_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def list_match_reviews(conn: sqlite3.Connection, status: str = "pending") -> list[dict]:
+def list_match_reviews(conn: sqlite3.Connection, status: str = AssetMatchReviewStatus.PENDING.value) -> list[dict]:
     rows = conn.execute(
         "SELECT * FROM asset_match_reviews WHERE status = ? ORDER BY created_at DESC, id DESC",
         (status,),
@@ -580,8 +580,8 @@ def list_match_reviews(conn: sqlite3.Connection, status: str = "pending") -> lis
 
 def resolve_match_review(conn: sqlite3.Connection, review_id: int) -> dict | None:
     conn.execute(
-        "UPDATE asset_match_reviews SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?",
-        (review_id,),
+        "UPDATE asset_match_reviews SET status = ?, resolved_at = datetime('now') WHERE id = ?",
+        (AssetMatchReviewStatus.RESOLVED.value, review_id),
     )
     row = conn.execute("SELECT * FROM asset_match_reviews WHERE id = ?", (review_id,)).fetchone()
     return dict(row) if row else None
@@ -632,12 +632,18 @@ def merge_assets(conn: sqlite3.Connection, source_asset_id: int, target_asset_id
         conn.execute(
             """
             UPDATE asset_match_reviews
-            SET status = 'resolved', resolved_at = datetime('now')
-            WHERE status = 'pending'
+            SET status = ?, resolved_at = datetime('now')
+            WHERE status = ?
               AND ticker = ?
               AND (candidate_asset_ids LIKE ? OR candidate_asset_ids LIKE ?)
             """,
-            (ticker, f"%{source_asset_id}%", f"%{target_asset_id}%"),
+            (
+                AssetMatchReviewStatus.RESOLVED.value,
+                AssetMatchReviewStatus.PENDING.value,
+                ticker,
+                f"%{source_asset_id}%",
+                f"%{target_asset_id}%",
+            ),
         )
     conn.execute("DELETE FROM positions WHERE asset_id = ?", (source_asset_id,))
 

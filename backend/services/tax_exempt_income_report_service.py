@@ -12,7 +12,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import sqlite3
 from typing import Any
 
-from backend.domain.enums import AssetClass
+from backend.domain.enums import AssetClass, B3IncomeEventStatus
 from backend.services import capital_gain_report_service, report_service
 from backend.services.fiscal_regime_service import REGIME_B3_COMMON, REGIME_FI_INFRA_EXEMPT
 
@@ -349,12 +349,12 @@ def _add_fi_infra_b3_incomes(
         WHERE i.portfolio_id = ?
           AND i.payment_date BETWEEN ? AND ?
           AND i.asset_id IS NOT NULL
-          AND i.status != 'review'
+          AND i.status != ?
           AND i.ledger_event_id IS NULL
           AND a.merged_into_asset_id IS NULL
         ORDER BY current_ticker, i.payment_date, i.id
         """,
-        (portfolio_id, start_date, end_date),
+        (portfolio_id, start_date, end_date, B3IncomeEventStatus.REVIEW.value),
     ).fetchall()
 
     for row in rows:

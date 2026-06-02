@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.database import get_db
+from backend.domain.enums import AssetMatchReviewStatus
 from backend.models import (
     AssetCreate,
     AssetTickerUpdate,
@@ -75,7 +76,7 @@ def list_all(asset_class: Optional[str] = Query(None), include_merged: bool = Qu
 
 
 @router.get("/reviews", response_model=list[AssetMatchReviewResponse])
-def list_reviews(status: str = Query("pending")):
+def list_reviews(status: str = Query(AssetMatchReviewStatus.PENDING.value)):
     with get_db() as conn:
         return asset_service.list_match_reviews(conn, status)
 
