@@ -23,6 +23,13 @@ import openpyxl
 
 from backend.domain.engine import to_decimal
 from backend.domain.enums import AssetClass, B3IncomeEventStatus, B3MarketPriceStatus, B3MonthlyImportStatus, EventType
+from backend.domain.normalization import (
+    normalize_b3_income_event_status,
+    normalize_b3_market_price_status,
+    normalize_b3_monthly_import_status,
+    normalize_bool_01,
+    normalize_ticker,
+)
 from backend.services import asset_service, event_service
 
 
@@ -96,6 +103,10 @@ def _clean_decimal_str(value) -> str | None:
         if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]):
             cleaned = "".join(parts)
     return str(to_decimal(cleaned))
+
+
+def _optional_ticker(value: str | None) -> str | None:
+    return normalize_ticker(value) if value else None
 
 
 def _json_dumps(value: object) -> str:
@@ -194,7 +205,7 @@ def _find_by_ticker(conn: sqlite3.Connection, ticker: str | None, event_date: st
     if not ticker:
         return None, []
     date_clause = ""
-    params: list[object] = [ticker.upper()]
+    params: list[object] = [normalize_ticker(ticker)]
     if event_date:
         date_clause = "AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_until IS NULL OR t.valid_until > ?)"
         params.extend([event_date, event_date])
@@ -203,7 +214,7 @@ def _find_by_ticker(conn: sqlite3.Connection, ticker: str | None, event_date: st
         SELECT DISTINCT a.id
         FROM asset_tickers t
         JOIN assets a ON a.id = t.asset_id
-        WHERE UPPER(t.ticker) = ?
+        WHERE t.ticker = ?
           AND a.merged_into_asset_id IS NULL
           {date_clause}
         ORDER BY a.id
@@ -242,7 +253,7 @@ def _find_by_canonical_income_ticker(
     if not ticker:
         return None, []
     date_clause = ""
-    params: list[object] = [ticker.upper()]
+    params: list[object] = [normalize_ticker(ticker)]
     if event_date:
         date_clause = "AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_until IS NULL OR t.valid_until > ?)"
         params.extend([event_date, event_date])
@@ -251,7 +262,7 @@ def _find_by_canonical_income_ticker(
         SELECT DISTINCT a.id, a.name AS asset_name, t.name AS ticker_name
         FROM asset_tickers t
         JOIN assets a ON a.id = t.asset_id
-        WHERE UPPER(t.ticker) = ?
+        WHERE t.ticker = ?
           AND a.merged_into_asset_id IS NULL
           {date_clause}
         ORDER BY a.id
@@ -372,6 +383,7 @@ def _resolve_asset(
 
 
 def _upsert_import(conn: sqlite3.Connection, portfolio_id: int, filename: str, reference_month: str, reference_date: str) -> int:
+    processed_status = normalize_b3_monthly_import_status(B3MonthlyImportStatus.PROCESSED.value)
     conn.execute(
         f"""
         INSERT INTO b3_monthly_imports (portfolio_id, filename, reference_month, reference_date)
@@ -379,7 +391,7 @@ def _upsert_import(conn: sqlite3.Connection, portfolio_id: int, filename: str, r
         ON CONFLICT(portfolio_id, filename) DO UPDATE SET
             reference_month = excluded.reference_month,
             reference_date = excluded.reference_date,
-            status = '{B3MonthlyImportStatus.PROCESSED.value}',
+            status = '{processed_status}',
             total_rows = 0,
             imported_prices = 0,
             imported_incomes = 0,
@@ -399,6 +411,9 @@ def _upsert_import(conn: sqlite3.Connection, portfolio_id: int, filename: str, r
 
 
 def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
+    status = normalize_b3_market_price_status(values["status"])
+    is_unit_price = normalize_bool_01(values["is_unit_price"])
+    ticker = _optional_ticker(values.get("ticker"))
     existing = conn.execute(
         """
         SELECT * FROM b3_market_prices
@@ -407,7 +422,7 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
         (values["import_id"], values["source_sheet"], values["source_row"]),
     ).fetchone()
     if existing:
-        if not values["is_unit_price"]:
+        if not is_unit_price:
             try:
                 existing_payload = json.loads(existing["raw_payload"] or "{}")
             except json.JSONDecodeError:
@@ -436,13 +451,13 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
                 values["asset_id"],
                 values["reference_month"],
                 values["reference_date"],
-                values.get("ticker"),
+                ticker,
                 values.get("product"),
                 values.get("cnpj"),
                 values.get("maturity_date"),
                 values.get("value"),
-                1 if values["is_unit_price"] else 0,
-                values["status"],
+                is_unit_price,
+                status,
                 values.get("review_id"),
                 _json_dumps(values["raw_payload"]),
                 existing["id"],
@@ -450,7 +465,7 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
         )
         return "updated"
 
-    if not values["is_unit_price"] and values.get("asset_id") is not None:
+    if not is_unit_price and values.get("asset_id") is not None:
         asset_existing = conn.execute(
             """
             SELECT * FROM b3_market_prices
@@ -489,11 +504,11 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
                 """,
                 (
                     str(current_value + added_value),
-                    values.get("ticker"),
+                    ticker,
                     values.get("product"),
                     values.get("cnpj"),
                     values.get("maturity_date"),
-                    values["status"],
+                    status,
                     values.get("review_id"),
                     _json_dumps(
                         {
@@ -522,13 +537,13 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
             values["reference_date"],
             values["source_sheet"],
             values["source_row"],
-            values.get("ticker"),
+            ticker,
             values.get("product"),
             values.get("cnpj"),
             values.get("maturity_date"),
             values.get("value"),
-            1 if values["is_unit_price"] else 0,
-            values["status"],
+            is_unit_price,
+            status,
             values.get("review_id"),
             _json_dumps(values["raw_payload"]),
         ),
@@ -537,6 +552,8 @@ def _upsert_market_price(conn: sqlite3.Connection, values: dict) -> str:
 
 
 def _upsert_income(conn: sqlite3.Connection, values: dict) -> bool:
+    status = normalize_b3_income_event_status(values["status"])
+    ticker = _optional_ticker(values.get("ticker"))
     existing = conn.execute(
         """
         SELECT id FROM b3_income_events
@@ -568,11 +585,11 @@ def _upsert_income(conn: sqlite3.Connection, values: dict) -> bool:
                 values["payment_date"],
                 values["event_type"],
                 values["product"],
-                values.get("ticker"),
+                ticker,
                 values.get("quantity"),
                 values.get("unit_price"),
                 values.get("net_value"),
-                values["status"],
+                status,
                 values.get("ledger_event_id"),
                 values.get("review_id"),
                 _json_dumps(values["raw_payload"]),
@@ -597,11 +614,11 @@ def _upsert_income(conn: sqlite3.Connection, values: dict) -> bool:
             values["payment_date"],
             values["event_type"],
             values["product"],
-            values.get("ticker"),
+            ticker,
             values.get("quantity"),
             values.get("unit_price"),
             values.get("net_value"),
-            values["status"],
+            status,
             values.get("ledger_event_id"),
             values.get("review_id"),
             _json_dumps(values["raw_payload"]),
@@ -697,7 +714,7 @@ def _process_market_sheet(
                 continue
             asset_class = _FIXED_INCOME_CLASSES[prefix]
         result["total_rows"] += 1
-        ticker = _clean_str(row.get(ticker_header)) if ticker_header else None
+        ticker = _optional_ticker(_clean_str(row.get(ticker_header))) if ticker_header else None
         cnpj = _digits(row.get(cnpj_header)) if cnpj_header else None
         maturity_date = _date_str(row.get(maturity_header)) if maturity_header else None
         quantity = None
@@ -874,7 +891,7 @@ def _process_income_sheet(
         if _norm_text(product).startswith("TOTAL"):
             continue
         parsed_product = _extract_ticker_product(product)
-        ticker = parsed_product.canonical_ticker or parsed_product.original_ticker
+        ticker = _optional_ticker(parsed_product.canonical_ticker or parsed_product.original_ticker)
         payment_date = _date_str(row.get("PAGAMENTO"))
         event_type = _clean_str(row.get("TIPO DE EVENTO"))
         try:
@@ -890,7 +907,7 @@ def _process_income_sheet(
         inferred_class = _infer_income_class(ticker, product)
         fixed_income_match = _match_fixed_income_income(product, quantity, fixed_income_positions) if inferred_class == AssetClass.DEBENTURE else None
         if fixed_income_match:
-            ticker = fixed_income_match["ticker"]
+            ticker = _optional_ticker(fixed_income_match["ticker"])
             asset_id = fixed_income_match["asset_id"]
             candidates = []
         else:
@@ -901,6 +918,7 @@ def _process_income_sheet(
                 asset_class=inferred_class,
                 event_date=payment_date,
             )
+            ticker = _optional_ticker(ticker)
         review_id = None
         status = B3IncomeEventStatus.IMPORTED.value
         ledger_event_id = None
@@ -1074,7 +1092,7 @@ def import_b3_monthly_file(conn: sqlite3.Connection, portfolio_id: int, source: 
             result["duplicates"],
             result["review_count"],
             _json_dumps(result["errors"]) if result["errors"] else None,
-            B3MonthlyImportStatus.PROCESSED_WITH_ERRORS.value if result["errors"] else B3MonthlyImportStatus.PROCESSED.value,
+            normalize_b3_monthly_import_status(B3MonthlyImportStatus.PROCESSED_WITH_ERRORS.value if result["errors"] else B3MonthlyImportStatus.PROCESSED.value),
             import_id,
         ),
     )

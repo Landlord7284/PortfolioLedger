@@ -1,10 +1,12 @@
 from pathlib import Path
 from io import BytesIO
 
+import pytest
 from openpyxl import Workbook
 
 from backend.database import get_db, init_db
 from backend.domain.enums import AssetClass, EventType
+from backend.services import b3_monthly_import_service as b3_service
 from backend.services import asset_service, event_service, portfolio_service
 from backend.services.b3_monthly_import_service import SourceFile, import_b3_monthly_batch, sanitize_b3_monthly_import
 
@@ -77,7 +79,7 @@ def test_b3_import_persists_market_prices_income_and_auto_amortization(tmp_path)
             "Posição - Fundos": [["ABCD11 - ABCD FII", "ITAU", "1", "ABCD11", "11111111000111", None, "Cotas", None, 10, 10, "-", "-", 95.5, 955]],
             "Posição - Renda Fixa": [["DEB - CIA TESTE", "ITAU", "CIA", "DEB123", "IPCA", "DEPOSITADO", "01/01/2024", "01/01/2030", 1, 1, "-", "-", "-", 102.05, 1020.5]],
             "Posição - Tesouro Direto": [["Tesouro IPCA+ 2029", "ITAU", "BRSTN", "IPCA", "15/05/2029", 1, 1, 0, "-", 100, 110, 109, 111.22]],
-            "Proventos Recebidos": [["KNOX11 - KNOX DEBT FDO", "28/11/2025", "Amortização", "BTG", "10", 2.5, 25]],
+            "Proventos Recebidos": [["KNOX11 - KNOX DEBT FDO", "28/11/2025", EventType.AMORTIZACAO.value, "BTG", "10", 2.5, 25]],
         }
     )
 
@@ -118,7 +120,7 @@ def test_b3_amortization_imports_duplicate_by_type_asset_and_date_with_flag(tmp_
     init_db(db_path)
     content = _workbook_bytes(
         {
-            "Proventos Recebidos": [["KNOX11 - KNOX DEBT FDO", "28/11/2025", "Amortização", "BTG", "10", 2.5, 25]],
+            "Proventos Recebidos": [["KNOX11 - KNOX DEBT FDO", "28/11/2025", EventType.AMORTIZACAO.value, "BTG", "10", 2.5, 25]],
         }
     )
 
@@ -150,7 +152,7 @@ def test_b3_import_is_idempotent_for_same_file(tmp_path):
     content = _workbook_bytes(
         {
             "Posição - Ações": [["XPTO3 - XPTO S.A.", "ITAU", "1", "XPTO3", "12345678000190", None, "ON", None, 10, 10, "-", "-", 12.34, 123.4]],
-            "Proventos Recebidos": [["KNOX11 - KNOX DEBT FDO", "28/11/2025", "Amortização", "BTG", "10", 2.5, 25]],
+            "Proventos Recebidos": [["KNOX11 - KNOX DEBT FDO", "28/11/2025", EventType.AMORTIZACAO.value, "BTG", "10", 2.5, 25]],
         }
     )
 
@@ -591,6 +593,115 @@ def test_b3_import_creates_review_for_unmatched_asset(tmp_path):
     assert len(reviews) == 1
     assert price["status"] == "review"
     assert price["review_id"] == reviews[0]["id"]
+
+
+def test_b3_import_reuses_pending_review_for_unmatched_asset(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Posição - Ações": [["MISS3 - MISSING S.A.", "ITAU", "1", "MISS3", "12345678000190", None, "ON", None, 10, 10, "-", "-", 12.34, 123.4]],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        first = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        second = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        reviews = asset_service.list_match_reviews(conn)
+        price = conn.execute("SELECT * FROM b3_market_prices").fetchone()
+
+    assert first["review_count"] == 1
+    assert second["review_count"] == 1
+    assert len(reviews) == 1
+    assert price["review_id"] == reviews[0]["id"]
+
+
+def test_b3_upserts_normalize_status_ticker_and_boolean_or_reject_invalid_values(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
+        import_id = conn.execute(
+            """
+            INSERT INTO b3_monthly_imports (portfolio_id, filename, reference_month, reference_date)
+            VALUES (?, ?, ?, ?)
+            """,
+            (portfolio["id"], "2025-11.xlsx", "2025-11", "2025-11-30"),
+        ).lastrowid
+
+        with pytest.raises(ValueError, match="Status de importacao"):
+            b3_service._upsert_market_price(
+                conn,
+                {
+                    "import_id": import_id,
+                    "asset_id": asset["id"],
+                    "reference_month": "2025-11",
+                    "reference_date": "2025-11-30",
+                    "source_sheet": "Posição - Ações",
+                    "source_row": 2,
+                    "ticker": " xpto3 ",
+                    "product": "XPTO3",
+                    "cnpj": None,
+                    "maturity_date": None,
+                    "value": "10",
+                    "is_unit_price": True,
+                    "status": "IMPORTED",
+                    "review_id": None,
+                    "raw_payload": {},
+                },
+            )
+        assert conn.execute("SELECT COUNT(*) AS count FROM b3_market_prices").fetchone()["count"] == 0
+
+        b3_service._upsert_market_price(
+            conn,
+            {
+                "import_id": import_id,
+                "asset_id": asset["id"],
+                "reference_month": "2025-11",
+                "reference_date": "2025-11-30",
+                "source_sheet": "Posição - Ações",
+                "source_row": 2,
+                "ticker": " xpto3 ",
+                "product": "XPTO3",
+                "cnpj": None,
+                "maturity_date": None,
+                "value": "10",
+                "is_unit_price": "0",
+                "status": "imported",
+                "review_id": None,
+                "raw_payload": {},
+            },
+        )
+        price = conn.execute("SELECT * FROM b3_market_prices").fetchone()
+        assert price["ticker"] == "XPTO3"
+        assert price["is_unit_price"] == 0
+        assert price["status"] == "imported"
+
+        with pytest.raises(ValueError, match="Status de importacao"):
+            b3_service._upsert_income(
+                conn,
+                {
+                    "import_id": import_id,
+                    "portfolio_id": portfolio["id"],
+                    "asset_id": asset["id"],
+                    "source_row": 3,
+                    "payment_date": "2025-11-28",
+                    "event_type": "Rendimento",
+                    "product": "XPTO3",
+                    "ticker": "xpto3",
+                    "quantity": "1",
+                    "unit_price": "1",
+                    "net_value": "1",
+                    "status": "done",
+                    "ledger_event_id": None,
+                    "review_id": None,
+                    "raw_payload": {},
+                },
+            )
+        assert conn.execute("SELECT COUNT(*) AS count FROM b3_income_events").fetchone()["count"] == 0
 
 
 def test_b3_batch_processes_files_chronologically(tmp_path):

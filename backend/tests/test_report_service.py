@@ -229,7 +229,7 @@ def test_income_report_resolves_cancelled_and_duplicate_amortizations(tmp_path):
             portfolio["id"],
             asset["id"],
             payment_date="2025-05-30",
-            event_type="Amortização",
+            event_type=EventType.AMORTIZACAO.value,
             net_value="271.81",
             ledger_event_id=duplicate["id"],
             status="ledger_event_created",
@@ -240,7 +240,7 @@ def test_income_report_resolves_cancelled_and_duplicate_amortizations(tmp_path):
             portfolio["id"],
             asset["id"],
             payment_date="2025-05-30",
-            event_type="Amortização",
+            event_type=EventType.AMORTIZACAO.value,
             net_value="271.81",
             source_row=2,
         )

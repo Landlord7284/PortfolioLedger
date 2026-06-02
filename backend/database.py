@@ -412,7 +412,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         UPDATE assets
-        SET asset_class = 'Ação'
+        SET asset_class = 'A\u00e7\u00e3o'
         WHERE asset_class = 'Acao'
         """
     )

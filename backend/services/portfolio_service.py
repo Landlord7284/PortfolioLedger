@@ -7,6 +7,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Optional
 
+from backend.domain.normalization import normalize_bool_01
+
 
 def create_portfolio(
     conn: sqlite3.Connection,
@@ -19,7 +21,7 @@ def create_portfolio(
         INSERT INTO portfolios (name, consolidated)
         VALUES (?, ?)
         """,
-        (name.strip(), int(consolidated)),
+        (name.strip(), normalize_bool_01(consolidated)),
     )
     return get_portfolio(conn, cur.lastrowid)
 
@@ -51,7 +53,7 @@ def update_portfolio(
         values.append(name.strip())
     if consolidated is not None:
         fields.append("consolidated = ?")
-        values.append(int(consolidated))
+        values.append(normalize_bool_01(consolidated))
     if not fields:
         return get_portfolio(conn, portfolio_id)
     fields.append("updated_at = datetime('now')")

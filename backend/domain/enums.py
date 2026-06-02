@@ -10,10 +10,10 @@ from enum import Enum
 
 
 class AssetClass(str, Enum):
-    ACAO = "Ação"
+    ACAO = "A\u00e7\u00e3o"
     BDR = "BDR"
     CRIPTOMOEDA = "Criptomoeda"
-    DEBENTURE = "Debênture"
+    DEBENTURE = "Deb\u00eanture"
     CRI = "CRI"
     CRA = "CRA"
     ETF = "ETF"
@@ -47,11 +47,11 @@ class AssetClass(str, Enum):
     def from_xlsx_label(cls, label: str) -> "AssetClass":
         """Resolve legacy XLSX labels (e.g. 'Ação', 'TD') to enum members."""
         _map = {
-            "Ação": cls.ACAO,
+            "A\u00e7\u00e3o": cls.ACAO,
             "Acao": cls.ACAO,
             "BDR": cls.BDR,
             "Criptomoeda": cls.CRIPTOMOEDA,
-            "Debênture": cls.DEBENTURE,
+            "Deb\u00eanture": cls.DEBENTURE,
             "Debenture": cls.DEBENTURE,
             "CRI": cls.CRI,
             "CRA": cls.CRA,
@@ -74,9 +74,9 @@ class EventType(str, Enum):
     VENDA = "Venda"
     DESDOBRAMENTO = "Desdobramento"
     GRUPAMENTO = "Grupamento"
-    AMORTIZACAO = "Amortização"
-    BONIFICACAO = "Bonificação"
-    CISAO = "Cisão"
+    AMORTIZACAO = "Amortiza\u00e7\u00e3o"
+    BONIFICACAO = "Bonifica\u00e7\u00e3o"
+    CISAO = "Cis\u00e3o"
     RESGATE_ANTECIPADO = "Resgate Antecipado"
     RESGATE_VENCIMENTO = "Resgate Vencimento"
 

@@ -10,7 +10,8 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 
 from backend.domain.engine import to_decimal
-from backend.domain.enums import AssetClass, EventType
+from backend.domain.enums import EventType
+from backend.domain.normalization import normalize_asset_class_strict, normalize_ticker
 from backend.services.import_service import import_events_to_ledger
 
 CENTS = Decimal("0.01")
@@ -47,18 +48,10 @@ def _normalize_operation_type(value: str) -> str:
 
 
 def _normalize_asset_class(value: str) -> str:
-    text = str(value).strip()
-    aliases = {
-        "AÃ§Ã£o": AssetClass.ACAO.value,
-        "A??o": AssetClass.ACAO.value,
-        "Acao": AssetClass.ACAO.value,
-        "Ação": AssetClass.ACAO.value,
-        "DebÃªnture": AssetClass.DEBENTURE.value,
-        "Debenture": AssetClass.DEBENTURE.value,
-    }
-    if text in aliases:
-        return aliases[text]
-    return AssetClass(text).value
+    try:
+        return normalize_asset_class_strict(value)
+    except ValueError as exc:
+        raise BrokerageNoteValidationError(str(exc)) from exc
 
 
 def _signed_note_amount(debit_credit: str, net_amount) -> Decimal:
@@ -106,9 +99,10 @@ def calculate_brokerage_note(payload: dict) -> dict:
     normalized_ops: list[dict] = []
     for idx, raw in enumerate(raw_operations, start=1):
         asset_class = _normalize_asset_class(raw["asset_class"])
-        ticker = str(raw["ticker"]).strip().upper()
-        if not ticker:
-            raise BrokerageNoteValidationError(f"Linha {idx}: ticker é obrigatório.")
+        try:
+            ticker = normalize_ticker(raw["ticker"])
+        except ValueError as exc:
+            raise BrokerageNoteValidationError(f"Linha {idx}: ticker é obrigatório.") from exc
         event_type = _normalize_operation_type(raw["operation_type"])
         quantity = to_decimal(raw["quantity"])
         gross_value = _money(raw["gross_value"])

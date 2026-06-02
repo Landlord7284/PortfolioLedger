@@ -23,8 +23,16 @@ from typing import Optional, BinaryIO
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from backend.domain.enums import AssetClass, EventType
+from backend.domain.enums import EventType
 from backend.domain.engine import to_decimal
+from backend.domain.normalization import (
+    map_imported_asset_class,
+    map_imported_event_type,
+    normalize_asset_class_strict,
+    normalize_event_type_strict,
+    normalize_market,
+    normalize_ticker,
+)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -120,44 +128,6 @@ def _resolve_cell_value(value, cell_ref: str = "") -> Decimal:
     return to_decimal(value)
 
 
-# ─────────────────────────────────────────────────────────────
-# Class label mapping (legacy XLSX → enum)
-# ─────────────────────────────────────────────────────────────
-
-_CLASS_LABEL_MAP = {
-    "Ação": AssetClass.ACAO,
-    "Acao": AssetClass.ACAO,
-    "BDR": AssetClass.BDR,
-    "Criptomoeda": AssetClass.CRIPTOMOEDA,
-    "Debênture": AssetClass.DEBENTURE,
-    "Debenture": AssetClass.DEBENTURE,
-    "CRI": AssetClass.CRI,
-    "CRA": AssetClass.CRA,
-    "ETF": AssetClass.ETF,
-    "FII": AssetClass.FII,
-    "FI-INFRA": AssetClass.FI_INFRA,
-    "Tesouro Direto": AssetClass.TESOURO_DIRETO,
-    "TD": AssetClass.TESOURO_DIRETO,
-    "Stock": AssetClass.STOCK,
-    "REIT": AssetClass.REIT,
-}
-
-_EVENT_LABEL_MAP = {
-    "Compra": EventType.COMPRA,
-    "Venda": EventType.VENDA,
-    "Desdobramento": EventType.DESDOBRAMENTO,
-    "Grupamento": EventType.GRUPAMENTO,
-    "Amortização": EventType.AMORTIZACAO,
-    "Amortizacao": EventType.AMORTIZACAO,
-    "Bonificação": EventType.BONIFICACAO,
-    "Bonificacao": EventType.BONIFICACAO,
-    "Cisão": EventType.CISAO,
-    "Cisao": EventType.CISAO,
-    "Resgate Antecipado": EventType.RESGATE_ANTECIPADO,
-    "Resgate Vencimento": EventType.RESGATE_VENCIMENTO,
-}
-
-
 IMPORT_TEMPLATE_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 _BR_TEMPLATE_HEADERS = [
@@ -181,9 +151,9 @@ _INTERNATIONAL_TEMPLATE_HEADERS = [
 ]
 
 _BR_TEMPLATE_INSTRUCTIONS = [
-    ("Classe", "Use valores como Ação, BDR, ETF, FII, FI-INFRA, Tesouro Direto, Debênture."),
+    ("Classe", "Use valores como A\u00e7\u00e3o, BDR, ETF, FII, FI-INFRA, Tesouro Direto, Deb\u00eanture."),
     ("Ativo", "Ticker do ativo, por exemplo PETR4."),
-    ("Evento", "Use Compra, Venda, Desdobramento, Grupamento, Amortização, Bonificação, Cisão, Resgate Antecipado ou Resgate Vencimento."),
+    ("Evento", "Use Compra, Venda, Desdobramento, Grupamento, Amortiza\u00e7\u00e3o, Bonifica\u00e7\u00e3o, Cis\u00e3o, Resgate Antecipado ou Resgate Vencimento."),
     ("Data", "Informe a data do evento em DD/MM/AAAA, ou como data do Excel."),
     ("Quantidade", "Quantidade movimentada no evento."),
     ("Valor Evento", "Valor líquido em BRL."),
@@ -193,7 +163,7 @@ _BR_TEMPLATE_INSTRUCTIONS = [
 _INTERNATIONAL_TEMPLATE_INSTRUCTIONS = [
     ("Classe", "Use valores como Stock, REIT, ETF."),
     ("Ativo", "Ticker do ativo, por exemplo AAPL."),
-    ("Evento", "Use Compra, Venda, Desdobramento, Grupamento, Amortização, Bonificação, Cisão, Resgate Antecipado ou Resgate Vencimento."),
+    ("Evento", "Use Compra, Venda, Desdobramento, Grupamento, Amortiza\u00e7\u00e3o, Bonifica\u00e7\u00e3o, Cis\u00e3o, Resgate Antecipado ou Resgate Vencimento."),
     ("Data", "Informe a data do evento em DD/MM/AAAA, ou como data do Excel."),
     ("Quantidade", "Quantidade movimentada no evento."),
     ("Valor Evento", "Valor em USD."),
@@ -301,15 +271,17 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
 
         # Map class
         class_str = str(raw_class).strip()
-        asset_class = _CLASS_LABEL_MAP.get(class_str)
-        if asset_class is None:
+        try:
+            asset_class = map_imported_asset_class(class_str)
+        except ValueError:
             errors.append(f"Linha {row_idx}: classe desconhecida '{class_str}'")
             continue
 
         # Map event type
         event_str = str(raw_event).strip()
-        event_type = _EVENT_LABEL_MAP.get(event_str)
-        if event_type is None:
+        try:
+            event_type = map_imported_event_type(event_str)
+        except ValueError:
             errors.append(f"Linha {row_idx}: evento desconhecido '{event_str}'")
             continue
 
@@ -338,13 +310,13 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
 
         gross_value = None
         origin_usd = None
-        if layout == "legacy" and event_type == EventType.VENDA and raw_extra_value not in (None, ""):
+        if layout == "legacy" and event_type == EventType.VENDA.value and raw_extra_value not in (None, ""):
             try:
                 gross_value = _resolve_cell_value(raw_extra_value, f"G{row_idx}")
             except (ValueError, InvalidOperation) as e:
                 errors.append(f"Linha {row_idx}: erro no valor bruto: {e}")
                 continue
-        elif layout == "international" and event_type == EventType.COMPRA and raw_extra_value not in (None, ""):
+        elif layout == "international" and event_type == EventType.COMPRA.value and raw_extra_value not in (None, ""):
             try:
                 origin_usd = _resolve_cell_value(raw_extra_value, f"G{row_idx}")
             except (ValueError, InvalidOperation) as e:
@@ -352,16 +324,16 @@ def parse_xlsx(source: Path | str | BinaryIO) -> list[dict]:
                 continue
 
         # For value-ignored events, force to zero
-        if event_type in EventType.value_ignored():
+        if EventType(event_type) in EventType.value_ignored():
             event_value = Decimal("0")
             gross_value = None
             origin_usd = None
 
         events.append({
-            "asset_class": asset_class.value,
+            "asset_class": asset_class,
             "market": "US" if layout == "international" else None,
-            "ticker": str(raw_ticker).strip().upper(),
-            "event_type": event_type.value,
+            "ticker": normalize_ticker(str(raw_ticker)),
+            "event_type": event_type,
             "event_date": event_date,
             "quantity": str(quantity),
             "event_value": str(event_value),
@@ -456,15 +428,19 @@ def import_events_to_ledger(
 
     for i, ev in enumerate(parsed, start=1):
         try:
-            gross_value = ev.get("gross_value") if ev["event_type"] == EventType.VENDA.value else None
-            origin_usd = ev.get("origin_usd") if ev["event_type"] == EventType.COMPRA.value else None
+            asset_class = normalize_asset_class_strict(ev["asset_class"])
+            event_type = normalize_event_type_strict(ev["event_type"])
+            ticker = normalize_ticker(ev["ticker"])
+            market = normalize_market(ev.get("market"))
+            gross_value = ev.get("gross_value") if event_type == EventType.VENDA.value else None
+            origin_usd = ev.get("origin_usd") if event_type == EventType.COMPRA.value else None
             operation_payload = build_operation_payload(
-                ticker=ev["ticker"],
-                asset_class=ev["asset_class"],
-                market=ev.get("market"),
+                ticker=ticker,
+                asset_class=asset_class,
+                market=market,
                 event_date=ev["event_date"],
                 portfolio_id=portfolio_id,
-                event_type=ev["event_type"],
+                event_type=event_type,
                 quantity=ev["quantity"],
                 event_value=ev["event_value"],
                 gross_value=gross_value,
@@ -475,10 +451,10 @@ def import_events_to_ledger(
             # Resolve or create asset through the central ticker + class + market matcher.
             match = match_asset(
                 conn,
-                ticker=ev["ticker"],
-                asset_class=ev["asset_class"],
+                ticker=ticker,
+                asset_class=asset_class,
                 event_date=ev["event_date"],
-                market=ev.get("market"),
+                market=market,
                 source=source,
                 create_review=True,
                 operation_payload=operation_payload,
@@ -488,9 +464,9 @@ def import_events_to_ledger(
             elif match["status"] == "none":
                 asset = create_asset(
                     conn,
-                    asset_class=ev["asset_class"],
-                    ticker=ev["ticker"],
-                    market=ev.get("market") or match.get("market"),
+                    asset_class=asset_class,
+                    ticker=ticker,
+                    market=market or match.get("market"),
                     valid_from=None,
                     event_date=ev["event_date"],
                     source=source,
@@ -500,7 +476,7 @@ def import_events_to_ledger(
                 review_count += 1
                 skipped += 1
                 review_details.append(
-                    f"Linha {i + source_row_offset}: {ev['ticker']} ({ev['asset_class']}) em {ev['event_date']} enviado para revisão"
+                    f"Linha {i + source_row_offset}: {ticker} ({asset_class}) em {ev['event_date']} enviado para revisão"
                 )
                 continue
 
@@ -509,7 +485,7 @@ def import_events_to_ledger(
                 conn,
                 portfolio_id=portfolio_id,
                 asset_id=asset_id,
-                event_type=ev["event_type"],
+                event_type=event_type,
                 event_date=ev["event_date"],
                 quantity=ev["quantity"],
                 event_value=ev["event_value"],
@@ -536,7 +512,7 @@ def import_events_to_ledger(
                     (
                         portfolio_id,
                         asset_id,
-                        ev["event_type"],
+                        event_type,
                         ev["event_date"],
                         ev["quantity"],
                         ev["event_value"],
@@ -550,7 +526,7 @@ def import_events_to_ledger(
                     ),
                 )
                 row = conn.execute("SELECT * FROM events WHERE id = ?", (cur.lastrowid,)).fetchone()
-                if ev["event_type"] == EventType.COMPRA.value:
+                if event_type == EventType.COMPRA.value:
                     from backend.services.fiscal_lot_service import create_lot_for_purchase
                     create_lot_for_purchase(conn, row, origin_usd)
                 from backend.services.event_service import recalculate_position
@@ -562,14 +538,14 @@ def import_events_to_ledger(
                 imported += 1
                 duplicates += 1
                 duplicate_details.append(
-                    f"Ativo {ev['ticker']}, {ev['event_type']} em {ev['event_date']}"
+                    f"Ativo {ticker}, {event_type} em {ev['event_date']}"
                 )
             else:
                 create_event(
                     conn,
                     portfolio_id=portfolio_id,
                     asset_id=asset_id,
-                    event_type=ev["event_type"],
+                    event_type=event_type,
                     event_date=ev["event_date"],
                     quantity=ev["quantity"],
                     event_value=ev["event_value"],
@@ -580,7 +556,7 @@ def import_events_to_ledger(
                 imported += 1
 
         except Exception as e:
-            errors.append(f"Evento {i} ({ev['ticker']} {ev['event_date']}): {e}")
+            errors.append(f"Evento {i} ({ev.get('ticker')} {ev.get('event_date')}): {e}")
             skipped += 1
 
     return {

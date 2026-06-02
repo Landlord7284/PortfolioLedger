@@ -211,7 +211,7 @@ def test_import_template_xlsx_uses_brazil_columns():
         "Valor Evento",
         "Valor Bruto",
     ]
-    assert instructions["B2"].value == "Use valores como Ação, BDR, ETF, FII, FI-INFRA, Tesouro Direto, Debênture."
+    assert instructions["B2"].value == "Use valores como A\u00e7\u00e3o, BDR, ETF, FII, FI-INFRA, Tesouro Direto, Deb\u00eanture."
     assert instructions["B3"].value == "Ticker do ativo, por exemplo PETR4."
     assert instructions["B5"].value == "Informe a data do evento em DD/MM/AAAA, ou como data do Excel."
     assert instructions["A8"].value == "Valor Bruto"

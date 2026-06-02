@@ -8,7 +8,7 @@ from openpyxl import Workbook
 from backend.database import get_db, init_db
 from backend.domain.enums import AssetClass, TreasuryIndexer
 from backend.main import app
-from backend.services import asset_service
+from backend.services import asset_service, portfolio_service
 from backend.services.import_service import import_to_ledger
 from backend.services.portfolio_service import create_portfolio
 
@@ -83,6 +83,111 @@ def test_asset_service_normalizes_cnpj_on_create_update_and_response(tmp_path):
 
         with pytest.raises(ValueError, match="CNPJ"):
             asset_service.update_asset_metadata(conn, asset["id"], cnpj="123")
+
+
+@pytest.mark.parametrize("asset_class", ["AÃ§Ã£o", "A��o", "Acao", "acao", "AÇÃO", "Debenture", "Deb�nture"])
+def test_manual_asset_class_rejects_aliases_and_mojibake_without_persisting(tmp_path, asset_class):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        with pytest.raises(ValueError, match="Classe do ativo invalido"):
+            asset_service.create_asset(conn, asset_class, "XPTO3", market="BR")
+
+        count = conn.execute("SELECT COUNT(*) AS count FROM assets").fetchone()["count"]
+
+    assert count == 0
+
+
+def test_xlsx_import_maps_safe_asset_class_aliases_to_canonical_values(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Registro"
+    sheet.append(["Classe", "Ativo", "Evento", "Data", "Quantidade", "Valor Evento", "Valor Bruto"])
+    sheet.append(["Acao", " xpto3 ", "Compra", "2026-05-10", 10, 1000, None])
+    sheet.append(["Debenture", "deb123", "Compra", "2026-05-11", 1, 100, None])
+    stream = BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+
+    with get_db(db_path) as conn:
+        portfolio = create_portfolio(conn, "Principal")
+        result = import_to_ledger(conn, stream, portfolio["id"])
+        rows = conn.execute(
+            """
+            SELECT a.asset_class, t.ticker
+            FROM assets a
+            JOIN asset_tickers t ON t.asset_id = a.id
+            ORDER BY a.id
+            """
+        ).fetchall()
+
+    assert result["imported"] == 2
+    assert [(row["asset_class"], row["ticker"]) for row in rows] == [
+        (AssetClass.ACAO.value, "XPTO3"),
+        (AssetClass.DEBENTURE.value, "DEB123"),
+    ]
+
+
+def test_ticker_is_uppercase_and_exact_ticker_queries_use_normalized_parameter(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, " xpto3 ", market="BR")
+        ticker_row = conn.execute("SELECT ticker FROM asset_tickers WHERE asset_id = ?", (asset["id"],)).fetchone()
+        resolved_id = asset_service.resolve_ticker_to_asset_id(conn, "xpto3", "2026-05-10")
+        found_id = asset_service.find_asset_by_ticker(conn, "xpto3")
+        match = asset_service.match_asset(conn, "xpto3", AssetClass.ACAO.value, "2026-05-10", "BR")
+
+    assert ticker_row["ticker"] == "XPTO3"
+    assert resolved_id == asset["id"]
+    assert found_id == asset["id"]
+    assert match["status"] == "exact"
+    assert match["asset"]["id"] == asset["id"]
+
+
+def test_asset_service_rejects_invalid_market_currency_and_incompatible_metadata(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        with pytest.raises(ValueError, match="Mercado"):
+            asset_service.create_asset(conn, AssetClass.ACAO.value, "BADM3", market="EU")
+        with pytest.raises(ValueError, match="Moeda"):
+            asset_service.create_asset(conn, AssetClass.ACAO.value, "BADC3", currency="EUR")
+        with pytest.raises(ValueError, match="Metadados incompativeis"):
+            asset_service.create_asset(conn, AssetClass.FII.value, "META11", market="BR", gics_sector="Real Estate")
+
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
+        with pytest.raises(ValueError, match="Metadados incompativeis"):
+            asset_service.update_asset_metadata(conn, asset["id"], gics_sector="Technology")
+
+        persisted = conn.execute("SELECT COUNT(*) AS count FROM assets").fetchone()["count"]
+
+    assert persisted == 1
+
+
+def test_review_status_and_portfolio_boolean_are_normalized_or_rejected(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal", consolidated="1")
+        review = asset_service.create_match_review(conn, "test", "xpto3", AssetClass.ACAO.value, "BR")
+        resolved = asset_service.resolve_match_review(conn, review["id"])
+
+        assert portfolio["consolidated"] == 1
+        assert review["status"] == "pending"
+        assert resolved["status"] == "resolved"
+
+        with pytest.raises(ValueError, match="Status de revisao"):
+            asset_service.list_match_reviews(conn, "PENDING")
+        with pytest.raises(ValueError, match="Booleano"):
+            portfolio_service.create_portfolio(conn, "Invalida", consolidated=2)
 
 
 def test_asset_api_contract_exposes_fiscal_fields_on_create_get_and_patch(tmp_path, monkeypatch):
@@ -428,8 +533,8 @@ def test_import_xlsx_persists_gross_value_only_for_sales(tmp_path):
     sheet = workbook.active
     sheet.title = "Registro"
     sheet.append(["Classe", "Ativo", "Evento", "Data", "Quantidade", "Valor Evento", "Valor Bruto"])
-    sheet.append(["Ação", "XPTO3", "Compra", "2026-05-10", 10, 1000, 1005])
-    sheet.append(["Ação", "XPTO3", "Venda", "2026-05-11", 4, 390, 400])
+    sheet.append([AssetClass.ACAO.value, "XPTO3", "Compra", "2026-05-10", 10, 1000, 1005])
+    sheet.append([AssetClass.ACAO.value, "XPTO3", "Venda", "2026-05-11", 4, 390, 400])
     stream = BytesIO()
     workbook.save(stream)
     stream.seek(0)
@@ -455,8 +560,8 @@ def test_import_xlsx_duplicate_preserves_sale_gross_value(tmp_path):
     sheet = workbook.active
     sheet.title = "Registro"
     sheet.append(["Classe", "Ativo", "Evento", "Data", "Quantidade", "Valor Evento", "Valor Bruto"])
-    sheet.append(["Ação", "XPTO3", "Compra", "2026-05-10", 10, 1000, None])
-    sheet.append(["Ação", "XPTO3", "Venda", "2026-05-11", 4, 390, 400])
+    sheet.append([AssetClass.ACAO.value, "XPTO3", "Compra", "2026-05-10", 10, 1000, None])
+    sheet.append([AssetClass.ACAO.value, "XPTO3", "Venda", "2026-05-11", 4, 390, 400])
     stream = BytesIO()
     workbook.save(stream)
 

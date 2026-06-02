@@ -12,14 +12,68 @@ import json
 import sqlite3
 from typing import Optional
 
-from backend.domain.enums import AssetClass, AssetMatchReviewStatus, Currency, Market, ReitType, TreasuryIndexer, default_market_for_class, currency_for_market
+from backend.domain.enums import AssetClass, AssetMatchReviewStatus, Market, default_market_for_class, currency_for_market
+from backend.domain.normalization import (
+    normalize_asset_class_strict,
+    normalize_currency,
+    normalize_event_type_strict,
+    normalize_market,
+    normalize_reit_type,
+    normalize_review_status,
+    normalize_ticker,
+    normalize_treasury_indexer,
+)
 from backend.services.fiscal_regime_service import require_supported_capital_gain_regime
-
-REIT_TYPES = {item.value for item in ReitType}
 
 
 def _normalize_ticker(ticker: str) -> str:
-    return ticker.strip().upper()
+    return normalize_ticker(ticker)
+
+
+def _has_metadata_value(value: Optional[str]) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
+def _reject_metadata(fields: list[tuple[str, Optional[str]]], message: str) -> None:
+    invalid = [name for name, value in fields if _has_metadata_value(value)]
+    if invalid:
+        raise ValueError(f"Metadados incompativeis para a classe do ativo: {', '.join(invalid)}. {message}")
+
+
+def _validate_metadata_for_class(
+    asset_class: str,
+    *,
+    sector: Optional[str] = None,
+    subsector: Optional[str] = None,
+    segment: Optional[str] = None,
+    gics_sector: Optional[str] = None,
+    gics_industry_group: Optional[str] = None,
+    gics_industry: Optional[str] = None,
+    gics_sub_industry: Optional[str] = None,
+    reit_type: Optional[str] = None,
+    treasury_indexer: Optional[str] = None,
+) -> None:
+    ac = AssetClass(asset_class)
+    br_taxonomy = [("sector", sector), ("subsector", subsector), ("segment", segment)]
+    gics_taxonomy = [
+        ("gics_sector", gics_sector),
+        ("gics_industry_group", gics_industry_group),
+        ("gics_industry", gics_industry),
+        ("gics_sub_industry", gics_sub_industry),
+    ]
+    reit_fields = [("reit_type", reit_type)]
+    treasury_fields = [("treasury_indexer", treasury_indexer)]
+
+    if ac in {AssetClass.ACAO, AssetClass.FII}:
+        _reject_metadata(gics_taxonomy + reit_fields + treasury_fields, "Esta classe aceita apenas sector, subsector e segment.")
+    elif ac == AssetClass.STOCK:
+        _reject_metadata(br_taxonomy + reit_fields + treasury_fields, "Stock aceita apenas campos GICS.")
+    elif ac == AssetClass.REIT:
+        _reject_metadata(br_taxonomy + treasury_fields, "REIT aceita campos GICS e reit_type.")
+    elif ac == AssetClass.TESOURO_DIRETO:
+        _reject_metadata(br_taxonomy + gics_taxonomy + reit_fields, "Tesouro Direto aceita apenas treasury_indexer.")
+    else:
+        _reject_metadata(br_taxonomy + gics_taxonomy + reit_fields + treasury_fields, "Esta classe nao aceita metadados setoriais, GICS, REIT Type ou indexador.")
 
 
 def _normalize_cnpj(cnpj: Optional[str]) -> Optional[str]:
@@ -33,37 +87,27 @@ def _normalize_cnpj(cnpj: Optional[str]) -> Optional[str]:
     return digits
 
 
-def _normalize_reit_type(reit_type: Optional[str]) -> Optional[str]:
-    if reit_type is None:
-        return None
-    value = str(reit_type).strip()
-    if not value:
-        return None
-    if value not in REIT_TYPES:
-        raise ValueError("REIT Type deve ser Equity, Mortgage ou Hybrid.")
+def _normalize_reit_type(asset_class: str, reit_type: Optional[str]) -> Optional[str]:
+    value = normalize_reit_type(reit_type)
+    if value is not None and AssetClass(asset_class) != AssetClass.REIT:
+        raise ValueError("REIT Type e permitido apenas para REIT.")
     return value
 
 
 def _normalize_treasury_indexer(asset_class: str, treasury_indexer: Optional[str]) -> Optional[str]:
-    if treasury_indexer is None:
-        return None
-    value = str(treasury_indexer).strip().upper()
-    if not value:
-        return None
-    if AssetClass(asset_class) != AssetClass.TESOURO_DIRETO:
+    value = normalize_treasury_indexer(treasury_indexer)
+    if value is not None and AssetClass(asset_class) != AssetClass.TESOURO_DIRETO:
         raise ValueError("Indexador e permitido apenas para Tesouro Direto.")
-    try:
-        return TreasuryIndexer(value).value
-    except ValueError as exc:
-        raise ValueError("Indexador deve ser SELIC, IPCA ou PREFIXED.") from exc
+    return value
 
 
 def _resolve_market(asset_class: str, market: Optional[str], ticker: Optional[str] = None, source: str = "manual") -> str | None:
+    normalized_market = normalize_market(market) if market is not None else None
     forced = default_market_for_class(asset_class)
     if forced:
         return forced.value
-    if market:
-        return Market(market).value
+    if normalized_market:
+        return normalized_market
     if AssetClass(asset_class) == AssetClass.ETF and source == "import_xlsx" and ticker:
         return Market.BR.value if _normalize_ticker(ticker).endswith("11") else None
     if AssetClass(asset_class) == AssetClass.ETF:
@@ -123,11 +167,11 @@ def build_operation_payload(
         return None
     payload = {
         "ticker": _normalize_ticker(ticker),
-        "asset_class": AssetClass(asset_class).value,
+        "asset_class": normalize_asset_class_strict(asset_class),
         "market": market,
         "event_date": event_date,
         "portfolio_id": portfolio_id,
-        "event_type": event_type,
+        "event_type": normalize_event_type_strict(event_type) if event_type else event_type,
         "quantity": quantity,
         "event_value": event_value,
         "gross_value": gross_value,
@@ -151,7 +195,8 @@ def create_match_review(
     operation_payload: Optional[dict] = None,
 ) -> dict:
     normalized = _normalize_ticker(ticker)
-    ac = AssetClass(asset_class).value
+    ac = normalize_asset_class_strict(asset_class)
+    normalized_market = normalize_market(market)
     existing = conn.execute(
         """
         SELECT * FROM asset_match_reviews
@@ -163,7 +208,7 @@ def create_match_review(
           AND COALESCE(event_date, '') = COALESCE(?, '')
         ORDER BY id DESC LIMIT 1
         """,
-        (AssetMatchReviewStatus.PENDING.value, source, normalized, ac, market, event_date),
+        (AssetMatchReviewStatus.PENDING.value, source, normalized, ac, normalized_market, event_date),
     ).fetchone()
     if existing:
         return dict(existing)
@@ -178,7 +223,7 @@ def create_match_review(
             source,
             normalized,
             ac,
-            market,
+            normalized_market,
             event_date,
             json.dumps(candidate_asset_ids or []),
             reason,
@@ -198,7 +243,7 @@ def match_asset(
     create_review: bool = False,
     operation_payload: Optional[dict] = None,
 ) -> dict:
-    ac = AssetClass(asset_class).value
+    ac = normalize_asset_class_strict(asset_class)
     normalized = _normalize_ticker(ticker)
     resolved_market = _resolve_market(ac, market, normalized, source)
     review_payload = {**operation_payload, "market": resolved_market} if operation_payload else None
@@ -212,7 +257,7 @@ def match_asset(
         f"""
         SELECT DISTINCT a.* FROM assets a
         JOIN asset_tickers t ON t.asset_id = a.id
-        WHERE UPPER(t.ticker) = ?
+        WHERE t.ticker = ?
           AND a.asset_class = ?
           AND a.market = ?
           AND a.merged_into_asset_id IS NULL
@@ -233,7 +278,7 @@ def match_asset(
         """
         SELECT DISTINCT a.* FROM assets a
         JOIN asset_tickers t ON t.asset_id = a.id
-        WHERE UPPER(t.ticker) = ?
+        WHERE t.ticker = ?
           AND a.merged_into_asset_id IS NULL
         ORDER BY a.asset_class, a.market, a.id
         """,
@@ -249,7 +294,7 @@ def match_asset(
         """
         SELECT a.merged_into_asset_id FROM assets a
         JOIN asset_tickers t ON t.asset_id = a.id
-        WHERE UPPER(t.ticker) = ? AND a.asset_class = ? AND a.market = ?
+        WHERE t.ticker = ? AND a.asset_class = ? AND a.market = ?
           AND a.merged_into_asset_id IS NOT NULL
         ORDER BY a.id LIMIT 1
         """,
@@ -299,17 +344,30 @@ def create_asset(
     allow_existing: bool = True,
     allow_probable: bool = False,
 ) -> dict:
-    ac = AssetClass(asset_class)
+    ac = AssetClass(normalize_asset_class_strict(asset_class))
+    normalized_ticker = _normalize_ticker(ticker)
     normalized_cnpj = _normalize_cnpj(cnpj)
-    normalized_reit_type = _normalize_reit_type(reit_type)
+    normalized_reit_type = _normalize_reit_type(ac.value, reit_type)
     normalized_treasury_indexer = _normalize_treasury_indexer(ac.value, treasury_indexer)
     require_supported_capital_gain_regime(fiscal_regime_override)
     if currency:
-        Currency(currency)
-    resolved_market = _resolve_market(ac.value, market, ticker, source)
+        normalize_currency(currency)
+    _validate_metadata_for_class(
+        ac.value,
+        sector=sector,
+        subsector=subsector,
+        segment=segment,
+        gics_sector=gics_sector,
+        gics_industry_group=gics_industry_group,
+        gics_industry=gics_industry,
+        gics_sub_industry=gics_sub_industry,
+        reit_type=normalized_reit_type,
+        treasury_indexer=normalized_treasury_indexer,
+    )
+    resolved_market = _resolve_market(ac.value, market, normalized_ticker, source)
     if resolved_market is None:
         operation_payload = build_operation_payload(
-            ticker=ticker,
+            ticker=normalized_ticker,
             asset_class=ac.value,
             market=None,
             event_date=event_date,
@@ -322,11 +380,11 @@ def create_asset(
             notes=notes,
             source_row=source_row,
         )
-        create_match_review(conn, source, ticker, ac.value, None, event_date, [], "Mercado do ETF deve ser confirmado.", operation_payload)
+        create_match_review(conn, source, normalized_ticker, ac.value, None, event_date, [], "Mercado do ETF deve ser confirmado.", operation_payload)
         raise ValueError("Mercado do ETF deve ser confirmado antes do cadastro.")
     resolved_currency = currency_for_market(resolved_market).value
     operation_payload = build_operation_payload(
-        ticker=ticker,
+        ticker=normalized_ticker,
         asset_class=ac.value,
         market=resolved_market,
         event_date=event_date,
@@ -340,7 +398,7 @@ def create_asset(
         source_row=source_row,
     )
 
-    match = match_asset(conn, ticker, ac.value, event_date, resolved_market, source, create_review=not allow_probable, operation_payload=operation_payload)
+    match = match_asset(conn, normalized_ticker, ac.value, event_date, resolved_market, source, create_review=not allow_probable, operation_payload=operation_payload)
     if match["status"] == "exact" and allow_existing:
         return match["asset"]
     if match["status"] == "probable" and not allow_probable:
@@ -367,7 +425,7 @@ def create_asset(
         INSERT INTO asset_tickers (asset_id, ticker, name, valid_from)
         VALUES (?, ?, ?, ?)
         """,
-        (asset_id, _normalize_ticker(ticker), name, valid_from),
+        (asset_id, normalized_ticker, name, valid_from),
     )
     return get_asset(conn, asset_id)
 
@@ -411,7 +469,7 @@ def get_asset(conn: sqlite3.Connection, asset_id: int) -> dict | None:
 def list_assets(conn: sqlite3.Connection, asset_class: Optional[str] = None, include_merged: bool = False) -> list[dict]:
     merged_clause = "" if include_merged else " AND merged_into_asset_id IS NULL"
     if asset_class:
-        rows = conn.execute(f"SELECT * FROM assets WHERE asset_class = ?{merged_clause} ORDER BY id", (asset_class,)).fetchall()
+        rows = conn.execute(f"SELECT * FROM assets WHERE asset_class = ?{merged_clause} ORDER BY id", (normalize_asset_class_strict(asset_class),)).fetchall()
     else:
         where = "" if include_merged else "WHERE merged_into_asset_id IS NULL"
         rows = conn.execute(f"SELECT * FROM assets {where} ORDER BY id").fetchall()
@@ -476,9 +534,9 @@ def update_asset_metadata(
         return None
     require_supported_capital_gain_regime(fiscal_regime_override)
     normalized_cnpj = _normalize_cnpj(cnpj)
-    normalized_reit_type = _normalize_reit_type(reit_type)
+    next_class = normalize_asset_class_strict(asset_class) if asset_class is not None else current["asset_class"]
+    normalized_reit_type = _normalize_reit_type(next_class, reit_type) if reit_type is not None else None
 
-    next_class = AssetClass(asset_class).value if asset_class is not None else current["asset_class"]
     normalized_treasury_indexer = _normalize_treasury_indexer(next_class, treasury_indexer)
     next_market = _resolve_market(next_class, market if market is not None else current["market"], ticker or current.get("current_ticker"), "manual")
     if next_market is None:
@@ -488,6 +546,20 @@ def update_asset_metadata(
         conflict = match_asset(conn, next_ticker, next_class, None, next_market, "metadata_update")
         if conflict["status"] == "exact" and conflict["asset"]["id"] != asset_id:
             raise ValueError("Já existe ativo com este ticker, classe e mercado. Use mesclagem manual para preservar o id correto.")
+
+    validate_existing = asset_class is not None
+    _validate_metadata_for_class(
+        next_class,
+        sector=sector if sector is not None else (current.get("sector") if validate_existing else None),
+        subsector=subsector if subsector is not None else (current.get("subsector") if validate_existing else None),
+        segment=segment if segment is not None else (current.get("segment") if validate_existing else None),
+        gics_sector=gics_sector if gics_sector is not None else (current.get("gics_sector") if validate_existing else None),
+        gics_industry_group=gics_industry_group if gics_industry_group is not None else (current.get("gics_industry_group") if validate_existing else None),
+        gics_industry=gics_industry if gics_industry is not None else (current.get("gics_industry") if validate_existing else None),
+        gics_sub_industry=gics_sub_industry if gics_sub_industry is not None else (current.get("gics_sub_industry") if validate_existing else None),
+        reit_type=normalized_reit_type if reit_type is not None else (current.get("reit_type") if validate_existing else None),
+        treasury_indexer=normalized_treasury_indexer if treasury_indexer is not None else (current.get("treasury_indexer") if validate_existing else None),
+    )
 
     fields: list[str] = []
     values: list = []
@@ -571,9 +643,10 @@ def list_asset_tickers(conn: sqlite3.Connection, asset_id: int) -> list[dict]:
 
 
 def list_match_reviews(conn: sqlite3.Connection, status: str = AssetMatchReviewStatus.PENDING.value) -> list[dict]:
+    normalized_status = normalize_review_status(status)
     rows = conn.execute(
         "SELECT * FROM asset_match_reviews WHERE status = ? ORDER BY created_at DESC, id DESC",
-        (status,),
+        (normalized_status,),
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -597,7 +670,7 @@ def merge_assets(conn: sqlite3.Connection, source_asset_id: int, target_asset_id
     if source.get("merged_into_asset_id") or target.get("merged_into_asset_id"):
         raise ValueError("Ativos mesclados não podem ser usados como origem/destino operacional.")
     source_tickers = [
-        row["ticker"] for row in conn.execute(
+        _normalize_ticker(row["ticker"]) for row in conn.execute(
             "SELECT DISTINCT ticker FROM asset_tickers WHERE asset_id = ?",
             (source_asset_id,),
         ).fetchall()
@@ -609,6 +682,7 @@ def merge_assets(conn: sqlite3.Connection, source_asset_id: int, target_asset_id
     conn.execute("UPDATE events SET asset_id = ? WHERE asset_id = ?", (target_asset_id, source_asset_id))
     conn.execute("UPDATE fiscal_lots SET asset_id = ? WHERE asset_id = ?", (target_asset_id, source_asset_id))
     for t in conn.execute("SELECT * FROM asset_tickers WHERE asset_id = ?", (source_asset_id,)).fetchall():
+        normalized_ticker = _normalize_ticker(t["ticker"])
         exists = conn.execute(
             """
             SELECT 1 FROM asset_tickers
@@ -617,12 +691,12 @@ def merge_assets(conn: sqlite3.Connection, source_asset_id: int, target_asset_id
               AND COALESCE(valid_until, '') = COALESCE(?, '')
             LIMIT 1
             """,
-            (target_asset_id, t["ticker"], t["valid_from"], t["valid_until"]),
+            (target_asset_id, normalized_ticker, t["valid_from"], t["valid_until"]),
         ).fetchone()
         if not exists:
             conn.execute(
                 "INSERT INTO asset_tickers (asset_id, ticker, name, valid_from, valid_until) VALUES (?, ?, ?, ?, ?)",
-                (target_asset_id, t["ticker"], t["name"], t["valid_from"], t["valid_until"]),
+                (target_asset_id, normalized_ticker, t["name"], t["valid_from"], t["valid_until"]),
             )
     conn.execute(
         "UPDATE assets SET merged_into_asset_id = ?, merged_at = datetime('now'), duplicate_flag = 0 WHERE id = ?",

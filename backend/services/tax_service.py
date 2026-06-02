@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from backend.domain.engine import to_decimal
 from backend.domain.enums import EventType
+from backend.domain.normalization import normalize_bool_01
 from backend.services.fiscal_regime_service import (
     has_tax_parameter,
     require_supported_capital_gain_regime,
@@ -477,8 +478,8 @@ def _validate_tax_parameter_payload(values: dict[str, Any]) -> dict[str, Any]:
         "darf_code": _nullable_text(values.get("darf_code")),
         "minimum_darf_amount": _decimal_text(values.get("minimum_darf_amount", "10.00"), "DARF minima"),
         "loss_bucket": _nullable_text(values.get("loss_bucket")),
-        "active": bool(values.get("active", True)),
-        "monthly_darf_enabled": bool(values.get("monthly_darf_enabled", True)),
+        "active": normalize_bool_01(values.get("active", True)),
+        "monthly_darf_enabled": normalize_bool_01(values.get("monthly_darf_enabled", True)),
     }
     if _d(normalized["minimum_darf_amount"]) < ZERO:
         raise ValueError("DARF minima nao pode ser negativa.")
@@ -552,8 +553,8 @@ def create_tax_parameter(conn: sqlite3.Connection, values: dict[str, Any]) -> di
             normalized["darf_code"],
             normalized["minimum_darf_amount"],
             normalized["loss_bucket"],
-            int(normalized["active"]),
-            int(normalized["monthly_darf_enabled"]),
+            normalized["active"],
+            normalized["monthly_darf_enabled"],
         ),
     )
     return _tax_parameter_row(conn, cur.lastrowid)
@@ -600,8 +601,8 @@ def update_tax_parameter(conn: sqlite3.Connection, parameter_id: int, updates: d
             normalized["darf_code"],
             normalized["minimum_darf_amount"],
             normalized["loss_bucket"],
-            int(normalized["active"]),
-            int(normalized["monthly_darf_enabled"]),
+            normalized["active"],
+            normalized["monthly_darf_enabled"],
             parameter_id,
         ),
     )

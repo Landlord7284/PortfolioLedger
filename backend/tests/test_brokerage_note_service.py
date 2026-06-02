@@ -105,12 +105,11 @@ def test_largest_remainder_uses_original_order_as_tie_breaker():
     assert [ev["allocated_fee"] for ev in result["events"]] == ["0.01", "0.01", "0.00"]
 
 
-def test_accepts_mojibake_asset_class_alias():
-    result = calculate_brokerage_note(_payload(operations=[
-        _operation(asset_class="AÃ§Ã£o"),
-    ]))
-
-    assert result["events"][0]["asset_class"] == AssetClass.ACAO.value
+def test_rejects_mojibake_asset_class_alias():
+    with pytest.raises(BrokerageNoteValidationError, match="Classe do ativo invalido"):
+        calculate_brokerage_note(_payload(operations=[
+            _operation(asset_class="AÃ§Ã£o"),
+        ]))
 
 
 def test_calculates_purchase_note_with_debit_net_amount():

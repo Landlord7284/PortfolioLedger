@@ -22,6 +22,7 @@ from backend.domain.engine import (
     to_decimal,
 )
 from backend.domain.enums import EventType
+from backend.domain.normalization import normalize_event_type_strict
 
 
 CENTS = Decimal("0.01")
@@ -287,7 +288,7 @@ def create_event(
     Returns the created event row as dict.
     """
     # Parse and validate enum
-    et = EventType(event_type)
+    et = EventType(normalize_event_type_strict(event_type))
 
     qty = to_decimal(quantity)
     val = to_decimal(event_value)
@@ -473,6 +474,8 @@ def correct_event(
 
     The correction event is linked to the original via ``correction_of``.
     """
+    et = EventType(normalize_event_type_strict(event_type))
+
     # First, storno the original
     storno_event(conn, event_id, notes=f"Estorno para correção do evento #{event_id}")
 
@@ -480,7 +483,6 @@ def correct_event(
         "SELECT * FROM events WHERE id = ?", (event_id,)
     ).fetchone()
 
-    et = EventType(event_type)
     qty = to_decimal(quantity)
     val = to_decimal(event_value)
     gross = to_decimal(gross_value) if gross_value and et == EventType.VENDA else None
