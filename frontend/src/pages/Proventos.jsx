@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
+const PROVENTOS_FILTER_STORAGE_KEY = 'ledger.proventos.filters';
 const PERIOD_OPTIONS = [
   { value: 'year', label: 'Ano' },
   { value: '12m', label: '12m' },
@@ -40,6 +41,18 @@ const CHART_COLORS = [
 const TOP_SEGMENT_LIMIT = 5;
 const OTHERS_SEGMENT_KEY = 'Outros';
 const ALL_FILTER_VALUE = 'all';
+
+function getStoredProventosFilters() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PROVENTOS_FILTER_STORAGE_KEY) || '{}');
+    return {
+      period: PERIOD_OPTIONS.some((option) => option.value === parsed.period) ? parsed.period : 'year',
+      chartGroupBy: CHART_GROUP_OPTIONS.some((option) => option.value === parsed.chartGroupBy) ? parsed.chartGroupBy : 'asset',
+    };
+  } catch {
+    return { period: 'year', chartGroupBy: 'asset' };
+  }
+}
 
 function toNumber(value) {
   const parsed = Number(value || 0);
@@ -164,8 +177,7 @@ function LoadingCards() {
 
 export default function Proventos() {
   const { activePortfolioId, portfolioList, hideValues } = useContext(AppContext);
-  const [period, setPeriod] = useState('year');
-  const [chartGroupBy, setChartGroupBy] = useState('asset');
+  const [proventosFilters, setProventosFilters] = useState(getStoredProventosFilters);
   const [tableYear, setTableYear] = useState('');
   const [tableMonth, setTableMonth] = useState('');
   const [tableAssetClass, setTableAssetClass] = useState(ALL_FILTER_VALUE);
@@ -174,6 +186,12 @@ export default function Proventos() {
   const [sort, setSort] = useState({ key: 'payment_date', direction: 'desc' });
 
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
+  const period = proventosFilters.period;
+  const chartGroupBy = proventosFilters.chartGroupBy;
+
+  useEffect(() => {
+    localStorage.setItem(PROVENTOS_FILTER_STORAGE_KEY, JSON.stringify(proventosFilters));
+  }, [proventosFilters]);
 
   useEffect(() => {
     if (!activePortfolioId) return;
@@ -209,7 +227,7 @@ export default function Proventos() {
   }, [activePortfolioId, period, chartGroupBy, tableYear, tableMonth, tableAssetClass]);
 
   const handlePeriodChange = (value) => {
-    setPeriod(value);
+    setProventosFilters((current) => ({ ...current, period: value }));
   };
 
   const monthlyChartSegments = useMemo(() => (
@@ -422,7 +440,7 @@ export default function Proventos() {
                   variant={chartGroupBy === option.value ? 'default' : 'outline'}
                   size="sm"
                   className="h-8 rounded-full px-3"
-                  onClick={() => setChartGroupBy(option.value)}
+                  onClick={() => setProventosFilters((current) => ({ ...current, chartGroupBy: option.value }))}
                 >
                   {option.label}
                 </Button>

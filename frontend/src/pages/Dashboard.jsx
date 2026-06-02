@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext, useMemo, useCallback } from 'react';
+import { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, Pie, PieChart, XAxis, YAxis } from 'recharts';
 import { AppContext } from '../App';
@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ChartContainer, ChartTooltip } from '@/components/ui/chart';
+import { Kbd } from '@/components/ui/kbd';
 import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
@@ -33,6 +34,7 @@ const PERIOD_OPTIONS = [
 ];
 const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--primary)'];
 const DETAIL_ASSET_LIMIT = 9;
+const SEARCH_MATCH_LIMIT = 6;
 const CLASS_LEVEL = { type: 'class', field: 'asset_class', label: 'Classe', emptyLabel: 'Sem classe' };
 const ASSET_LEVEL = { type: 'asset', field: 'asset_id', label: 'Ativo' };
 const HIERARCHY_BY_CLASS = {
@@ -77,6 +79,32 @@ function toNumber(value) {
 
 function getAssetLabel(position) {
   return position.current_ticker || `#${position.asset_id}`;
+}
+
+function normalizeSearchText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getSearchFillValue(position) {
+  return position.current_ticker || position.name || getAssetLabel(position);
+}
+
+function positionMatchesSearch(position, normalizedQuery) {
+  if (!normalizedQuery) return true;
+  return [position.current_ticker, getAssetLabel(position), position.name, position.asset_id]
+    .some((value) => normalizeSearchText(value).includes(normalizedQuery));
+}
+
+function getSearchRank(position, normalizedQuery) {
+  const ticker = normalizeSearchText(position.current_ticker);
+  const label = normalizeSearchText(getAssetLabel(position));
+  const name = normalizeSearchText(position.name);
+
+  if (ticker === normalizedQuery || label === normalizedQuery) return 0;
+  if (ticker.startsWith(normalizedQuery) || label.startsWith(normalizedQuery)) return 1;
+  if (name.startsWith(normalizedQuery)) return 2;
+  if (ticker.includes(normalizedQuery) || label.includes(normalizedQuery)) return 3;
+  return 4;
 }
 
 function hasText(value) {
@@ -444,12 +472,15 @@ export default function Dashboard() {
   const [showImport, setShowImport] = useState(false);
   const [assetFilterClass, setAssetFilterClass] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(0);
   const [sort, setSort] = useState({ key: 'ticker', direction: 'asc' });
   const [isLargeModal, setIsLargeModal] = useState(false);
   const [showRedeemed, setShowRedeemed] = useState(() => {
     return localStorage.getItem('showRedeemed') === 'true';
   });
   const navigate = useNavigate();
+  const searchInputRef = useRef(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') === 'assets' ? 'assets' : 'dashboard';
   const dashboardAssetClass = dashboardFilters.assetClass;
@@ -466,6 +497,33 @@ export default function Dashboard() {
   useEffect(() => {
     localStorage.setItem(DASHBOARD_FILTER_STORAGE_KEY, JSON.stringify(dashboardFilters));
   }, [dashboardFilters]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (event) => {
+      const target = event.target;
+      const isEditing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName) || target?.isContentEditable;
+
+      if (
+        event.key !== '/'
+        || event.ctrlKey
+        || event.metaKey
+        || event.altKey
+        || isEditing
+        || showEventForm
+        || showB3Import
+        || showImport
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      setSearchFocused(true);
+      searchInputRef.current?.focus();
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [showEventForm, showB3Import, showImport]);
 
   const loadPositions = useCallback(async () => {
     if (!activePortfolioId) {
@@ -627,13 +685,7 @@ export default function Dashboard() {
     const visible = positionsWithShare.filter((p) => {
       if (!showRedeemed && toNumber(p.quantity) === 0) return false;
       if (assetFilterClass && p.asset_class !== assetFilterClass) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        const ticker = (p.current_ticker || '').toLowerCase();
-        const name = (p.name || '').toLowerCase();
-        return ticker.includes(q) || name.includes(q);
-      }
-      return true;
+      return positionMatchesSearch(p, normalizeSearchText(searchQuery));
     });
 
     return [...visible].sort((a, b) => {
@@ -642,6 +694,71 @@ export default function Dashboard() {
       return result === 0 ? compareText(getAssetLabel(a), getAssetLabel(b)) : result * direction;
     });
   }, [positionsWithShare, showRedeemed, assetFilterClass, searchQuery, sort]);
+
+  const searchMatches = useMemo(() => {
+    const normalizedQuery = normalizeSearchText(searchQuery);
+    if (!normalizedQuery) return [];
+
+    return positionsWithShare
+      .filter((position) => {
+        if (!showRedeemed && toNumber(position.quantity) === 0) return false;
+        if (assetFilterClass && position.asset_class !== assetFilterClass) return false;
+        return positionMatchesSearch(position, normalizedQuery);
+      })
+      .sort((a, b) => {
+        const rank = getSearchRank(a, normalizedQuery) - getSearchRank(b, normalizedQuery);
+        return rank === 0 ? compareText(getAssetLabel(a), getAssetLabel(b)) : rank;
+      })
+      .slice(0, SEARCH_MATCH_LIMIT);
+  }, [positionsWithShare, showRedeemed, assetFilterClass, searchQuery]);
+
+  useEffect(() => {
+    setActiveSearchMatchIndex(0);
+  }, [searchQuery, assetFilterClass, showRedeemed]);
+
+  const selectedSearchMatchIndex = searchMatches.length ? Math.min(activeSearchMatchIndex, searchMatches.length - 1) : -1;
+  const activeSearchMatch = searchMatches[selectedSearchMatchIndex] || null;
+  const showSearchMatches = searchFocused && normalizeSearchText(searchQuery) && searchMatches.length > 0;
+
+  const navigateToSearchMatch = useCallback((position) => {
+    if (!position) return;
+    setSearchQuery(getSearchFillValue(position));
+    setSearchFocused(false);
+    navigate(`/assets/${position.asset_id}`);
+  }, [navigate]);
+
+  const handleSearchKeyDown = useCallback((event) => {
+    if (event.key === 'ArrowDown' && searchMatches.length > 0) {
+      event.preventDefault();
+      setActiveSearchMatchIndex((current) => (current + 1) % searchMatches.length);
+      return;
+    }
+
+    if (event.key === 'ArrowUp' && searchMatches.length > 0) {
+      event.preventDefault();
+      setActiveSearchMatchIndex((current) => (current - 1 + searchMatches.length) % searchMatches.length);
+      return;
+    }
+
+    if (event.key === 'Tab' && activeSearchMatch) {
+      const fillValue = getSearchFillValue(activeSearchMatch);
+      if (searchQuery !== fillValue) {
+        event.preventDefault();
+        setSearchQuery(fillValue);
+      }
+      return;
+    }
+
+    if (event.key === 'Enter' && activeSearchMatch) {
+      event.preventDefault();
+      navigateToSearchMatch(activeSearchMatch);
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      setSearchFocused(false);
+    }
+  }, [activeSearchMatch, navigateToSearchMatch, searchMatches.length, searchQuery]);
 
   const displayMoney = (val) => formatMoney(val, hideValues);
   const displayQuantity = (val, assetClass) => formatQuantity(val, assetClass, hideValues);
@@ -785,14 +902,58 @@ export default function Dashboard() {
 
           <div className="flex flex-wrap items-center gap-2 md:justify-end">
             <OperationalAlert alerts={alerts} hideValues={hideValues} />
-            <div className="relative">
+            <div className="relative w-[260px]">
               <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                className="w-[240px] pl-8"
+                ref={searchInputRef}
+                role="combobox"
+                aria-expanded={Boolean(showSearchMatches)}
+                aria-controls="dashboard-asset-search-listbox"
+                aria-activedescendant={activeSearchMatch ? `dashboard-asset-search-${activeSearchMatch.asset_id}` : undefined}
+                className="w-full pl-8 pr-12"
                 placeholder="Buscar ticker ou nome..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setSearchFocused(false)}
+                onKeyDown={handleSearchKeyDown}
               />
+              <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
+                <Kbd>/</Kbd>
+              </div>
+              {showSearchMatches && (
+                <div
+                  id="dashboard-asset-search-listbox"
+                  role="listbox"
+                  className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
+                >
+                  {searchMatches.map((position, index) => {
+                    const selected = index === selectedSearchMatchIndex;
+                    return (
+                      <button
+                        key={position.asset_id}
+                        id={`dashboard-asset-search-${position.asset_id}`}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={cn(
+                          'flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm outline-none transition-colors',
+                          selected ? 'bg-accent text-accent-foreground' : 'hover:bg-accent hover:text-accent-foreground'
+                        )}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseEnter={() => setActiveSearchMatchIndex(index)}
+                        onClick={() => navigateToSearchMatch(position)}
+                      >
+                        <span className="flex min-w-0 flex-col">
+                          <span className="truncate font-medium">{getAssetLabel(position)}</span>
+                          {position.name && <span className="truncate text-xs text-muted-foreground">{position.name}</span>}
+                        </span>
+                        {position.asset_class && <Badge variant="secondary" className="shrink-0">{position.asset_class}</Badge>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             <Button variant="outline" onClick={() => setShowB3Import(true)}>
               <Download className="h-4 w-4" />
