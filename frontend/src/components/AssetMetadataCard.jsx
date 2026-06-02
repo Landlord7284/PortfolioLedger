@@ -14,8 +14,10 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 const AUTO_VALUE = '__auto__';
-const CLASSIFICATION_FIELDS = ['sector', 'subsector', 'segment'];
-const AUTOCOMPLETE_METADATA_FIELDS = new Set(CLASSIFICATION_FIELDS);
+const BRAZILIAN_CLASSIFICATION_FIELDS = ['sector', 'subsector', 'segment'];
+const GICS_FIELDS = ['gics_sector', 'gics_industry_group', 'gics_industry', 'gics_sub_industry'];
+const OPTIONAL_METADATA_FIELDS = new Set([...GICS_FIELDS, 'reit_type']);
+const AUTOCOMPLETE_METADATA_FIELDS = new Set([...BRAZILIAN_CLASSIFICATION_FIELDS, ...GICS_FIELDS]);
 
 const FISCAL_REGIME_OPTIONS = [
   { value: 'B3_COMMON_15', label: 'B3 - Operacoes comuns 15%' },
@@ -28,6 +30,18 @@ const FISCAL_TREATMENT_OPTIONS = [
   { value: 'EXEMPT_ZERO', label: 'Isento sem DARF' },
 ];
 
+const REIT_TYPE_OPTIONS = [
+  { value: 'Equity', label: 'Equity' },
+  { value: 'Mortgage', label: 'Mortgage' },
+  { value: 'Hybrid', label: 'Hybrid' },
+];
+
+const TREASURY_INDEXER_OPTIONS = [
+  { value: 'SELIC', label: 'SELIC' },
+  { value: 'IPCA', label: 'IPCA' },
+  { value: 'PREFIXED', label: 'Prefixado' },
+];
+
 const ASSET_METADATA_FIELDS = {
   'Ação': ['name', 'cnpj', 'sector', 'subsector', 'segment'],
   BDR: ['name', 'cnpj', 'sector', 'subsector', 'segment'],
@@ -37,9 +51,9 @@ const ASSET_METADATA_FIELDS = {
   Debênture: ['name', 'isin', 'maturity_date'],
   CRI: ['name', 'isin', 'maturity_date'],
   CRA: ['name', 'isin', 'maturity_date'],
-  'Tesouro Direto': ['name', 'maturity_date'],
-  Stock: ['name', 'isin'],
-  REIT: ['name', 'isin'],
+  'Tesouro Direto': ['name', 'treasury_indexer', 'maturity_date'],
+  Stock: ['name', 'isin', 'gics_sector', 'gics_industry_group', 'gics_industry', 'gics_sub_industry'],
+  REIT: ['name', 'isin', 'reit_type', 'gics_sector', 'gics_industry_group', 'gics_industry', 'gics_sub_industry'],
 };
 
 const FIELD_LABELS = {
@@ -49,6 +63,12 @@ const FIELD_LABELS = {
   sector: 'Setor',
   subsector: 'Subsetor',
   segment: 'Segmento',
+  gics_sector: 'Sector',
+  gics_industry_group: 'Industry Group',
+  gics_industry: 'Industry',
+  gics_sub_industry: 'Sub-Industry',
+  reit_type: 'REIT Type',
+  treasury_indexer: 'Indexador',
   maturity_date: 'Vencimento',
   fiscal_regime_override: 'Regime fiscal',
   fiscal_tax_treatment: 'Tratamento fiscal',
@@ -65,7 +85,10 @@ function getMetadataFields(assetClass) {
   return fieldNames.map((name) => ({
     name,
     label: name === 'name' ? getNameLabel(assetClass) : FIELD_LABELS[name],
-    type: name === 'maturity_date' ? 'date' : 'text',
+    type: name === 'maturity_date' ? 'date' : name === 'reit_type' || name === 'treasury_indexer' ? 'select' : 'text',
+    options: name === 'reit_type' ? REIT_TYPE_OPTIONS : name === 'treasury_indexer' ? TREASURY_INDEXER_OPTIONS : undefined,
+    placeholder: name === 'reit_type' ? 'Nao informado' : name === 'treasury_indexer' ? 'Indexador' : undefined,
+    required: name === 'treasury_indexer' ? false : !OPTIONAL_METADATA_FIELDS.has(name),
   }));
 }
 
@@ -105,7 +128,7 @@ function getUniqueFieldValues(assets, fieldName) {
 
 export function buildAssetMetadataSuggestions(assets = []) {
   return Object.fromEntries(
-    CLASSIFICATION_FIELDS.map((fieldName) => [fieldName, getUniqueFieldValues(assets, fieldName)])
+    [...BRAZILIAN_CLASSIFICATION_FIELDS, ...GICS_FIELDS].map((fieldName) => [fieldName, getUniqueFieldValues(assets, fieldName)])
   );
 }
 
@@ -226,6 +249,7 @@ function MetadataAutocompleteInput({ name, value, suggestions = [], onValueChang
 export function getMissingAssetMetadata(asset) {
   if (!asset) return [];
   return getMetadataFields(asset.asset_class).filter((field) => {
+    if (field.required === false) return false;
     const value = asset[field.name];
     return value === null || value === undefined || String(value).trim() === '';
   });
@@ -246,6 +270,12 @@ export default function AssetMetadataCard({ asset, onSave, metadataSuggestions =
         sector: asset.sector || '',
         subsector: asset.subsector || '',
         segment: asset.segment || '',
+        gics_sector: asset.gics_sector || '',
+        gics_industry_group: asset.gics_industry_group || '',
+        gics_industry: asset.gics_industry || '',
+        gics_sub_industry: asset.gics_sub_industry || '',
+        reit_type: asset.reit_type || '',
+        treasury_indexer: asset.treasury_indexer || '',
         maturity_date: asset.maturity_date || '',
         fiscal_regime_override: asset.fiscal_regime_override || '',
         fiscal_tax_treatment: asset.fiscal_tax_treatment || '',
@@ -305,6 +335,7 @@ export default function AssetMetadataCard({ asset, onSave, metadataSuggestions =
       return formatDisplayDate(asset[field.name]);
     }
     if (field.type === 'select') {
+      if (!asset[field.name] && field.name === 'treasury_indexer') return '—';
       return field.options.find((option) => option.value === asset[field.name])?.label || field.placeholder;
     }
     if (field.name === 'cnpj') {

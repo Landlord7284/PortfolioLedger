@@ -51,6 +51,12 @@ class AssetCreate(BaseModel):
     sector: Optional[str] = None
     subsector: Optional[str] = None
     segment: Optional[str] = None
+    gics_sector: Optional[str] = None
+    gics_industry_group: Optional[str] = None
+    gics_industry: Optional[str] = None
+    gics_sub_industry: Optional[str] = None
+    reit_type: Optional[str] = None
+    treasury_indexer: Optional[str] = None
     fiscal_regime_override: Optional[str] = None
     fiscal_tax_treatment: Optional[str] = None
     portfolio_id: Optional[int] = None
@@ -89,6 +95,12 @@ class AssetMetadataUpdate(BaseModel):
     sector: Optional[str] = None
     subsector: Optional[str] = None
     segment: Optional[str] = None
+    gics_sector: Optional[str] = None
+    gics_industry_group: Optional[str] = None
+    gics_industry: Optional[str] = None
+    gics_sub_industry: Optional[str] = None
+    reit_type: Optional[str] = None
+    treasury_indexer: Optional[str] = None
     market: Optional[str] = None
     fiscal_regime_override: Optional[str] = None
     fiscal_tax_treatment: Optional[str] = None
@@ -115,6 +127,12 @@ class AssetResponse(BaseModel):
     sector: Optional[str] = None
     subsector: Optional[str] = None
     segment: Optional[str] = None
+    gics_sector: Optional[str] = None
+    gics_industry_group: Optional[str] = None
+    gics_industry: Optional[str] = None
+    gics_sub_industry: Optional[str] = None
+    reit_type: Optional[str] = None
+    treasury_indexer: Optional[str] = None
     fiscal_regime_override: Optional[str] = None
     fiscal_tax_treatment: Optional[str] = None
     duplicate_flag: bool = False
@@ -810,6 +828,7 @@ class DashboardPositionRow(BaseModel):
     sector: Optional[str] = None
     subsector: Optional[str] = None
     segment: Optional[str] = None
+    treasury_indexer: Optional[str] = None
     quantity: str
     market_value: str
     cost_basis: str

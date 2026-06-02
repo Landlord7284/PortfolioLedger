@@ -28,6 +28,14 @@ const ASSET_CLASSES = [
 ];
 
 const CLASSES_WITH_MATURITY = ['Debênture', 'CRI', 'CRA', 'Tesouro Direto'];
+const REIT_TYPE_UNSPECIFIED = '__reit_type_unspecified__';
+const TREASURY_INDEXER_UNSPECIFIED = '__treasury_indexer_unspecified__';
+const REIT_TYPE_OPTIONS = ['Equity', 'Mortgage', 'Hybrid'];
+const TREASURY_INDEXER_OPTIONS = [
+  { value: 'SELIC', label: 'SELIC' },
+  { value: 'IPCA', label: 'IPCA' },
+  { value: 'PREFIXED', label: 'Prefixado' },
+];
 
 const VALUE_IGNORED = ['Desdobramento', 'Grupamento'];
 
@@ -89,8 +97,6 @@ function AssetCombobox({ options, value, onChange, disabled }) {
   )
 }
 
-
-
 export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }) {
   const { activePortfolioId } = useContext(AppContext);
   const [assetList, setAssetList] = useState([]);
@@ -119,6 +125,12 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   const [newClass, setNewClass] = useState('Ação');
   const [newMarket, setNewMarket] = useState('BR');
   const [newMaturityDate, setNewMaturityDate] = useState('');
+  const [newGicsSector, setNewGicsSector] = useState('');
+  const [newGicsIndustryGroup, setNewGicsIndustryGroup] = useState('');
+  const [newGicsIndustry, setNewGicsIndustry] = useState('');
+  const [newGicsSubIndustry, setNewGicsSubIndustry] = useState('');
+  const [newReitType, setNewReitType] = useState('');
+  const [newTreasuryIndexer, setNewTreasuryIndexer] = useState('');
 
   const [bulkRows, setBulkRows] = useState([
     { id: 1, asset_id: assetId || '', event_type: 'Compra', date: today, qty: '', val: '', notes: '' }
@@ -194,6 +206,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   const isUsdPurchaseAsset = isNewAsset
     ? newClass === 'Stock' || newClass === 'REIT' || (newClass === 'ETF' && newMarket === 'US')
     : selectedAsset?.currency === 'USD' || selectedAsset?.market === 'US';
+  const showGicsFields = isNewAsset && ['Stock', 'REIT'].includes(newClass);
   const operationCurrencyLabel = isUsdPurchaseAsset ? 'US$' : 'R$';
   const showOriginUsd = isPre2024Purchase && isUsdPurchaseAsset;
 
@@ -237,6 +250,14 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             ticker: newTicker,
             market: newClass === 'ETF' ? newMarket : undefined,
             maturity_date: CLASSES_WITH_MATURITY.includes(newClass) ? (newMaturityDate || null) : null,
+            ...(newClass === 'Tesouro Direto' ? { treasury_indexer: newTreasuryIndexer || null } : {}),
+            ...(showGicsFields ? {
+              gics_sector: newGicsSector || null,
+              gics_industry_group: newGicsIndustryGroup || null,
+              gics_industry: newGicsIndustry || null,
+              gics_sub_industry: newGicsSubIndustry || null,
+            } : {}),
+            ...(newClass === 'REIT' ? { reit_type: newReitType || null } : {}),
             event_date: eventDate,
             portfolio_id: activePortfolioId,
             event_type: eventType,
@@ -438,11 +459,69 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
                       </Select>
                     </div>
                   )}
+                  {newClass === 'Tesouro Direto' && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium text-muted-foreground uppercase">Indexador</Label>
+                      <Select
+                        value={newTreasuryIndexer || TREASURY_INDEXER_UNSPECIFIED}
+                        onValueChange={(value) => setNewTreasuryIndexer(value === TREASURY_INDEXER_UNSPECIFIED ? '' : value)}
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={TREASURY_INDEXER_UNSPECIFIED}>Indexador</SelectItem>
+                          {TREASURY_INDEXER_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   {CLASSES_WITH_MATURITY.includes(newClass) && (
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium text-muted-foreground uppercase">Data de Vencimento</Label>
                       <DatePicker value={newMaturityDate} onChange={setNewMaturityDate} />
                     </div>
+                  )}
+                  {newClass === 'REIT' && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium text-muted-foreground uppercase">REIT Type</Label>
+                      <Select
+                        value={newReitType || REIT_TYPE_UNSPECIFIED}
+                        onValueChange={(value) => setNewReitType(value === REIT_TYPE_UNSPECIFIED ? '' : value)}
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={REIT_TYPE_UNSPECIFIED}>Nao informado</SelectItem>
+                          {REIT_TYPE_OPTIONS.map((type) => (
+                            <SelectItem key={type} value={type}>{type}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {showGicsFields && (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground uppercase">Sector</Label>
+                        <Input value={newGicsSector} onChange={(e) => setNewGicsSector(e.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground uppercase">Industry Group</Label>
+                        <Input value={newGicsIndustryGroup} onChange={(e) => setNewGicsIndustryGroup(e.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground uppercase">Industry</Label>
+                        <Input value={newGicsIndustry} onChange={(e) => setNewGicsIndustry(e.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground uppercase">Sub-Industry</Label>
+                        <Input value={newGicsSubIndustry} onChange={(e) => setNewGicsSubIndustry(e.target.value)} />
+                      </div>
+                    </>
                   )}
                 </div>
               ) : (

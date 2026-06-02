@@ -264,8 +264,8 @@ export default function AssetsAndRightsReport() {
                     <TableHead className="text-right">Quantidade</TableHead>
                     <TableHead>Nome Ação/FII</TableHead>
                     <TableHead>CNPJ</TableHead>
-                    <TableHead className="text-right">Situação em {formatCutoff(report?.previous_cutoff)}</TableHead>
-                    <TableHead className="text-right">Situação em {formatCutoff(report?.current_cutoff)}</TableHead>
+                    <TableHead className="text-right">Situação {formatCutoff(report?.previous_cutoff)}</TableHead>
+                    <TableHead className="text-right">Situação {formatCutoff(report?.current_cutoff)}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

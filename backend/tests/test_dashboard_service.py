@@ -158,6 +158,28 @@ def test_dashboard_uses_consolidated_b3_value_for_non_unit_prices(tmp_path, monk
     assert report["summary"]["market_value_uses_cost_fallback"] is False
 
 
+def test_dashboard_current_positions_include_treasury_indexer(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    monkeypatch.setattr(dashboard_service, "date", FixedDate)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        treasury = asset_service.create_asset(
+            conn,
+            AssetClass.TESOURO_DIRETO.value,
+            "TESOURO-IPCA-2035",
+            treasury_indexer="IPCA",
+        )
+        event_service.create_event(conn, portfolio["id"], treasury["id"], EventType.COMPRA.value, "2026-01-10", "1", "1000")
+
+        report = dashboard_service.get_dashboard(conn, portfolio["id"], period="year")
+
+    [position] = report["current_positions"]
+    assert position["asset_class"] == AssetClass.TESOURO_DIRETO.value
+    assert position["treasury_indexer"] == "IPCA"
+
+
 def test_dashboard_falls_back_to_cost_when_no_quotes_exist(tmp_path, monkeypatch):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)

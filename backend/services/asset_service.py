@@ -12,8 +12,10 @@ import json
 import sqlite3
 from typing import Optional
 
-from backend.domain.enums import AssetClass, Currency, Market, default_market_for_class, currency_for_market
+from backend.domain.enums import AssetClass, Currency, Market, TreasuryIndexer, default_market_for_class, currency_for_market
 from backend.services.fiscal_regime_service import require_supported_capital_gain_regime
+
+REIT_TYPES = {"Equity", "Mortgage", "Hybrid"}
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -29,6 +31,31 @@ def _normalize_cnpj(cnpj: Optional[str]) -> Optional[str]:
     if len(digits) != 14:
         raise ValueError("CNPJ deve ter 14 dígitos.")
     return digits
+
+
+def _normalize_reit_type(reit_type: Optional[str]) -> Optional[str]:
+    if reit_type is None:
+        return None
+    value = str(reit_type).strip()
+    if not value:
+        return None
+    if value not in REIT_TYPES:
+        raise ValueError("REIT Type deve ser Equity, Mortgage ou Hybrid.")
+    return value
+
+
+def _normalize_treasury_indexer(asset_class: str, treasury_indexer: Optional[str]) -> Optional[str]:
+    if treasury_indexer is None:
+        return None
+    value = str(treasury_indexer).strip().upper()
+    if not value:
+        return None
+    if AssetClass(asset_class) != AssetClass.TESOURO_DIRETO:
+        raise ValueError("Indexador e permitido apenas para Tesouro Direto.")
+    try:
+        return TreasuryIndexer(value).value
+    except ValueError as exc:
+        raise ValueError("Indexador deve ser SELIC, IPCA ou PREFIXED.") from exc
 
 
 def _resolve_market(asset_class: str, market: Optional[str], ticker: Optional[str] = None, source: str = "manual") -> str | None:
@@ -251,6 +278,12 @@ def create_asset(
     sector: Optional[str] = None,
     subsector: Optional[str] = None,
     segment: Optional[str] = None,
+    gics_sector: Optional[str] = None,
+    gics_industry_group: Optional[str] = None,
+    gics_industry: Optional[str] = None,
+    gics_sub_industry: Optional[str] = None,
+    reit_type: Optional[str] = None,
+    treasury_indexer: Optional[str] = None,
     fiscal_regime_override: Optional[str] = None,
     fiscal_tax_treatment: Optional[str] = None,
     event_date: Optional[str] = None,
@@ -268,6 +301,8 @@ def create_asset(
 ) -> dict:
     ac = AssetClass(asset_class)
     normalized_cnpj = _normalize_cnpj(cnpj)
+    normalized_reit_type = _normalize_reit_type(reit_type)
+    normalized_treasury_indexer = _normalize_treasury_indexer(ac.value, treasury_indexer)
     require_supported_capital_gain_regime(fiscal_regime_override)
     if currency:
         Currency(currency)
@@ -315,11 +350,15 @@ def create_asset(
         """
         INSERT INTO assets (asset_class, market, currency, maturity_date, aux_id,
                             name, cnpj, isin, sector, subsector, segment,
+                            gics_sector, gics_industry_group, gics_industry, gics_sub_industry, reit_type,
+                            treasury_indexer,
                             fiscal_regime_override, fiscal_tax_treatment)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (ac.value, resolved_market, resolved_currency, maturity_date, aux_id,
          name, normalized_cnpj, isin, sector, subsector, segment,
+         gics_sector, gics_industry_group, gics_industry, gics_sub_industry, normalized_reit_type,
+         normalized_treasury_indexer,
          fiscal_regime_override, fiscal_tax_treatment),
     )
     asset_id = cur.lastrowid
@@ -422,6 +461,12 @@ def update_asset_metadata(
     sector: Optional[str] = None,
     subsector: Optional[str] = None,
     segment: Optional[str] = None,
+    gics_sector: Optional[str] = None,
+    gics_industry_group: Optional[str] = None,
+    gics_industry: Optional[str] = None,
+    gics_sub_industry: Optional[str] = None,
+    reit_type: Optional[str] = None,
+    treasury_indexer: Optional[str] = None,
     market: Optional[str] = None,
     fiscal_regime_override: Optional[str] = None,
     fiscal_tax_treatment: Optional[str] = None,
@@ -431,8 +476,10 @@ def update_asset_metadata(
         return None
     require_supported_capital_gain_regime(fiscal_regime_override)
     normalized_cnpj = _normalize_cnpj(cnpj)
+    normalized_reit_type = _normalize_reit_type(reit_type)
 
     next_class = AssetClass(asset_class).value if asset_class is not None else current["asset_class"]
+    normalized_treasury_indexer = _normalize_treasury_indexer(next_class, treasury_indexer)
     next_market = _resolve_market(next_class, market if market is not None else current["market"], ticker or current.get("current_ticker"), "manual")
     if next_market is None:
         raise ValueError("Mercado do ETF deve ser informado.")
@@ -453,6 +500,10 @@ def update_asset_metadata(
         ("sector", sector),
         ("subsector", subsector),
         ("segment", segment),
+        ("gics_sector", gics_sector),
+        ("gics_industry_group", gics_industry_group),
+        ("gics_industry", gics_industry),
+        ("gics_sub_industry", gics_sub_industry),
         ("fiscal_regime_override", fiscal_regime_override),
         ("fiscal_tax_treatment", fiscal_tax_treatment),
         ("market", next_market if market is not None or asset_class is not None else None),
@@ -461,6 +512,15 @@ def update_asset_metadata(
         if val is not None:
             fields.append(f"{col} = ?")
             values.append(val)
+    if reit_type is not None:
+        fields.append("reit_type = ?")
+        values.append(normalized_reit_type)
+    if asset_class is not None and next_class != AssetClass.TESOURO_DIRETO.value:
+        fields.append("treasury_indexer = ?")
+        values.append(None)
+    elif treasury_indexer is not None:
+        fields.append("treasury_indexer = ?")
+        values.append(normalized_treasury_indexer)
     if fields:
         values.append(asset_id)
         conn.execute(f"UPDATE assets SET {', '.join(fields)} WHERE id = ?", values)

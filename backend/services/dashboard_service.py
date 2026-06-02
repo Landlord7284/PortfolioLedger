@@ -235,6 +235,7 @@ def _current_positions(
             a.sector,
             a.subsector,
             a.segment,
+            a.treasury_indexer,
             (
                 SELECT ticker
                 FROM asset_tickers t
@@ -505,6 +506,7 @@ def _build_current_snapshot(
                 "sector": position.get("sector"),
                 "subsector": position.get("subsector"),
                 "segment": position.get("segment"),
+                "treasury_indexer": position.get("treasury_indexer"),
                 "quantity": str(quantity),
                 "market_value": _money(market_value),
                 "cost_basis": _money(cost),

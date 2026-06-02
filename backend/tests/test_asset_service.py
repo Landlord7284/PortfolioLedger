@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
 from backend.database import get_db, init_db
-from backend.domain.enums import AssetClass
+from backend.domain.enums import AssetClass, TreasuryIndexer
 from backend.main import app
 from backend.services import asset_service
 from backend.services.import_service import import_to_ledger
@@ -135,6 +135,188 @@ def test_asset_api_contract_exposes_fiscal_fields_on_create_get_and_patch(tmp_pa
         },
     )
     assert unsupported_response.status_code == 400
+
+
+def test_asset_service_persists_and_validates_treasury_indexer(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        treasury = asset_service.create_asset(
+            conn,
+            AssetClass.TESOURO_DIRETO.value,
+            "TESOURO-SELIC-2029",
+            treasury_indexer=TreasuryIndexer.SELIC.value,
+        )
+
+        assert treasury["treasury_indexer"] == "SELIC"
+
+        updated = asset_service.update_asset_metadata(
+            conn,
+            treasury["id"],
+            treasury_indexer=TreasuryIndexer.PREFIXED.value,
+        )
+        assert updated["treasury_indexer"] == "PREFIXED"
+
+        cleared = asset_service.update_asset_metadata(conn, treasury["id"], treasury_indexer="")
+        assert cleared["treasury_indexer"] is None
+
+        with pytest.raises(ValueError, match="Indexador"):
+            asset_service.create_asset(
+                conn,
+                AssetClass.TESOURO_DIRETO.value,
+                "TESOURO-LIVRE-2030",
+                treasury_indexer="CDI",
+            )
+
+        with pytest.raises(ValueError, match="Tesouro Direto"):
+            asset_service.create_asset(
+                conn,
+                AssetClass.ACAO.value,
+                "INDEX3",
+                treasury_indexer=TreasuryIndexer.IPCA.value,
+            )
+
+
+def test_asset_api_contract_exposes_treasury_indexer(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    monkeypatch.setattr("backend.routers.assets.get_db", lambda: get_db(db_path))
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/api/assets",
+        json={
+            "asset_class": AssetClass.TESOURO_DIRETO.value,
+            "ticker": "TESOURO-IPCA-2035",
+            "treasury_indexer": "IPCA",
+        },
+    )
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["treasury_indexer"] == "IPCA"
+
+    patch_response = client.patch(
+        f"/api/assets/{created['id']}",
+        json={"treasury_indexer": "PREFIXED"},
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["treasury_indexer"] == "PREFIXED"
+
+    get_response = client.get(f"/api/assets/{created['id']}")
+    assert get_response.status_code == 200
+    assert get_response.json()["treasury_indexer"] == "PREFIXED"
+
+    invalid_response = client.patch(f"/api/assets/{created['id']}", json={"treasury_indexer": "CDI"})
+    assert invalid_response.status_code == 400
+
+
+def test_asset_service_persists_international_taxonomy_fields(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        stock = asset_service.create_asset(
+            conn,
+            AssetClass.STOCK.value,
+            "AAPL",
+            gics_sector="Information Technology",
+            gics_industry_group="Technology Hardware & Equipment",
+            gics_industry="Technology Hardware, Storage & Peripherals",
+            gics_sub_industry="Technology Hardware, Storage & Peripherals",
+        )
+
+        assert stock["sector"] is None
+        assert stock["subsector"] is None
+        assert stock["segment"] is None
+        assert stock["gics_sector"] == "Information Technology"
+        assert stock["gics_industry_group"] == "Technology Hardware & Equipment"
+        assert stock["gics_industry"] == "Technology Hardware, Storage & Peripherals"
+        assert stock["gics_sub_industry"] == "Technology Hardware, Storage & Peripherals"
+
+        updated_stock = asset_service.update_asset_metadata(
+            conn,
+            stock["id"],
+            gics_sector="Communication Services",
+            gics_industry_group="Media & Entertainment",
+        )
+
+        assert updated_stock["gics_sector"] == "Communication Services"
+        assert updated_stock["gics_industry_group"] == "Media & Entertainment"
+
+        reit = asset_service.create_asset(
+            conn,
+            AssetClass.REIT.value,
+            "PLD",
+            reit_type="Equity",
+            gics_sector="Real Estate",
+            gics_industry_group="Equity Real Estate Investment Trusts (REITs)",
+        )
+
+        assert reit["reit_type"] == "Equity"
+        assert reit["gics_sector"] == "Real Estate"
+
+        updated_reit = asset_service.update_asset_metadata(conn, reit["id"], reit_type="Mortgage")
+        assert updated_reit["reit_type"] == "Mortgage"
+
+        cleared_reit = asset_service.update_asset_metadata(conn, reit["id"], reit_type="")
+        assert cleared_reit["reit_type"] is None
+
+        with pytest.raises(ValueError, match="REIT Type"):
+            asset_service.update_asset_metadata(conn, reit["id"], reit_type="Office")
+
+
+def test_asset_api_contract_exposes_international_taxonomy_fields(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    monkeypatch.setattr("backend.routers.assets.get_db", lambda: get_db(db_path))
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/api/assets",
+        json={
+            "asset_class": AssetClass.REIT.value,
+            "ticker": "PLD",
+            "reit_type": "Equity",
+            "gics_sector": "Real Estate",
+            "gics_industry_group": "Equity Real Estate Investment Trusts (REITs)",
+            "gics_industry": "Industrial REITs",
+            "gics_sub_industry": "Industrial REITs",
+        },
+    )
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["reit_type"] == "Equity"
+    assert created["gics_sector"] == "Real Estate"
+    assert created["gics_industry_group"] == "Equity Real Estate Investment Trusts (REITs)"
+    assert created["gics_industry"] == "Industrial REITs"
+    assert created["gics_sub_industry"] == "Industrial REITs"
+
+    patch_response = client.patch(
+        f"/api/assets/{created['id']}",
+        json={
+            "reit_type": "Hybrid",
+            "gics_industry": "Diversified REITs",
+            "gics_sub_industry": "Diversified REITs",
+        },
+    )
+
+    assert patch_response.status_code == 200
+    patched = patch_response.json()
+    assert patched["reit_type"] == "Hybrid"
+    assert patched["gics_industry"] == "Diversified REITs"
+    assert patched["gics_sub_industry"] == "Diversified REITs"
+
+    get_response = client.get(f"/api/assets/{created['id']}")
+    assert get_response.status_code == 200
+    fetched = get_response.json()
+    assert fetched["reit_type"] == "Hybrid"
+    assert fetched["gics_sector"] == "Real Estate"
+
+    invalid_response = client.patch(f"/api/assets/{created['id']}", json={"reit_type": "Office"})
+    assert invalid_response.status_code == 400
 
 
 def test_probable_match_review_stores_operation_payload(tmp_path):

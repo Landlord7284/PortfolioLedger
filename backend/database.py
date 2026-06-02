@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS assets (
     sector          TEXT,
     subsector       TEXT,
     segment         TEXT,
+    gics_sector     TEXT,
+    gics_industry_group TEXT,
+    gics_industry   TEXT,
+    gics_sub_industry TEXT,
+    reit_type       TEXT CHECK (reit_type IS NULL OR reit_type IN ('Equity', 'Mortgage', 'Hybrid')),
+    treasury_indexer TEXT CHECK (treasury_indexer IS NULL OR treasury_indexer IN ('SELIC', 'IPCA', 'PREFIXED')),
     fiscal_regime_override TEXT,
     fiscal_tax_treatment   TEXT,
     merged_into_asset_id INTEGER REFERENCES assets(id),
@@ -329,6 +335,12 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "assets", "merged_at", "merged_at TEXT")
     _add_column_if_missing(conn, "assets", "fiscal_regime_override", "fiscal_regime_override TEXT")
     _add_column_if_missing(conn, "assets", "fiscal_tax_treatment", "fiscal_tax_treatment TEXT")
+    _add_column_if_missing(conn, "assets", "gics_sector", "gics_sector TEXT")
+    _add_column_if_missing(conn, "assets", "gics_industry_group", "gics_industry_group TEXT")
+    _add_column_if_missing(conn, "assets", "gics_industry", "gics_industry TEXT")
+    _add_column_if_missing(conn, "assets", "gics_sub_industry", "gics_sub_industry TEXT")
+    _add_column_if_missing(conn, "assets", "reit_type", "reit_type TEXT CHECK (reit_type IS NULL OR reit_type IN ('Equity', 'Mortgage', 'Hybrid'))")
+    _add_column_if_missing(conn, "assets", "treasury_indexer", "treasury_indexer TEXT CHECK (treasury_indexer IS NULL OR treasury_indexer IN ('SELIC', 'IPCA', 'PREFIXED'))")
     _add_column_if_missing(conn, "asset_match_reviews", "operation_payload", "operation_payload TEXT")
     _add_column_if_missing(conn, "events", "gross_value", "gross_value TEXT")
     _add_column_if_missing(conn, "events", "event_value_brl", "event_value_brl TEXT")

@@ -47,6 +47,15 @@ const HIERARCHY_BY_CLASS = {
   'FI-INFRA': [
     { type: 'segment', field: 'segment', label: 'Segmento', emptyLabel: 'Sem segmento' },
   ],
+  'Tesouro Direto': [
+    { type: 'treasury_indexer', field: 'treasury_indexer', label: 'Indexador', emptyLabel: 'Sem indexador' },
+  ],
+};
+
+const TREASURY_INDEXER_LABELS = {
+  SELIC: 'SELIC',
+  IPCA: 'IPCA',
+  PREFIXED: 'Prefixado',
 };
 
 function getStoredDashboardFilters() {
@@ -81,6 +90,7 @@ function getLevelValue(position, level) {
 }
 
 function getLevelLabel(position, level) {
+  if (level.field === 'treasury_indexer') return TREASURY_INDEXER_LABELS[position.treasury_indexer] || getLevelValue(position, level);
   return level.type === 'asset' ? getAssetLabel(position) : getLevelValue(position, level);
 }
 

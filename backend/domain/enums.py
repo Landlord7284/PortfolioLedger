@@ -105,6 +105,12 @@ class Currency(str, Enum):
     USD = "USD"
 
 
+class TreasuryIndexer(str, Enum):
+    SELIC = "SELIC"
+    IPCA = "IPCA"
+    PREFIXED = "PREFIXED"
+
+
 class Market(str, Enum):
     BR = "BR"
     US = "US"
