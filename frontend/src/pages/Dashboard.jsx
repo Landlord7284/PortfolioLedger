@@ -216,6 +216,15 @@ function getBreadcrumbLabel(path) {
   return ['Carteira', ...path.map((node) => node.label)].join(' > ');
 }
 
+function getVisibleBreadcrumbItems(path) {
+  const items = path.map((node, index) => ({ type: 'node', node, index }));
+  if (items.length <= 2) return items;
+  return [
+    { type: 'ellipsis', label: '...', title: getBreadcrumbLabel(path) },
+    ...items.slice(-2),
+  ];
+}
+
 function formatPercent(value, hideValues = false) {
   if (hideValues) return '•••••';
   const parsed = Number(value || 0);
@@ -875,6 +884,7 @@ export default function Dashboard() {
     ? `${allocationSelection.smallestAllocation.label} (${formatPercent(allocationSelection.smallestAllocation.share, hideValues)})`
     : '—';
   const allocationPieData = allocationSelection.groups.filter((row) => row.amount > 0 && row.market_value_supported);
+  const allocationBreadcrumbItems = useMemo(() => getVisibleBreadcrumbItems(allocationPath), [allocationPath]);
 
   if (!activePortfolioId) {
     return (
@@ -1119,18 +1129,28 @@ export default function Dashboard() {
                         >
                           Carteira
                         </Button>
-                        {allocationPath.map((node, index) => (
-                          <div key={`${node.type}:${node.value}:${index}`} className="flex items-center gap-1">
+                        {allocationBreadcrumbItems.map((item) => (
+                          <div
+                            key={item.type === 'ellipsis' ? 'ellipsis' : `${item.node.type}:${item.node.value}:${item.index}`}
+                            className="flex items-center gap-1"
+                          >
                             <span className="text-xs text-muted-foreground">&gt;</span>
-                            <Button
-                              type="button"
-                              variant={index === allocationPath.length - 1 ? 'secondary' : 'ghost'}
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => handleBreadcrumbClick(index)}
-                            >
-                              {node.label}
-                            </Button>
+                            {item.type === 'ellipsis' ? (
+                              <span className="flex h-7 items-center px-2 text-xs text-muted-foreground" title={item.title}>
+                                {item.label}
+                              </span>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant={item.index === allocationPath.length - 1 ? 'secondary' : 'ghost'}
+                                size="sm"
+                                className="h-7 max-w-36 px-2 text-xs"
+                                onClick={() => handleBreadcrumbClick(item.index)}
+                                title={item.node.label}
+                              >
+                                <span className="truncate">{item.node.label}</span>
+                              </Button>
+                            )}
                           </div>
                         ))}
                       </div>
