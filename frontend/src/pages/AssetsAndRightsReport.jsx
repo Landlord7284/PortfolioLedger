@@ -13,6 +13,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const currentYear = new Date().getFullYear();
+const ASSET_NAME_MAX_LENGTH = 44;
+
+function truncateAssetName(name) {
+  if (!name) return '-';
+  return name.length > ASSET_NAME_MAX_LENGTH ? name.slice(0, ASSET_NAME_MAX_LENGTH) : name;
+}
 
 function formatCutoff(date) {
   if (!date) return '';
@@ -175,11 +181,11 @@ export default function AssetsAndRightsReport() {
       </div>
 
       {classes.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground mr-1">Filtrar:</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5" aria-label="Classe do relatório de Bens e Direitos">
           <Button
             variant={!filterClass ? 'default' : 'outline'}
-            size="xs"
+            size="sm"
+            className="text-sm"
             onClick={() => setFilterClass('')}
           >
             Todos
@@ -188,7 +194,8 @@ export default function AssetsAndRightsReport() {
             <Button
               key={assetClass}
               variant={filterClass === assetClass ? 'default' : 'outline'}
-              size="xs"
+              size="sm"
+              className="text-sm"
               onClick={() => setFilterClass(assetClass)}
             >
               {assetClass}
@@ -284,7 +291,9 @@ export default function AssetsAndRightsReport() {
                         <TableCell className="text-right font-mono text-sm">
                           {formatQuantity(row.quantity, row.asset_class, hideValues)}
                         </TableCell>
-                        <TableCell className="min-w-[180px]">{row.name || '-'}</TableCell>
+                        <TableCell className="min-w-[180px]" title={row.name || undefined}>
+                          {truncateAssetName(row.name)}
+                        </TableCell>
                         <TableCell className="font-mono text-sm text-muted-foreground">{formatCnpj(row.cnpj) || '-'}</TableCell>
                         <TableCell className="text-right font-mono text-sm">
                           {formatMoney(row.previous_year_cost, hideValues)}

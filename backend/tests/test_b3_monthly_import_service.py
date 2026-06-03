@@ -329,6 +329,44 @@ def test_b3_market_price_preserves_multiple_b3_rows_for_same_asset_month_sheet(t
     assert [row["value"] for row in rows] == ["12.34", "12.35"]
 
 
+def test_b3_import_completes_missing_stock_fii_and_fi_infra_registration_without_overwriting(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Posição - Ações": [
+                ["AURE3 - AUREN ENERGIA S.A.                                ", "ITAU", "1", "AURE3", "28594234000123", None, "ON", None, 10, 10, "-", "-", 13.89, 138.9],
+            ],
+            "Posição - Fundos": [
+                ["KNIP11 - KINEA ÍNDICES DE PREÇOS FII RESP LIM          ", "ITAU", "1", "KNIP11", "16838421000126", None, "Cotas", None, 10, 10, "-", "-", 90.0, 900],
+                ["IFRI11 - ITAU FIC FI INVEST FINAN INFRA CDI RF CRED PRIV   ", "ITAU", "1", "IFRI11", "53556099000179", None, "Fundo", None, 10, 10, "-", "-", 103.2, 1032],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        stock = asset_service.create_asset(conn, AssetClass.ACAO.value, "AURE3", market="BR")
+        fii = asset_service.create_asset(conn, AssetClass.FII.value, "KNIP11", market="BR", name="Nome Manual")
+        fi_infra = asset_service.create_asset(conn, AssetClass.FI_INFRA.value, "IFRI11", market="BR", cnpj="11111111000111")
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2026-04.xlsx", content)])
+        stock_after = asset_service.get_asset(conn, stock["id"])
+        fii_after = asset_service.get_asset(conn, fii["id"])
+        fi_infra_after = asset_service.get_asset(conn, fi_infra["id"])
+        asset_count = conn.execute("SELECT COUNT(*) AS count FROM assets").fetchone()["count"]
+
+    assert result["imported_prices"] == 3
+    assert asset_count == 3
+    assert stock_after["name"] == "AUREN ENERGIA S.A."
+    assert stock_after["cnpj"] == "28594234000123"
+    assert fii_after["name"] == "Nome Manual"
+    assert fii_after["cnpj"] == "16838421000126"
+    assert fi_infra_after["asset_class"] == AssetClass.FI_INFRA.value
+    assert fi_infra_after["name"] == "ITAU FIC FI INVEST FINAN INFRA CDI RF CRED PRIV"
+    assert fi_infra_after["cnpj"] == "11111111000111"
+
+
 def test_b3_income_preserves_same_asset_date_type_with_different_values(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)

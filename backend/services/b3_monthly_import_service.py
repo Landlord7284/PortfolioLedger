@@ -41,6 +41,11 @@ _FIXED_INCOME_CLASSES = {
     "DEB": AssetClass.DEBENTURE,
 }
 _SUMMARY_ONLY_PREFIXES = {"CRI", "CRA"}
+_B3_REGISTRATION_COMPLETABLE_CLASSES = {
+    AssetClass.ACAO.value,
+    AssetClass.FII.value,
+    AssetClass.FI_INFRA.value,
+}
 
 
 @dataclass
@@ -73,6 +78,13 @@ def _clean_str(value) -> str | None:
         return None
     text = str(value).strip()
     return text if text and text != "-" else None
+
+
+def _clean_metadata_text(value) -> str | None:
+    text = _clean_str(value)
+    if text is None:
+        return None
+    return re.sub(r"\s+", " ", text).strip() or None
 
 
 def _digits(value) -> str | None:
@@ -174,8 +186,8 @@ def _extract_ticker_product(product: str | None) -> ProductParse:
         ticker = match.group(1).upper()
         suffix_match = _BR_TICKER_WITH_ALPHA_SUFFIX_RE.match(ticker)
         canonical_ticker = suffix_match.group(1) if suffix_match and _TRADED_TICKER_RE.match(suffix_match.group(1)) else None
-        return ProductParse(ticker, canonical_ticker, match.group(2).strip())
-    return ProductParse(None, None, product.strip())
+        return ProductParse(ticker, canonical_ticker, _clean_metadata_text(match.group(2)))
+    return ProductParse(None, None, _clean_metadata_text(product))
 
 
 def _get_current_ticker(conn: sqlite3.Connection, asset_id: int) -> str | None:
@@ -382,29 +394,52 @@ def _resolve_asset(
     return asset_id, candidates, "name"
 
 
-def _complete_existing_debenture_metadata(
+def _product_registration_name(product: str | None, ticker: str | None) -> str | None:
+    parsed = _extract_ticker_product(product)
+    if not parsed.original_ticker or not parsed.extracted_name:
+        return None
+    if ticker and parsed.original_ticker != normalize_ticker(ticker):
+        return None
+    return parsed.extracted_name
+
+
+def _complete_existing_b3_asset_metadata(
     conn: sqlite3.Connection,
     asset_id: int | None,
     *,
-    imported_name: str | None,
+    product: str | None,
+    ticker: str | None,
+    issuer_name: str | None,
+    cnpj: str | None,
     maturity_date: str | None,
 ) -> None:
     if not asset_id:
         return
     asset = asset_service.get_asset(conn, asset_id)
-    if not asset or asset["asset_class"] != AssetClass.DEBENTURE.value:
+    if not asset:
         return
 
-    name_update = imported_name if _clean_str(asset.get("name")) is None else None
-    maturity_update = maturity_date if _clean_str(asset.get("maturity_date")) is None else None
-    if name_update is None and maturity_update is None:
+    updates = {}
+    if asset["asset_class"] == AssetClass.DEBENTURE.value:
+        imported_name = _clean_metadata_text(issuer_name) or _clean_metadata_text(product)
+        if _clean_str(asset.get("name")) is None and imported_name is not None:
+            updates["name"] = imported_name
+        if _clean_str(asset.get("maturity_date")) is None and maturity_date is not None:
+            updates["maturity_date"] = maturity_date
+    elif asset["asset_class"] in _B3_REGISTRATION_COMPLETABLE_CLASSES:
+        imported_name = _product_registration_name(product, ticker)
+        if _clean_str(asset.get("name")) is None and imported_name is not None:
+            updates["name"] = imported_name
+        if _clean_str(asset.get("cnpj")) is None and cnpj is not None:
+            updates["cnpj"] = cnpj
+
+    if not updates:
         return
 
     asset_service.update_asset_metadata(
         conn,
         asset_id,
-        name=name_update,
-        maturity_date=maturity_update,
+        **updates,
     )
 
 
@@ -765,13 +800,15 @@ def _process_market_sheet(
             asset_class=asset_class,
             event_date=reference_date,
         )
-        if fixed_income_only and asset_class == AssetClass.DEBENTURE:
-            _complete_existing_debenture_metadata(
-                conn,
-                asset_id,
-                imported_name=_clean_str(row.get("EMISSOR")) or product,
-                maturity_date=maturity_date,
-            )
+        _complete_existing_b3_asset_metadata(
+            conn,
+            asset_id,
+            product=product,
+            ticker=ticker,
+            issuer_name=_clean_str(row.get("EMISSOR")),
+            cnpj=cnpj,
+            maturity_date=maturity_date,
+        )
         review_id = None
         status = B3MarketPriceStatus.IMPORTED.value
         if not asset_id:
