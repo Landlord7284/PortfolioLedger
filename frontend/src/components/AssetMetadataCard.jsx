@@ -324,6 +324,14 @@ export default function AssetMetadataCard({ asset, onSave, metadataSuggestions =
     }
   };
 
+  const handleEditingKeyDown = (event) => {
+    if (!editing || saving || event.key !== 'Enter' || event.defaultPrevented) return;
+    if (event.target.closest('button')) return;
+
+    event.preventDefault();
+    handleSave();
+  };
+
   const formatDisplayDate = (isoStr) => {
     if (!isoStr) return '—';
     const [y, m, d] = isoStr.split('-');
@@ -367,7 +375,7 @@ export default function AssetMetadataCard({ asset, onSave, metadataSuggestions =
             <AlertDescription>{saveError}</AlertDescription>
           </Alert>
         )}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4" onKeyDown={editing ? handleEditingKeyDown : undefined}>
           {fields.map((field) => (
             <div className="flex flex-col gap-1.5" key={field.name}>
               <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{field.label}</Label>
