@@ -5,6 +5,17 @@
 const BASE_URL = 'http://localhost:8000/api';
 const BACKEND_UNAVAILABLE_MESSAGE = `Nao foi possivel conectar ao backend em ${BASE_URL}. Verifique se o servidor FastAPI esta rodando na porta 8000.`;
 
+function formatErrorDetail(detail) {
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => item?.msg || item?.message || JSON.stringify(item))
+      .join('; ');
+  }
+  return detail.message || JSON.stringify(detail);
+}
+
 async function fetchBackend(url, options = {}) {
   try {
     return await fetch(url, options);
@@ -30,7 +41,7 @@ async function request(path, options = {}) {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    throw new Error(formatErrorDetail(body.detail) || `HTTP ${res.status}`);
   }
 
   return res.json();
@@ -42,7 +53,7 @@ async function requestBlob(path, options = {}) {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    throw new Error(formatErrorDetail(body.detail) || `HTTP ${res.status}`);
   }
 
   const disposition = res.headers.get('Content-Disposition') || '';

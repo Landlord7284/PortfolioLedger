@@ -116,6 +116,24 @@ def search(q: str = Query(..., min_length=1)):
         return asset_service.search_assets(conn, q)
 
 
+@router.get("/alerts", response_model=list[SchwabAssetAlertResponse])
+def list_asset_alerts(
+    portfolio_id: Optional[int] = Query(None),
+    status: str = Query("pending"),
+):
+    with get_db() as conn:
+        return schwab_import_service.list_asset_alerts(conn, portfolio_id, status)
+
+
+@router.post("/alerts/{alert_id}/resolve", response_model=SchwabAssetAlertResponse)
+def resolve_asset_alert(alert_id: int):
+    with get_db() as conn:
+        alert = schwab_import_service.resolve_asset_alert(conn, alert_id)
+    if not alert:
+        raise HTTPException(404, "Alerta não encontrado.")
+    return alert
+
+
 @router.get("/{asset_id}", response_model=AssetResponse)
 def get(asset_id: int):
     with get_db() as conn:
@@ -157,24 +175,6 @@ def update_metadata(asset_id: int, body: AssetMetadataUpdate):
         except Exception as e:
             raise HTTPException(400, str(e))
     return result
-
-
-@router.get("/alerts", response_model=list[SchwabAssetAlertResponse])
-def list_asset_alerts(
-    portfolio_id: Optional[int] = Query(None),
-    status: str = Query("pending"),
-):
-    with get_db() as conn:
-        return schwab_import_service.list_asset_alerts(conn, portfolio_id, status)
-
-
-@router.post("/alerts/{alert_id}/resolve", response_model=SchwabAssetAlertResponse)
-def resolve_asset_alert(alert_id: int):
-    with get_db() as conn:
-        alert = schwab_import_service.resolve_asset_alert(conn, alert_id)
-    if not alert:
-        raise HTTPException(404, "Alerta não encontrado.")
-    return alert
 
 
 @router.get("/{asset_id}/tickers", response_model=list[AssetTickerResponse])
