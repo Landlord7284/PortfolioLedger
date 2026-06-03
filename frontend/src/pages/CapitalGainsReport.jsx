@@ -922,6 +922,14 @@ export default function CapitalGainsReport() {
     }
   };
 
+  const handleIrrfDialogKeyDown = (event) => {
+    if (event.key !== 'Enter' || savingIrrf) return;
+    if (event.target.closest('button')) return;
+
+    event.preventDefault();
+    saveIrrfOverride();
+  };
+
   const deleteIrrfOverride = async () => {
     if (!irrfDialog?.override?.id) return;
     setSavingIrrf(true);
@@ -1144,7 +1152,7 @@ export default function CapitalGainsReport() {
             </DialogDescription>
           </DialogHeader>
           {irrfDialog && (
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4" onKeyDown={handleIrrfDialogKeyDown}>
               {irrfDialog.allowMonthSelect && (
                 <div className="flex flex-col gap-1.5">
                   <Label>Mês da apuração</Label>
