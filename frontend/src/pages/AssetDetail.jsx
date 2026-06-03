@@ -23,12 +23,13 @@ import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput, formatMone
 // Correction Modal using Dialog
 function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
   const EVENT_TYPES = [
-    'Compra', 'Venda', 'Desdobramento', 'Grupamento',
+    'Compra', 'Venda', 'V. Fração', 'Desdobramento', 'Grupamento',
     'Bonificação', 'Amortização', 'Cisão',
     'Resgate Antecipado', 'Resgate Vencimento',
   ];
 
   const VALUE_IGNORED = ['Desdobramento', 'Grupamento'];
+  const QUANTITY_OPTIONAL = ['V. Fração'];
 
   const [eventType, setEventType] = useState(event.event_type);
   const [eventDate, setEventDate] = useState(event.event_date);
@@ -63,7 +64,7 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
       await eventsApi.correct(event.id, {
         event_type: eventType,
         event_date: eventDate,
-        quantity: quantity.replace(',', '.'),
+        quantity: QUANTITY_OPTIONAL.includes(eventType) && !quantity ? null : quantity.replace(',', '.'),
         event_value: normalizeValue(eventValue, eventType),
         ...grossValuePayload(grossValue, eventType),
         notes: notes || null,
@@ -116,7 +117,7 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
               <Input 
                 value={quantity} 
                 onChange={(e) => setQuantity(sanitizeQuantityInput(e.target.value, assetClass))} 
-                required 
+                required={!QUANTITY_OPTIONAL.includes(eventType)} 
               />
             </div>
           </div>

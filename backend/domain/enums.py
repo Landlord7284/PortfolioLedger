@@ -72,6 +72,7 @@ class AssetClass(str, Enum):
 class EventType(str, Enum):
     COMPRA = "Compra"
     VENDA = "Venda"
+    VENDA_FRACAO = "V. Fração"
     DESDOBRAMENTO = "Desdobramento"
     GRUPAMENTO = "Grupamento"
     AMORTIZACAO = "Amortiza\u00e7\u00e3o"
@@ -85,6 +86,11 @@ class EventType(str, Enum):
     def exit_events(cls) -> set["EventType"]:
         """Events that reduce quantity and produce realized result."""
         return {cls.VENDA, cls.RESGATE_ANTECIPADO, cls.RESGATE_VENCIMENTO}
+
+    @classmethod
+    def quantity_optional(cls) -> set["EventType"]:
+        """Events that do not move asset quantity."""
+        return {cls.VENDA_FRACAO}
 
     @classmethod
     def requires_positive_position(cls) -> set["EventType"]:

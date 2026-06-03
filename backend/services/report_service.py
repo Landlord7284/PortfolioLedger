@@ -421,7 +421,7 @@ def _rows_to_records(rows: list[sqlite3.Row]) -> list[EventRecord]:
             id=row["event_id"],
             event_type=EventType(row["event_type"]),
             event_date=row["event_date"],
-            quantity=Decimal(row["quantity"]),
+            quantity=Decimal(row["quantity"]) if row["quantity"] is not None else None,
             event_value=Decimal(row["event_value"]),
             event_value_brl=Decimal(row["event_value_brl"]) if row["event_value_brl"] is not None else None,
             sequence_num=row["sequence_num"],

@@ -88,7 +88,7 @@ class EventRecord:
     id: int
     event_type: EventType
     event_date: str
-    quantity: Decimal
+    quantity: Decimal | None
     event_value: Decimal
     sequence_num: int
     event_value_brl: Decimal | None = None
@@ -132,7 +132,12 @@ def validate_event(event: EventRecord, state: PositionState) -> None:
         raise EngineValidationError("Data do evento é obrigatória.")
 
     # ── quantity must be positive for qty-moving events ──────
-    if qty <= _ZERO:
+    if qty is None:
+        if et not in EventType.quantity_optional():
+            raise EngineValidationError(
+                f"Quantidade é obrigatória para evento {et.value}."
+            )
+    elif qty <= _ZERO:
         if et not in (EventType.AMORTIZACAO, EventType.CISAO):
             raise EngineValidationError(
                 f"Quantidade deve ser positiva para evento {et.value}."
@@ -145,7 +150,7 @@ def validate_event(event: EventRecord, state: PositionState) -> None:
         )
 
     # ── exit events: cannot leave quantity negative ──────────
-    if et in EventType.exit_events():
+    if et in EventType.exit_events() and qty is not None:
         if qty > state.quantity:
             raise EngineValidationError(
                 f"{et.value}: quantidade vendida/resgatada ({qty}) "
@@ -160,7 +165,7 @@ def validate_event(event: EventRecord, state: PositionState) -> None:
             )
 
     # ── grupamento: cannot leave quantity negative ───────────
-    if et == EventType.GRUPAMENTO:
+    if et == EventType.GRUPAMENTO and qty is not None:
         if qty > state.quantity:
             raise EngineValidationError(
                 f"Grupamento: redução de {qty} excede posição {state.quantity}."
@@ -203,6 +208,10 @@ def _process_venda(state: PositionState, qty: Decimal, val: Decimal) -> Decimal:
     return realized
 
 
+def _process_venda_fracao(_state: PositionState, _qty: Decimal | None, val: Decimal) -> Decimal:
+    return val
+
+
 def _process_desdobramento(state: PositionState, qty: Decimal, _val: Decimal) -> Decimal:
     state.quantity += qty
     state._recalc_avg()
@@ -237,6 +246,7 @@ def _process_cisao(state: PositionState, _qty: Decimal, val: Decimal) -> Decimal
 _PROCESSORS = {
     EventType.COMPRA: _process_compra,
     EventType.VENDA: _process_venda,
+    EventType.VENDA_FRACAO: _process_venda_fracao,
     EventType.RESGATE_ANTECIPADO: _process_venda,      # same math as Venda
     EventType.RESGATE_VENCIMENTO: _process_venda,      # same math as Venda
     EventType.DESDOBRAMENTO: _process_desdobramento,
@@ -334,8 +344,8 @@ def replay_events_with_snapshots(events: list[EventRecord]) -> dict[int, EventRe
     original_state = PositionState()
     snapshots: dict[int, EventReplaySnapshot] = {}
     for ev in events:
-        unit_price = ev.event_value / ev.quantity if ev.quantity > _ZERO else None
-        unit_price_brl = ev.replay_value / ev.quantity if ev.quantity > _ZERO else None
+        unit_price = ev.event_value / ev.quantity if ev.quantity is not None and ev.quantity > _ZERO else None
+        unit_price_brl = ev.replay_value / ev.quantity if ev.quantity is not None and ev.quantity > _ZERO else None
         realized = process_event(ev, state, skip_validation=False)
         original_ev = EventRecord(
             id=ev.id,

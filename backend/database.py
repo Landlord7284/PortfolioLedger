@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS events (
     asset_id        INTEGER NOT NULL REFERENCES assets(id),
     event_type      TEXT    NOT NULL CHECK (event_type IN {_EVENT_TYPE_VALUES}),
     event_date      TEXT    NOT NULL,
-    quantity        TEXT    NOT NULL,
+    quantity        TEXT,
     event_value     TEXT    NOT NULL,
     event_value_brl TEXT,
     gross_value     TEXT,
@@ -395,6 +395,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "events", "gross_value_brl", "gross_value_brl TEXT")
     _add_column_if_missing(conn, "events", "ptax_compra", "ptax_compra TEXT")
     _add_column_if_missing(conn, "events", "ptax_venda", "ptax_venda TEXT")
+    _ensure_events_nullable_quantity(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ptax_monthly_cache (
@@ -408,6 +409,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         """
     )
     _ensure_b3_schema(conn)
+    _ensure_schwab_schema(conn)
 
     conn.execute(
         """
@@ -468,6 +470,59 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_events_portfolio_period ON events(portfolio_id, event_date, sequence_num, asset_id)"
     )
     _ensure_fiscal_schema(conn)
+
+
+def _ensure_events_nullable_quantity(conn: sqlite3.Connection) -> None:
+    cols = _table_columns(conn, "events")
+    if not cols.get("quantity") or not cols["quantity"]["notnull"]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("ALTER TABLE events RENAME TO events_old")
+    conn.execute(
+        f"""
+        CREATE TABLE events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id    INTEGER NOT NULL REFERENCES portfolios(id),
+            asset_id        INTEGER NOT NULL REFERENCES assets(id),
+            event_type      TEXT    NOT NULL CHECK (event_type IN {_EVENT_TYPE_VALUES}),
+            event_date      TEXT    NOT NULL,
+            quantity        TEXT,
+            event_value     TEXT    NOT NULL,
+            event_value_brl TEXT,
+            gross_value     TEXT,
+            gross_value_brl TEXT,
+            ptax_compra     TEXT,
+            ptax_venda      TEXT,
+            sequence_num    INTEGER NOT NULL,
+            storno_of       INTEGER REFERENCES events(id),
+            correction_of   INTEGER REFERENCES events(id),
+            is_storno       INTEGER NOT NULL DEFAULT 0 CHECK (is_storno IN (0, 1)),
+            is_cancelled    INTEGER NOT NULL DEFAULT 0 CHECK (is_cancelled IN (0, 1)),
+            duplicate_flag  INTEGER NOT NULL DEFAULT 0 CHECK (duplicate_flag IN (0, 1)),
+            notes           TEXT,
+            created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO events (
+            id, portfolio_id, asset_id, event_type, event_date, quantity,
+            event_value, event_value_brl, gross_value, gross_value_brl,
+            ptax_compra, ptax_venda, sequence_num, storno_of, correction_of,
+            is_storno, is_cancelled, duplicate_flag, notes, created_at
+        )
+        SELECT id, portfolio_id, asset_id, event_type, event_date, quantity,
+               event_value, event_value_brl, gross_value, gross_value_brl,
+               ptax_compra, ptax_venda, sequence_num, storno_of, correction_of,
+               is_storno, is_cancelled, duplicate_flag, notes, created_at
+        FROM events_old
+        """
+    )
+    conn.execute("DROP TABLE events_old")
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_asset_portfolio ON events(asset_id, portfolio_id, event_date, sequence_num)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_portfolio_period ON events(portfolio_id, event_date, sequence_num, asset_id)")
 
 
 def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
@@ -583,6 +638,105 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
                 row,
             )
     _add_column_if_missing(conn, "fiscal_tax_parameters", "active", "active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))")
+
+
+def _ensure_schwab_schema(conn: sqlite3.Connection) -> None:
+    """Create Schwab/TDA import tables for fresh and existing databases."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS schwab_imports (
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id               INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            account_key                TEXT    NOT NULL DEFAULT 'UNKNOWN',
+            filename                   TEXT    NOT NULL,
+            file_hash                  TEXT    NOT NULL,
+            source                     TEXT    NOT NULL DEFAULT 'SCHWAB',
+            source_format              TEXT    NOT NULL DEFAULT 'JSON',
+            from_date                  TEXT,
+            to_date                    TEXT,
+            total_transactions_amount  TEXT,
+            total_fees_comm_amount     TEXT,
+            total_rows                 INTEGER NOT NULL DEFAULT 0,
+            imported_ledger_events     INTEGER NOT NULL DEFAULT 0,
+            imported_foreign_events    INTEGER NOT NULL DEFAULT 0,
+            ignored                    INTEGER NOT NULL DEFAULT 0,
+            duplicates                 INTEGER NOT NULL DEFAULT 0,
+            review_count               INTEGER NOT NULL DEFAULT 0,
+            warning_count              INTEGER NOT NULL DEFAULT 0,
+            errors                     TEXT,
+            status                     TEXT    NOT NULL DEFAULT 'processed',
+            created_at                 TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at                 TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(portfolio_id, account_key, file_hash)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_schwab_imports_portfolio_period
+            ON schwab_imports(portfolio_id, from_date, to_date, id);
+
+        CREATE TABLE IF NOT EXISTS schwab_transactions (
+            id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+            import_id                   INTEGER NOT NULL REFERENCES schwab_imports(id) ON DELETE CASCADE,
+            portfolio_id                INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            source_row                  INTEGER NOT NULL,
+            account_key                 TEXT    NOT NULL DEFAULT 'UNKNOWN',
+            asset_id                    INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+            ledger_event_id             INTEGER REFERENCES events(id) ON DELETE SET NULL,
+            source                      TEXT    NOT NULL DEFAULT 'SCHWAB',
+            source_format               TEXT    NOT NULL DEFAULT 'JSON',
+            source_action               TEXT,
+            source_description          TEXT,
+            source_symbol               TEXT,
+            source_date_raw             TEXT,
+            event_date                  TEXT,
+            effective_date              TEXT,
+            quantity                    TEXT,
+            price                       TEXT,
+            amount                      TEXT,
+            fees_comm                   TEXT,
+            acctg_rule_cd               TEXT,
+            normalized_category         TEXT    NOT NULL,
+            normalized_type             TEXT,
+            normalized_subtype          TEXT,
+            status                      TEXT    NOT NULL DEFAULT 'imported',
+            economic_fingerprint        TEXT,
+            duplicate_of_transaction_id INTEGER REFERENCES schwab_transactions(id) ON DELETE SET NULL,
+            asset_match_review_id       INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
+            asset_alert_id              INTEGER,
+            raw_payload                 TEXT,
+            created_at                  TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at                  TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(import_id, source_row)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_schwab_transactions_economic
+            ON schwab_transactions(portfolio_id, account_key, economic_fingerprint, status);
+
+        CREATE INDEX IF NOT EXISTS idx_schwab_transactions_asset_date
+            ON schwab_transactions(portfolio_id, event_date, asset_id, normalized_category, status);
+
+        CREATE TABLE IF NOT EXISTS schwab_asset_alerts (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id        INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            import_id           INTEGER REFERENCES schwab_imports(id) ON DELETE CASCADE,
+            transaction_id      INTEGER REFERENCES schwab_transactions(id) ON DELETE SET NULL,
+            asset_id            INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+            ticker              TEXT,
+            alert_type          TEXT    NOT NULL,
+            event_date          TEXT,
+            source              TEXT    NOT NULL DEFAULT 'SCHWAB',
+            source_action       TEXT,
+            source_description  TEXT,
+            quantity            TEXT,
+            status              TEXT    NOT NULL DEFAULT 'pending',
+            raw_payload         TEXT,
+            created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+            resolved_at         TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_schwab_asset_alerts_pending
+            ON schwab_asset_alerts(status, portfolio_id, event_date, id);
+        """
+    )
 
 
 def _ensure_b3_schema(conn: sqlite3.Connection) -> None:

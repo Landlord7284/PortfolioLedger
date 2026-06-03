@@ -82,7 +82,15 @@ export const assets = {
     request(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   tickers: (id) => request(`/assets/${id}/tickers`),
   reviews: () => request('/assets/reviews'),
+  alerts: ({ portfolioId, status } = {}) => {
+    const params = new URLSearchParams();
+    if (portfolioId) params.set('portfolio_id', portfolioId);
+    if (status) params.set('status', status);
+    const qs = params.toString();
+    return request(`/assets/alerts${qs ? '?' + qs : ''}`);
+  },
   resolveReview: (id) => request(`/assets/reviews/${id}/resolve`, { method: 'POST' }),
+  resolveAlert: (id) => request(`/assets/alerts/${id}/resolve`, { method: 'POST' }),
   createFromReview: (id) => request(`/assets/reviews/${id}/create-asset`, { method: 'POST' }),
   merge: (data) => request('/assets/merge', { method: 'POST', body: JSON.stringify(data) }),
   delete: (id) =>
@@ -181,6 +189,21 @@ export const b3 = {
     if (tableMonth) params.set('table_month', tableMonth);
     if (tableAssetClass) params.set('table_asset_class', tableAssetClass);
     return request(`/b3/incomes?${params.toString()}`);
+  },
+};
+
+export const schwab = {
+  importJson: ({ portfolioId, files, accountKey }) => {
+    const formData = new FormData();
+    Array.from(files || []).forEach((file) => {
+      formData.append('files', file);
+    });
+    const params = new URLSearchParams({ portfolio_id: portfolioId });
+    if (accountKey) params.set('account_key', accountKey);
+    return request(`/schwab/import?${params.toString()}`, {
+      method: 'POST',
+      body: formData,
+    });
   },
 };
 

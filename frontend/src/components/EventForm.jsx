@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput } from '@/lib/formatters';
 
 const EVENT_TYPES = [
-  'Compra', 'Venda', 'Desdobramento', 'Grupamento',
+  'Compra', 'Venda', 'V. Fração', 'Desdobramento', 'Grupamento',
   'Bonificação', 'Amortização', 'Cisão',
   'Resgate Antecipado', 'Resgate Vencimento',
 ];
@@ -38,6 +38,7 @@ const TREASURY_INDEXER_OPTIONS = [
 ];
 
 const VALUE_IGNORED = ['Desdobramento', 'Grupamento'];
+const QUANTITY_OPTIONAL = ['V. Fração'];
 
 function AssetCombobox({ options, value, onChange, disabled }) {
   const [open, setOpen] = useState(false);
@@ -215,7 +216,8 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
     return { gross_value: currencyToBackend(val) };
   };
 
-  const normalizeQuantity = (val) => {
+  const normalizeQuantity = (val, evType) => {
+    if (QUANTITY_OPTIONAL.includes(evType) && !val) return null;
     return val.replace(',', '.');
   };
 
@@ -234,7 +236,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             asset_id: Number(r.asset_id),
             event_type: r.event_type,
             event_date: r.date,
-            quantity: normalizeQuantity(r.qty),
+            quantity: normalizeQuantity(r.qty, r.event_type),
             event_value: normalizeValue(r.val, r.event_type),
             notes: r.notes || null,
           };
@@ -261,7 +263,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
             event_date: eventDate,
             portfolio_id: activePortfolioId,
             event_type: eventType,
-            quantity: normalizeQuantity(quantity),
+            quantity: normalizeQuantity(quantity, eventType),
             event_value: normalizeValue(eventValue, eventType),
             origin_usd: showOriginUsd ? currencyToBackend(originUsd) : null,
             ...grossValuePayload(grossValue, eventType),
@@ -282,7 +284,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
           asset_id: Number(targetAssetId),
           event_type: eventType,
           event_date: eventDate,
-          quantity: normalizeQuantity(quantity),
+          quantity: normalizeQuantity(quantity, eventType),
           event_value: normalizeValue(eventValue, eventType),
           origin_usd: showOriginUsd ? currencyToBackend(originUsd) : null,
           ...grossValuePayload(grossValue, eventType),
@@ -394,7 +396,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
                         value={row.val} 
                         onChange={(e) => updateBulkRow(row.id, 'val', applyCurrencyMask(e.target.value))} 
                         disabled={VALUE_IGNORED.includes(row.event_type)} 
-                        required={!VALUE_IGNORED.includes(row.event_type)} 
+                        required={!VALUE_IGNORED.includes(row.event_type) && !QUANTITY_OPTIONAL.includes(row.event_type)} 
                       />
                     </TableCell>
                     <TableCell className="p-2 text-center">
@@ -563,7 +565,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
                 value={quantity} 
                 onChange={(e) => setQuantity(sanitizeQuantityInput(e.target.value, isNewAsset ? newClass : getAssetClass(selectedAssetId)))} 
                 placeholder="0,00" 
-                required 
+                required={!QUANTITY_OPTIONAL.includes(eventType)} 
               />
             </div>
             {!VALUE_IGNORED.includes(eventType) && (

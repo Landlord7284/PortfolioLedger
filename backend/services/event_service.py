@@ -40,7 +40,7 @@ def _rows_to_event_records(rows: list) -> list[EventRecord]:
             id=r["id"],
             event_type=EventType(r["event_type"]),
             event_date=r["event_date"],
-            quantity=Decimal(r["quantity"]),
+                quantity=Decimal(r["quantity"]) if r["quantity"] is not None else None,
             event_value=Decimal(r["event_value"]),
             sequence_num=r["sequence_num"],
             event_value_brl=Decimal(r["event_value_brl"]) if r["event_value_brl"] is not None else None,
@@ -57,7 +57,7 @@ def _rows_to_original_event_records(rows: list) -> list[EventRecord]:
             id=r["id"],
             event_type=EventType(r["event_type"]),
             event_date=r["event_date"],
-            quantity=Decimal(r["quantity"]),
+                quantity=Decimal(r["quantity"]) if r["quantity"] is not None else None,
             event_value=Decimal(r["event_value"]),
             sequence_num=r["sequence_num"],
             is_cancelled=bool(r["is_cancelled"]),
@@ -276,7 +276,7 @@ def create_event(
     asset_id: int,
     event_type: str,
     event_date: str,
-    quantity: str,
+    quantity: Optional[str],
     event_value: str,
     gross_value: Optional[str] = None,
     origin_usd: Optional[str] = None,
@@ -290,7 +290,7 @@ def create_event(
     # Parse and validate enum
     et = EventType(normalize_event_type_strict(event_type))
 
-    qty = to_decimal(quantity)
+    qty = to_decimal(quantity) if quantity is not None else None
     val = to_decimal(event_value)
     gross = to_decimal(gross_value) if gross_value and et == EventType.VENDA else None
 
@@ -338,7 +338,7 @@ def create_event(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (portfolio_id, asset_id, et.value, event_date,
-         str(qty), str(val), conversion["event_value_brl"],
+         str(qty) if qty is not None else None, str(val), conversion["event_value_brl"],
          str(gross) if gross is not None else None, conversion["gross_value_brl"],
          conversion["ptax_compra"], conversion["ptax_venda"], seq, notes),
     )

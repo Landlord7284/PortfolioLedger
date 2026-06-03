@@ -169,6 +169,7 @@ export default function AssetManagement() {
   const { activePortfolioId, portfolioList } = useContext(AppContext);
   const [assetList, setAssetList] = useState([]);
   const [reviews, setReviews] = useState([]);
+  const [assetAlerts, setAssetAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterClass, setFilterClass] = useState('');
@@ -189,18 +190,20 @@ export default function AssetManagement() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [assets, pending] = await Promise.all([
+      const [assets, pending, alerts] = await Promise.all([
         assetsApi.list(null, includeMerged),
         assetsApi.reviews(),
+        assetsApi.alerts({ portfolioId: activePortfolioId }),
       ]);
       setAssetList(assets);
       setReviews(pending);
+      setAssetAlerts(alerts);
     } catch (err) {
       toast.error(err.message || 'Falha ao carregar Gestão de Ativos.');
     } finally {
       setLoading(false);
     }
-  }, [includeMerged]);
+  }, [activePortfolioId, includeMerged]);
 
   useEffect(() => {
     load();
@@ -287,6 +290,16 @@ export default function AssetManagement() {
       await load();
     } catch (err) {
       toast.error(err.message || 'Falha ao resolver revisão.');
+    }
+  };
+
+  const resolveAssetAlert = async (id) => {
+    try {
+      await assetsApi.resolveAlert(id);
+      toast.success('Alerta marcado como resolvido.');
+      await load();
+    } catch (err) {
+      toast.error(err.message || 'Falha ao resolver alerta.');
     }
   };
 
@@ -461,6 +474,41 @@ export default function AssetManagement() {
                     </div>
                   </div>
                 )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {assetAlerts.length > 0 && (
+        <Card className="border-sky-500/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertCircle className="w-4 h-4 text-sky-500" /> Alertas Schwab/TDA
+            </CardTitle>
+            <CardDescription>Eventos societários importados que exigem revisão manual antes de afetar custo ou posição.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {assetAlerts.map((alert) => (
+              <div key={alert.id} className="flex flex-col gap-3 rounded-lg border p-3">
+                <div className="text-sm">
+                  <span className="font-medium">{alert.ticker || 'Ticker pendente'}</span> · {alert.alert_type} · {formatDate(alert.event_date)}
+                  <p className="text-xs text-muted-foreground mt-1">{alert.source_action || '-'}: {alert.source_description || '-'}</p>
+                  {alert.quantity && (
+                    <p className="text-xs text-muted-foreground mt-1">Quantidade informada: {formatQuantity(alert.quantity)}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">Origem: {alert.source} · transação #{alert.transaction_id || '-'}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {alert.asset_id && (
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/assets/${alert.asset_id}`)}>
+                      <ExternalLink className="w-4 h-4" /> Abrir ativo #{alert.asset_id}
+                    </Button>
+                  )}
+                  <Button size="sm" variant="outline" onClick={() => resolveAssetAlert(alert.id)}>
+                    <Check className="w-4 h-4" /> Marcar resolvido
+                  </Button>
+                </div>
               </div>
             ))}
           </CardContent>

@@ -43,6 +43,10 @@ _IMPORTED_ASSET_CLASS_ALIASES = {
 _IMPORTED_EVENT_TYPE_ALIASES = {
     "Compra": EventType.COMPRA,
     "Venda": EventType.VENDA,
+    "V. Fração": EventType.VENDA_FRACAO,
+    "V. Fracao": EventType.VENDA_FRACAO,
+    "Venda de Fração": EventType.VENDA_FRACAO,
+    "Venda de Fracao": EventType.VENDA_FRACAO,
     "Desdobramento": EventType.DESDOBRAMENTO,
     "Grupamento": EventType.GRUPAMENTO,
     "Amortiza\u00e7\u00e3o": EventType.AMORTIZACAO,

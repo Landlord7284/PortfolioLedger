@@ -185,7 +185,7 @@ class EventCreate(BaseModel):
     asset_id: int
     event_type: str
     event_date: str            # ISO date  YYYY-MM-DD
-    quantity: str              # Decimal as string
+    quantity: Optional[str] = None  # Decimal as string; nullable for V. Fração
     event_value: str           # Decimal as string
     gross_value: Optional[str] = None  # Decimal as string, only for Venda
     origin_usd: Optional[str] = None  # Decimal as string, only for PRE_2024 USD Compra
@@ -313,6 +313,32 @@ class IncomeReportResponse(BaseModel):
     portfolio_id: int
     year: int
     tables: list[IncomeReportTable]
+
+
+class ForeignReportRow(BaseModel):
+    month: str
+    category: str
+    asset_id: Optional[int] = None
+    ticker: Optional[str] = None
+    name: Optional[str] = None
+    amount_usd: str
+    amount_brl: Optional[str] = None
+    missing_ptax: bool = False
+
+
+class ForeignReportTotal(BaseModel):
+    category: str
+    amount_usd: str
+    amount_brl: Optional[str] = None
+    missing_ptax: bool = False
+
+
+class ForeignReportResponse(BaseModel):
+    portfolio_id: int
+    year: int
+    rows: list[ForeignReportRow]
+    totals: list[ForeignReportTotal]
+    missing_ptax_dates: list[str] = []
 
 
 class CapitalGainAssetRow(BaseModel):
@@ -684,6 +710,56 @@ class B3MonthlySanitizeResponse(BaseModel):
     ledger_events_cancelled: int
 
 
+class SchwabImportFileResult(BaseModel):
+    filename: str
+    from_date: Optional[str] = None
+    to_date: Optional[str] = None
+    total_rows: int
+    imported_ledger_events: int
+    imported_foreign_events: int
+    ignored: int = 0
+    duplicates: int = 0
+    review_count: int = 0
+    warning_count: int = 0
+    duplicate_details: list[str] = []
+    review_details: list[str] = []
+    warnings: list[str] = []
+    errors: list[str] = []
+
+
+class SchwabImportResponse(BaseModel):
+    portfolio_id: int
+    files_processed: int
+    total_rows: int
+    imported_ledger_events: int
+    imported_foreign_events: int
+    ignored: int = 0
+    duplicates: int = 0
+    review_count: int = 0
+    warning_count: int = 0
+    errors: list[str] = []
+    files: list[SchwabImportFileResult]
+
+
+class SchwabAssetAlertResponse(BaseModel):
+    id: int
+    portfolio_id: int
+    import_id: Optional[int] = None
+    transaction_id: Optional[int] = None
+    asset_id: Optional[int] = None
+    ticker: Optional[str] = None
+    alert_type: str
+    event_date: Optional[str] = None
+    source: str
+    source_action: Optional[str] = None
+    source_description: Optional[str] = None
+    quantity: Optional[str] = None
+    status: str
+    raw_payload: Optional[str] = None
+    created_at: str
+    resolved_at: Optional[str] = None
+
+
 class B3IncomeSummary(BaseModel):
     total_net_value: str
     monthly_average: str
@@ -829,7 +905,7 @@ class DashboardPositionRow(BaseModel):
     subsector: Optional[str] = None
     segment: Optional[str] = None
     treasury_indexer: Optional[str] = None
-    quantity: str
+    quantity: Optional[str] = None
     market_value: str
     cost_basis: str
     unrealized_result: str
