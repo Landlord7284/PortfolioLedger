@@ -382,6 +382,32 @@ def _resolve_asset(
     return asset_id, candidates, "name"
 
 
+def _complete_existing_debenture_metadata(
+    conn: sqlite3.Connection,
+    asset_id: int | None,
+    *,
+    imported_name: str | None,
+    maturity_date: str | None,
+) -> None:
+    if not asset_id:
+        return
+    asset = asset_service.get_asset(conn, asset_id)
+    if not asset or asset["asset_class"] != AssetClass.DEBENTURE.value:
+        return
+
+    name_update = imported_name if _clean_str(asset.get("name")) is None else None
+    maturity_update = maturity_date if _clean_str(asset.get("maturity_date")) is None else None
+    if name_update is None and maturity_update is None:
+        return
+
+    asset_service.update_asset_metadata(
+        conn,
+        asset_id,
+        name=name_update,
+        maturity_date=maturity_update,
+    )
+
+
 def _upsert_import(conn: sqlite3.Connection, portfolio_id: int, filename: str, reference_month: str, reference_date: str) -> int:
     processed_status = normalize_b3_monthly_import_status(B3MonthlyImportStatus.PROCESSED.value)
     conn.execute(
@@ -739,6 +765,13 @@ def _process_market_sheet(
             asset_class=asset_class,
             event_date=reference_date,
         )
+        if fixed_income_only and asset_class == AssetClass.DEBENTURE:
+            _complete_existing_debenture_metadata(
+                conn,
+                asset_id,
+                imported_name=_clean_str(row.get("EMISSOR")) or product,
+                maturity_date=maturity_date,
+            )
         review_id = None
         status = B3MarketPriceStatus.IMPORTED.value
         if not asset_id:

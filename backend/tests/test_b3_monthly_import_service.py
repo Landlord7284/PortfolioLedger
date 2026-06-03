@@ -520,6 +520,41 @@ def test_b3_fixed_income_stops_on_blank_product_filters_and_creates_debenture_wi
     assert assets[0]["maturity_date"] == "2032-07-15"
 
 
+def test_b3_fixed_income_completes_missing_existing_debenture_metadata_without_overwriting(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Posição - Renda Fixa": [
+                ["DEB - CIA TESTE", "ITAU", "CIA TESTE", "DEB123", "IPCA", "DEPOSITADO", "01/01/2024", "01/01/2030", 1, 1, "-", "-", "-", 100, 100],
+                ["DEB - CIA IMPORTADA", "ITAU", "CIA IMPORTADA", "DEB456", "IPCA", "DEPOSITADO", "01/01/2024", "15/07/2031", 1, 1, "-", "-", "-", 100, 100],
+                ["DEB - CIA VENCIMENTO", "ITAU", "CIA VENCIMENTO", "DEB789", "IPCA", "DEPOSITADO", "01/01/2024", "20/08/2032", 1, 1, "-", "-", "-", 100, 100],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        blank = asset_service.create_asset(conn, AssetClass.DEBENTURE.value, "DEB123", market="BR")
+        named = asset_service.create_asset(conn, AssetClass.DEBENTURE.value, "DEB456", market="BR", name="Nome Manual")
+        matured = asset_service.create_asset(conn, AssetClass.DEBENTURE.value, "DEB789", market="BR", maturity_date="2040-01-01")
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2025-11.xlsx", content)])
+        blank_after = asset_service.get_asset(conn, blank["id"])
+        named_after = asset_service.get_asset(conn, named["id"])
+        matured_after = asset_service.get_asset(conn, matured["id"])
+        asset_count = conn.execute("SELECT COUNT(*) AS count FROM assets").fetchone()["count"]
+
+    assert result["imported_prices"] == 3
+    assert asset_count == 3
+    assert blank_after["name"] == "CIA TESTE"
+    assert blank_after["maturity_date"] == "2030-01-01"
+    assert named_after["name"] == "Nome Manual"
+    assert named_after["maturity_date"] == "2031-07-15"
+    assert matured_after["name"] == "CIA VENCIMENTO"
+    assert matured_after["maturity_date"] == "2040-01-01"
+
+
 def test_b3_debenture_income_matches_position_by_product_and_clean_quantity(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)
