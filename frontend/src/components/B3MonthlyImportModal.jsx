@@ -21,9 +21,9 @@ import FileDropzone from './FileDropzone';
 function StatCard({ label, value, className = '' }) {
   return (
     <Card>
-      <CardContent className="p-3">
-        <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
-        <p className={`font-mono text-xl font-bold ${className}`}>{value ?? 0}</p>
+      <CardContent className="px-3 py-1.5">
+        <p className="text-[10px] font-medium uppercase tracking-wider leading-tight text-muted-foreground">{label}</p>
+        <p className={`font-mono text-base font-bold leading-tight ${className}`}>{value ?? 0}</p>
       </CardContent>
     </Card>
   );
@@ -38,7 +38,7 @@ function DetailList({ title, icon: Icon, items, destructive = false }) {
         <Icon className="h-4 w-4" />
         {title}
       </h4>
-      <div className="max-h-40 space-y-1 overflow-y-auto overflow-x-hidden">
+      <div className="flex max-h-36 flex-col gap-1 overflow-y-auto overflow-x-hidden">
         {items.map((item, index) => (
           <div
             key={`${item}-${index}`}
@@ -118,7 +118,7 @@ export default function B3MonthlyImportModal({ portfolioId, onClose, onSuccess }
 
   return (
     <Dialog open={true} onOpenChange={(open) => { if (!open && !importing) onClose(); }}>
-      <DialogContent className="sm:max-w-4xl">
+      <DialogContent className="grid max-h-[calc(100vh-2rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UploadCloud className="h-5 w-5" />
@@ -133,7 +133,7 @@ export default function B3MonthlyImportModal({ portfolioId, onClose, onSuccess }
         </DialogHeader>
 
         {!result ? (
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             <FileDropzone
               files={files}
               accept=".xlsx"
@@ -173,13 +173,13 @@ export default function B3MonthlyImportModal({ portfolioId, onClose, onSuccess }
             </DialogFooter>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
             <Alert className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="h-5 w-5 shrink-0" />
               <AlertTitle className="mb-0">Importacao B3 concluida!</AlertTitle>
             </Alert>
 
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
               <StatCard label="Arquivos" value={result.files_processed} />
               <StatCard label="Linhas" value={result.total_rows} />
               <StatCard label="Precos" value={result.imported_prices} className="text-emerald-500" />
@@ -190,7 +190,7 @@ export default function B3MonthlyImportModal({ portfolioId, onClose, onSuccess }
               <StatCard label="Erros" value={allErrors.length} className={allErrors.length > 0 ? 'text-destructive' : ''} />
             </div>
 
-            <div className="overflow-x-auto rounded-md border">
+            <div className="min-h-0 flex-1 overflow-auto rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -240,7 +240,7 @@ export default function B3MonthlyImportModal({ portfolioId, onClose, onSuccess }
                         {expanded && (
                           <TableRow className="bg-muted/20 hover:bg-muted/20">
                             <TableCell colSpan={9} className="p-4">
-                              <div className="w-full space-y-4">
+                              <div className="flex w-full flex-col gap-4">
                                 <DetailList title="Duplicados" icon={AlertTriangle} items={file.duplicate_details || []} />
                                 <DetailList title="Revisoes" icon={AlertTriangle} items={file.review_details || []} />
                                 <DetailList title="Erros" icon={AlertCircle} items={file.errors || []} destructive />
@@ -255,7 +255,7 @@ export default function B3MonthlyImportModal({ portfolioId, onClose, onSuccess }
               </Table>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-t-0 bg-transparent p-0 pt-1 sm:justify-end">
               <Button onClick={onClose} className="w-full sm:w-auto">Fechar</Button>
             </DialogFooter>
           </div>
