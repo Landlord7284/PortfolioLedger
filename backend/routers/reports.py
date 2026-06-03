@@ -14,6 +14,7 @@ from backend.models import (
     CapitalGainReportResponse,
     ForeignReportResponse,
     IncomeReportResponse,
+    ReportYearOptionsResponse,
     TaxExemptIncomeReportResponse,
 )
 from backend.services import capital_gain_report_service, foreign_report_service, report_service, tax_exempt_income_report_service
@@ -27,6 +28,14 @@ def _validate_year(year: int) -> int:
     if year < 1900 or year > current_year + 1:
         raise HTTPException(400, "Ano calendário inválido.")
     return year
+
+
+@router.get("/year-options", response_model=ReportYearOptionsResponse)
+def report_year_options(portfolio_id: int = Query(...)):
+    with get_db() as conn:
+        if not get_portfolio(conn, portfolio_id):
+            raise HTTPException(404, f"Carteira {portfolio_id} não encontrada.")
+        return report_service.get_report_year_options(conn, portfolio_id)
 
 
 @router.get("/assets-and-rights", response_model=AssetsAndRightsReportResponse)

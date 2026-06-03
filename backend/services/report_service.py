@@ -8,6 +8,7 @@ No report values are persisted here.
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 import re
@@ -402,6 +403,29 @@ def list_income_report(conn: sqlite3.Connection, portfolio_id: int, year: int) -
         "portfolio_id": portfolio_id,
         "year": year,
         "tables": [tables["tax_exempt"], tables["exclusive_taxation"]],
+    }
+
+
+def get_report_year_options(conn: sqlite3.Connection, portfolio_id: int) -> dict:
+    current_year = datetime.now().year
+    row = conn.execute(
+        """
+        SELECT MIN(event_date) AS first_event_date
+        FROM events
+        WHERE portfolio_id = ?
+          AND is_cancelled = 0
+          AND is_storno = 0
+        """,
+        (portfolio_id,),
+    ).fetchone()
+    first_event_year = int(row["first_event_date"][:4]) if row and row["first_event_date"] else None
+    start_year = min(first_event_year, current_year) if first_event_year is not None else current_year
+
+    return {
+        "portfolio_id": portfolio_id,
+        "first_event_year": first_event_year,
+        "current_year": current_year,
+        "years": list(range(current_year, start_year - 1, -1)),
     }
 
 

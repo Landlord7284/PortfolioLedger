@@ -3,6 +3,7 @@ import { AlertCircle, ChevronDown, ChevronRight, Download, Edit2, Loader2, Plus,
 import { toast } from 'sonner';
 import { AppContext } from '../App';
 import { reports as reportsApi, tax as taxApi } from '../api/client';
+import { useReportYearOptions } from '../hooks/useReportYearOptions';
 import { applyCurrencyMask, currencyToBackend, formatMoney } from '@/lib/formatters';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -522,7 +523,7 @@ export default function CapitalGainsReport() {
   const [exporting, setExporting] = useState(false);
 
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
-  const yearOptions = useMemo(() => Array.from({ length: 8 }, (_, index) => String(currentYear - index)), []);
+  const yearOptions = useReportYearOptions(activePortfolioId, year, setYear);
 
   const loadReport = useCallback(async () => {
     if (!activePortfolioId) {

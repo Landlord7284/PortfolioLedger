@@ -153,6 +153,10 @@ export const dashboard = {
 };
 
 export const reports = {
+  yearOptions: ({ portfolioId }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId });
+    return request(`/reports/year-options?${params.toString()}`);
+  },
   assetsAndRights: ({ portfolioId, year }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, year });
     return request(`/reports/assets-and-rights?${params.toString()}`);

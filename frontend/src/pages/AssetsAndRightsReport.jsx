@@ -3,6 +3,7 @@ import { Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppContext } from '../App';
 import { reports as reportsApi } from '../api/client';
+import { useReportYearOptions } from '../hooks/useReportYearOptions';
 import { formatCnpj, formatMoney, formatQuantity } from '@/lib/formatters';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,9 +58,7 @@ export default function AssetsAndRightsReport() {
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
   const currentMarkedKey = markedStorageKey(activePortfolioId, year);
   const markedAssets = markedState.key === currentMarkedKey ? markedState.assets : loadMarkedAssets(activePortfolioId, year);
-  const yearOptions = useMemo(() => {
-    return Array.from({ length: 8 }, (_, index) => String(currentYear - index));
-  }, []);
+  const yearOptions = useReportYearOptions(activePortfolioId, year, setYear);
 
   useEffect(() => {
     if (!activePortfolioId) {

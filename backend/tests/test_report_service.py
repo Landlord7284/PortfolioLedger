@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from openpyxl import load_workbook
 
 from backend.database import get_db, init_db
@@ -53,6 +55,60 @@ def _b3_income(
             ledger_event_id,
         ),
     )
+
+
+def test_report_year_options_use_oldest_active_event(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        other_portfolio = portfolio_service.create_portfolio(conn, "Outra")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
+
+        event_service.create_event(conn, other_portfolio["id"], asset["id"], EventType.COMPRA.value, "2018-01-01", "1", "10")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2021-05-10", "1", "10")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2024-01-10", "1", "10")
+
+        options = report_service.get_report_year_options(conn, portfolio["id"])
+
+    current_year = datetime.now().year
+    assert options["first_event_year"] == 2021
+    assert options["current_year"] == current_year
+    assert options["years"] == list(range(current_year, 2020, -1))
+
+
+def test_report_year_options_without_events_returns_current_year_only(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        options = report_service.get_report_year_options(conn, portfolio["id"])
+
+    current_year = datetime.now().year
+    assert options["first_event_year"] is None
+    assert options["current_year"] == current_year
+    assert options["years"] == [current_year]
+
+
+def test_report_year_options_ignores_cancelled_and_storno_events(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "XPTO3", market="BR")
+
+        cancelled = event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2019-01-01", "1", "10")
+        event_service.delete_event(conn, cancelled["id"])
+        original = event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2020-01-01", "1", "10")
+        event_service.storno_event(conn, original["id"])
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2022-01-01", "1", "10")
+
+        options = report_service.get_report_year_options(conn, portfolio["id"])
+
+    assert options["first_event_year"] == 2022
 
 
 def test_assets_and_rights_replays_year_end_positions(tmp_path):

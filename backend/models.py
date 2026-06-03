@@ -293,6 +293,13 @@ class AssetsAndRightsReportResponse(BaseModel):
     rows: list[AssetsAndRightsRow]
 
 
+class ReportYearOptionsResponse(BaseModel):
+    portfolio_id: int
+    first_event_year: Optional[int] = None
+    current_year: int
+    years: list[int]
+
+
 class IncomeReportRow(BaseModel):
     id: str
     ticker: Optional[str] = None
