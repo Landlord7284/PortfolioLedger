@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { importTemplateXlsx, importXlsx } from '../api/client';
 import { UploadCloud, FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2, AlertCircle, Download, ChevronDown } from 'lucide-react';
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import FileDropzone from './FileDropzone';
 import { toast } from 'sonner';
 
 export default function ImportModal({ portfolioId, onClose, onSuccess }) {
@@ -119,11 +119,13 @@ export default function ImportModal({ portfolioId, onClose, onSuccess }) {
               )}
             </div>
 
-            <Input
-              type="file"
+            <FileDropzone
+              files={file ? [file] : []}
               accept=".xlsx"
-              onChange={(e) => setFile(e.target.files[0])}
-              className="cursor-pointer"
+              onFilesChange={(selectedFiles) => setFile(selectedFiles[0] || null)}
+              disabled={importing}
+              title="Arraste a planilha aqui"
+              description="Use um arquivo .xlsx para importar os eventos da carteira selecionada."
             />
 
             <Alert>

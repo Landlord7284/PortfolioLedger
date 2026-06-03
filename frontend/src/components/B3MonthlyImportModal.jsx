@@ -15,8 +15,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import FileDropzone from './FileDropzone';
 
 function StatCard({ label, value, className = '' }) {
   return (
@@ -134,12 +134,15 @@ export default function B3MonthlyImportModal({ portfolioId, onClose, onSuccess }
 
         {!result ? (
           <div className="space-y-4">
-            <Input
-              type="file"
+            <FileDropzone
+              files={files}
               accept=".xlsx"
               multiple
-              onChange={(event) => setFiles(Array.from(event.target.files || []))}
-              className="cursor-pointer"
+              onFilesChange={setFiles}
+              disabled={importing}
+              title="Arraste os arquivos mensais aqui"
+              description="Use arquivos .xlsx da B3 no padrao YYYY-MM.xlsx."
+              browseLabel="Selecionar arquivos"
             />
 
             <Alert>
