@@ -294,6 +294,9 @@ def create_event(
     val = to_decimal(event_value)
     gross = to_decimal(gross_value) if gross_value and et == EventType.VENDA else None
 
+    if et in EventType.quantity_optional() and qty is None:
+        qty = Decimal("0")
+
     # For value-ignored events, force value to zero
     if et in EventType.value_ignored():
         val = Decimal("0")
@@ -463,7 +466,7 @@ def correct_event(
     event_id: int,
     event_type: str,
     event_date: str,
-    quantity: str,
+    quantity: Optional[str],
     event_value: str,
     gross_value: Optional[str] = None,
     origin_usd: Optional[str] = None,
@@ -483,9 +486,12 @@ def correct_event(
         "SELECT * FROM events WHERE id = ?", (event_id,)
     ).fetchone()
 
-    qty = to_decimal(quantity)
+    qty = to_decimal(quantity) if quantity is not None else None
     val = to_decimal(event_value)
     gross = to_decimal(gross_value) if gross_value and et == EventType.VENDA else None
+
+    if et in EventType.quantity_optional() and qty is None:
+        qty = Decimal("0")
 
     if et in EventType.value_ignored():
         val = Decimal("0")

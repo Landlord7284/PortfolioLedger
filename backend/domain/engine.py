@@ -138,7 +138,7 @@ def validate_event(event: EventRecord, state: PositionState) -> None:
                 f"Quantidade é obrigatória para evento {et.value}."
             )
     elif qty <= _ZERO:
-        if et not in (EventType.AMORTIZACAO, EventType.CISAO):
+        if et not in (*EventType.quantity_optional(), EventType.AMORTIZACAO, EventType.CISAO):
             raise EngineValidationError(
                 f"Quantidade deve ser positiva para evento {et.value}."
             )

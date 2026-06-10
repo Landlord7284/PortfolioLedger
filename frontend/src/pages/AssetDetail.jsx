@@ -17,6 +17,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from 'sonner';
 import { applyCurrencyMask, currencyToBackend, sanitizeQuantityInput, formatMoney, formatQuantity } from '@/lib/formatters';
 
@@ -64,7 +65,7 @@ function CorrectionModal({ event, assetClass, open, onClose, onSuccess }) {
       await eventsApi.correct(event.id, {
         event_type: eventType,
         event_date: eventDate,
-        quantity: QUANTITY_OPTIONAL.includes(eventType) && !quantity ? null : quantity.replace(',', '.'),
+        quantity: QUANTITY_OPTIONAL.includes(eventType) && !quantity ? '0' : quantity.replace(',', '.'),
         event_value: normalizeValue(eventValue, eventType),
         ...grossValuePayload(grossValue, eventType),
         notes: notes || null,
@@ -246,11 +247,11 @@ export default function AssetDetail() {
       } else if (alertTarget.type === 'duplicate') {
         toast.success(alertTarget.payload.confirm ? 'Evento duplicado confirmado como válido.' : 'Evento duplicado excluído.');
       } else if (alertTarget.type === 'schwab-duplicate') {
-        toast.success('Duplicidade Schwab/TDA confirmada.');
+        toast.success('Duplicidade Schwab confirmada.');
       } else if (alertTarget.type === 'schwab-ignore') {
-        toast.success('Transação Schwab/TDA ignorada.');
+        toast.success('Transação Schwab ignorada.');
       } else if (alertTarget.type === 'schwab-accept') {
-        toast.success('Evento Schwab/TDA importado no ledger.');
+        toast.success('Evento Schwab importado no ledger.');
       }
 
       if (alertTarget.type === 'asset-delete') {
@@ -329,8 +330,8 @@ export default function AssetDetail() {
     setAlertTarget({
       type: 'schwab-duplicate',
       payload: { reviewId: review.id, ledgerEventId },
-      title: 'Confirmar Duplicidade Schwab/TDA',
-      desc: `Confirma que a transação Schwab/TDA #${review.id} já está representada pelo evento #${ledgerEventId} no ledger?`,
+      title: 'Confirmar Duplicidade Schwab',
+      desc: `Confirma que a transação Schwab #${review.id} já está representada pelo evento #${ledgerEventId} no ledger?`,
       actionLabel: 'Confirmar Duplicidade',
       variant: 'default',
       actionFn: ({ reviewId, ledgerEventId }) => schwabApi.confirmDuplicate(reviewId, { ledger_event_id: ledgerEventId })
@@ -341,8 +342,8 @@ export default function AssetDetail() {
     setAlertTarget({
       type: 'schwab-ignore',
       payload: review.id,
-      title: 'Ignorar Transação Schwab/TDA',
-      desc: `Ignorar a transação Schwab/TDA #${review.id} sem alterar o ledger?`,
+      title: 'Ignorar Transação Schwab',
+      desc: `Ignorar a transação Schwab #${review.id} sem alterar o ledger?`,
       actionLabel: 'Ignorar',
       variant: 'destructive',
       actionFn: (reviewId) => schwabApi.ignoreReview(reviewId)
@@ -354,7 +355,7 @@ export default function AssetDetail() {
       type: 'schwab-accept',
       payload: review.id,
       title: 'Aceitar Como Novo Evento',
-      desc: `Lançar a transação Schwab/TDA #${review.id} como novo evento deste ativo no ledger?`,
+      desc: `Lançar a transação Schwab #${review.id} como novo evento deste ativo no ledger?`,
       actionLabel: 'Aceitar Como Novo',
       variant: 'default',
       actionFn: (reviewId) => schwabApi.acceptReview(reviewId, { asset_id: Number(assetId) })
@@ -403,6 +404,12 @@ export default function AssetDetail() {
   const validEvents = eventList.filter(ev => !ev.is_cancelled && !ev.is_storno);
   const orderedEventList = [...eventList].reverse();
   const hasDuplicateReview = asset.duplicate_flag || schwabDuplicateReviews.length > 0;
+  const schwabDuplicateReviewsByCandidateEventId = schwabDuplicateReviews.reduce((acc, review) => {
+    (review.candidate_events || []).forEach((event) => {
+      acc.set(event.id, [...(acc.get(event.id) || []), review]);
+    });
+    return acc;
+  }, new Map());
 
   return (
     <div className="space-y-6">
@@ -493,7 +500,7 @@ export default function AssetDetail() {
         <Card className="border-amber-500/30">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <AlertCircle className="w-4 h-4 text-amber-500" /> Revisões Schwab/TDA neste ativo
+              <AlertCircle className="w-4 h-4 text-amber-500" /> Revisões Schwab neste ativo
             </CardTitle>
             <CardDescription>Transações do JSON que podem duplicar eventos existentes no ledger deste ativo.</CardDescription>
           </CardHeader>
@@ -510,7 +517,7 @@ export default function AssetDetail() {
                   <p className="text-xs text-muted-foreground">
                     Importado: {review.source_symbol || review.current_ticker || '-'} · qtd {displayQuantity(review.quantity)} · valor {operationMoneyPrefix} {displayMoney(review.amount)}
                   </p>
-                  <p className="text-xs text-muted-foreground">Origem: {review.filename || 'Schwab/TDA JSON'} · linha {review.source_row}</p>
+                  <p className="text-xs text-muted-foreground">Origem: {review.filename || 'Schwab JSON'} · linha {review.source_row}</p>
                 </div>
 
                 {review.candidate_events?.length > 0 && (
@@ -626,6 +633,7 @@ export default function AssetDetail() {
                   const isCancelled = ev.is_cancelled;
                   const isStorno = ev.is_storno;
                   const isInteractive = !isCancelled && !isStorno;
+                  const schwabDuplicateReviewsForEvent = schwabDuplicateReviewsByCandidateEventId.get(ev.id) || [];
 
                   return (
                     <TableRow key={ev.id} className={!isInteractive ? 'opacity-50' : ''}>
@@ -648,6 +656,16 @@ export default function AssetDetail() {
                         ) : (
                           <Badge variant="secondary">
                             {ev.duplicate_flag && "⚠️ "}
+                            {schwabDuplicateReviewsForEvent.length > 0 && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <AlertCircle className="mr-1 inline h-3 w-3 text-amber-500" />
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  Possível duplicidade Schwab: {schwabDuplicateReviewsForEvent.map((review) => `#${review.id}`).join(', ')}.
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
                             {ev.event_type}
                           </Badge>
                         )}

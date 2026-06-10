@@ -267,7 +267,7 @@ def test_schwab_import_classifies_and_persists_events(tmp_path, monkeypatch):
         EventType.VENDA.value,
         EventType.VENDA_FRACAO.value,
     ]
-    assert events[2]["quantity"] is None
+    assert events[2]["quantity"] == "0"
     assert events[2]["event_value"] == "2.30"
     assert any(row["normalized_subtype"] == "w8_withholding" and row["source_symbol"] is None for row in tx_rows)
     assert any(row["normalized_subtype"] == "ptp_1446f" for row in tx_rows)
@@ -440,6 +440,7 @@ def test_schwab_cash_in_lieu_uses_v_fracao_and_duplicate_review(tmp_path, monkey
     assert result["review_count"] == 1
     assert len(events) == 1
     assert events[0]["event_type"] == EventType.VENDA_FRACAO.value
+    assert events[0]["quantity"] == "0"
     assert tx["status"] == "review"
     assert json.loads(tx["duplicate_candidate_event_ids"]) == [existing["id"]]
 

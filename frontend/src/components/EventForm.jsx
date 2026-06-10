@@ -217,7 +217,7 @@ export default function EventForm({ assetId, onSuccess, onCancel, onModeChange }
   };
 
   const normalizeQuantity = (val, evType) => {
-    if (QUANTITY_OPTIONAL.includes(evType) && !val) return null;
+    if (QUANTITY_OPTIONAL.includes(evType) && !val) return '0';
     return val.replace(',', '.');
   };
 

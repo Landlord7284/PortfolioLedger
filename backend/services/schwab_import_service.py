@@ -518,7 +518,7 @@ def _ledger_values(row: dict) -> tuple[str, str | None, str | None]:
         gross = amount + abs(fees)
         return str(amount), str(gross), row["quantity"]
     if action == "Cash In Lieu":
-        return str(abs(amount)), None, None
+        return str(abs(amount)), None, "0"
     raise ValueError(f"Acao nao lancavel no ledger: {action}")
 
 

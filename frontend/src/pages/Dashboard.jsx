@@ -2,7 +2,7 @@ import { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'r
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, Pie, PieChart, XAxis, YAxis } from 'recharts';
 import { AppContext } from '../App';
-import { dashboard as dashboardApi, positions as posApi } from '../api/client';
+import { dashboard as dashboardApi, positions as posApi, schwab as schwabApi } from '../api/client';
 import EventForm from '../components/EventForm';
 import B3MonthlyImportModal from '../components/B3MonthlyImportModal';
 import ImportModal from '../components/ImportModal';
@@ -471,6 +471,7 @@ function OperationalAlert({ alerts, hideValues }) {
 export default function Dashboard() {
   const { activePortfolioId, hideValues } = useContext(AppContext);
   const [positionList, setPositionList] = useState([]);
+  const [schwabDuplicateAssetIds, setSchwabDuplicateAssetIds] = useState(new Set());
   const [positionsLoading, setPositionsLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
@@ -549,13 +550,25 @@ export default function Dashboard() {
   const loadPositions = useCallback(async () => {
     if (!activePortfolioId) {
       setPositionList([]);
+      setSchwabDuplicateAssetIds(new Set());
       setPositionsLoading(false);
       return;
     }
     setPositionsLoading(true);
     try {
-      const data = await posApi.list(activePortfolioId);
+      const [data, schwabReviews] = await Promise.all([
+        posApi.list(activePortfolioId),
+        schwabApi.reviews({ portfolioId: activePortfolioId }).catch((reviewErr) => {
+          console.error(reviewErr);
+          return [];
+        }),
+      ]);
       setPositionList(data);
+      setSchwabDuplicateAssetIds(new Set(
+        schwabReviews
+          .filter((review) => review.asset_id && review.duplicate_candidate_event_ids?.length > 0)
+          .map((review) => Number(review.asset_id))
+      ));
     } catch (err) {
       console.error('Failed to load positions:', err);
       toast.error(err.message || 'Falha ao carregar posições.');
@@ -1447,6 +1460,13 @@ export default function Dashboard() {
                     {filtered.map((pos) => {
                       const realized = toNumber(pos.realized_result);
                       const qty = toNumber(pos.quantity);
+                      const hasXlsxDuplicate = Boolean(pos.duplicate_flag);
+                      const hasSchwabDuplicate = schwabDuplicateAssetIds.has(Number(pos.asset_id));
+                      const duplicateTooltip = hasXlsxDuplicate && hasSchwabDuplicate
+                        ? 'Duplicidades pendentes de análise: import XLSX e Schwab.'
+                        : hasSchwabDuplicate
+                          ? 'Possível duplicidade Schwab pendente. Abra o detalhe do ativo para resolver.'
+                          : 'Duplicado pendente de análise.';
                       return (
                         <TableRow
                           key={`${pos.portfolio_id}-${pos.asset_id}`}
@@ -1458,8 +1478,13 @@ export default function Dashboard() {
                               <span className="font-medium">
                                 {pos.current_ticker || `#${pos.asset_id}`}
                               </span>
-                              {pos.duplicate_flag && (
-                                <AlertCircle className="h-3.5 w-3.5 text-amber-500" title="Duplicado pendente de análise" />
+                              {(hasXlsxDuplicate || hasSchwabDuplicate) && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>{duplicateTooltip}</TooltipContent>
+                                </Tooltip>
                               )}
                             </div>
                           </TableCell>
