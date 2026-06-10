@@ -1519,7 +1519,9 @@ export default function Dashboard() {
 
       {showSchwabImport && (
         <SchwabImportModal
+          portfolioId={activePortfolioId}
           onClose={() => setShowSchwabImport(false)}
+          onSuccess={refreshData}
         />
       )}
     </div>

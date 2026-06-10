@@ -64,6 +64,14 @@ async function requestBlob(path, options = {}) {
   };
 }
 
+function filesFormData(files, fieldName = 'files') {
+  const formData = new FormData();
+  Array.from(files || []).forEach((file) => {
+    formData.append(fieldName, file);
+  });
+  return formData;
+}
+
 // ── Portfolios ──────────────────────────────────────────────
 
 export const portfolios = {
@@ -181,13 +189,9 @@ export const reports = {
 
 export const b3 = {
   monthlyImport: ({ portfolioId, files }) => {
-    const formData = new FormData();
-    Array.from(files || []).forEach((file) => {
-      formData.append('files', file);
-    });
     return request(`/b3/monthly-import?portfolio_id=${portfolioId}`, {
       method: 'POST',
-      body: formData,
+      body: filesFormData(files),
     });
   },
   sanitizeMonthlyImport: ({ portfolioId, referenceMonth }) =>
@@ -209,15 +213,12 @@ export const b3 = {
 
 export const schwab = {
   importJson: ({ portfolioId, files, accountKey }) => {
-    const formData = new FormData();
-    Array.from(files || []).forEach((file) => {
-      formData.append('files', file);
-    });
     const params = new URLSearchParams({ portfolio_id: portfolioId });
-    if (accountKey) params.set('account_key', accountKey);
+    const normalizedAccountKey = accountKey?.trim();
+    if (normalizedAccountKey) params.set('account_key', normalizedAccountKey);
     return request(`/schwab/import?${params.toString()}`, {
       method: 'POST',
-      body: formData,
+      body: filesFormData(files),
     });
   },
 };
