@@ -12,12 +12,18 @@ REGIME_B3_COMMON: Final = "B3_COMMON_15"
 REGIME_B3_FII: Final = "B3_FII_FIAGRO_20"
 REGIME_FI_INFRA_EXEMPT: Final = "FI_INFRA_EXEMPT"
 REGIME_CRYPTO: Final = "CRYPTO_GCAP"
+REGIME_FOREIGN_ASSETS_POST_2024: Final = "FOREIGN_ASSETS_POST_2024"
 
 SUPPORTED_CAPITAL_GAIN_REGIMES: Final = {
     REGIME_B3_COMMON,
     REGIME_B3_FII,
     REGIME_FI_INFRA_EXEMPT,
     REGIME_CRYPTO,
+}
+
+SUPPORTED_FISCAL_PARAMETER_REGIMES: Final = {
+    *SUPPORTED_CAPITAL_GAIN_REGIMES,
+    REGIME_FOREIGN_ASSETS_POST_2024,
 }
 
 
@@ -31,6 +37,20 @@ def require_supported_capital_gain_regime(regime: str | None) -> str | None:
     if regime in (None, ""):
         return None
     if not is_supported_capital_gain_regime(regime):
+        raise ValueError(f"Regime fiscal nao suportado nesta entrega: {regime}.")
+    return regime
+
+
+def is_supported_fiscal_parameter_regime(regime: str | None) -> bool:
+    if regime in (None, ""):
+        return True
+    return regime in SUPPORTED_FISCAL_PARAMETER_REGIMES
+
+
+def require_supported_fiscal_parameter_regime(regime: str | None) -> str | None:
+    if regime in (None, ""):
+        return None
+    if not is_supported_fiscal_parameter_regime(regime):
         raise ValueError(f"Regime fiscal nao suportado nesta entrega: {regime}.")
     return regime
 

@@ -12,12 +12,13 @@ from backend.database import get_db
 from backend.models import (
     AssetsAndRightsReportResponse,
     CapitalGainReportResponse,
+    ForeignAnnualReportResponse,
     ForeignReportResponse,
     IncomeReportResponse,
     ReportYearOptionsResponse,
     TaxExemptIncomeReportResponse,
 )
-from backend.services import capital_gain_report_service, foreign_report_service, report_service, tax_exempt_income_report_service
+from backend.services import capital_gain_report_service, foreign_annual_report_service, foreign_report_service, report_service, tax_exempt_income_report_service
 from backend.services.portfolio_service import get_portfolio
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -72,6 +73,21 @@ def foreign_report(
         if not get_portfolio(conn, portfolio_id):
             raise HTTPException(404, f"Carteira {portfolio_id} não encontrada.")
         return foreign_report_service.list_foreign_report(conn, portfolio_id, year)
+
+
+@router.get("/foreign-annual", response_model=ForeignAnnualReportResponse)
+def foreign_annual_report(
+    portfolio_id: int = Query(...),
+    year: int = Query(...),
+):
+    _validate_year(year)
+    with get_db() as conn:
+        if not get_portfolio(conn, portfolio_id):
+            raise HTTPException(404, f"Carteira {portfolio_id} não encontrada.")
+        try:
+            return foreign_annual_report_service.list_foreign_annual_report(conn, portfolio_id, year)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
 
 @router.get("/capital-gains", response_model=CapitalGainReportResponse)

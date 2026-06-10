@@ -15,6 +15,7 @@ from backend.domain.normalization import normalize_bool_01
 from backend.services.fiscal_regime_service import (
     has_tax_parameter,
     require_supported_capital_gain_regime,
+    require_supported_fiscal_parameter_regime,
 )
 from backend.services import ptax_service
 
@@ -459,7 +460,7 @@ def _validate_tax_parameter_payload(values: dict[str, Any]) -> dict[str, Any]:
     regime = _nullable_text(values.get("regime"))
     if not regime:
         raise ValueError("Regime fiscal e obrigatorio.")
-    require_supported_capital_gain_regime(regime)
+    require_supported_fiscal_parameter_regime(regime)
 
     valid_from = _validate_iso_date(values.get("valid_from") or "", "Vigencia inicial")
     valid_until = _nullable_text(values.get("valid_until"))

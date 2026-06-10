@@ -43,6 +43,7 @@ export default function Layout({ children }) {
     if (location.pathname === '/reports/assets-and-rights') return 'Bens e Direitos';
     if (location.pathname === '/reports/income') return 'Rendimentos';
     if (location.pathname === '/reports/capital-gains') return 'Ganho de Capital';
+    if (location.pathname === '/reports/foreign') return 'Exterior';
     if (location.pathname.startsWith('/assets/')) return 'Detalhe do Ativo';
     return 'Dashboard';
   };
@@ -157,6 +158,13 @@ export default function Layout({ children }) {
                   <SidebarMenuSubButton asChild isActive={location.pathname === '/reports/capital-gains'}>
                     <NavLink to="/reports/capital-gains">
                       <span>Ganho de Capital</span>
+                    </NavLink>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+                <SidebarMenuSubItem>
+                  <SidebarMenuSubButton asChild isActive={location.pathname === '/reports/foreign'}>
+                    <NavLink to="/reports/foreign">
+                      <span>Exterior</span>
                     </NavLink>
                   </SidebarMenuSubButton>
                 </SidebarMenuSubItem>

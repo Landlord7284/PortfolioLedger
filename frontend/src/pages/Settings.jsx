@@ -62,6 +62,11 @@ const SUPPORTED_TAX_REGIMES = [
     label: 'Criptoativos',
     description: 'Regime acompanhado fora da DARF mensal padrão quando configurado assim.',
   },
+  {
+    code: 'FOREIGN_ASSETS_POST_2024',
+    label: 'Exterior',
+    description: 'Ativos no exterior como Stock, REIT e ETF de market = US. Parâmetro anual pós-2024, sem DARF mensal nacional.',
+  },
 ];
 
 const PARAMETER_PRESETS = {
@@ -71,6 +76,15 @@ const PARAMETER_PRESETS = {
     exemption_limit: '',
     darf_code: '',
     minimum_darf_amount: '10,00',
+    loss_bucket: '',
+    monthly_darf_enabled: false,
+  },
+  FOREIGN_ASSETS_POST_2024: {
+    tax_rate_percent: '15',
+    withholding_rate_percent: '0',
+    exemption_limit: '',
+    darf_code: '',
+    minimum_darf_amount: '0,00',
     loss_bucket: '',
     monthly_darf_enabled: false,
   },
@@ -644,6 +658,7 @@ export default function Settings() {
                 regimeGroups.map((group) => {
                   const current = group.current;
                   const historyOpen = expandedRegimes.has(group.code);
+                  const isForeignRegime = group.code === 'FOREIGN_ASSETS_POST_2024';
                   return (
                     <Card key={group.code} className="overflow-hidden">
                       <CardHeader>
@@ -668,39 +683,55 @@ export default function Settings() {
                       </CardHeader>
                       <CardContent className="flex flex-col gap-4">
                         {current ? (
-                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                            <div className="rounded-md border p-3">
-                              <p className="text-xs text-muted-foreground">Alíquota</p>
-                              <p className="font-mono text-sm font-medium">{formatPercent(current.tax_rate)}</p>
+                          isForeignRegime ? (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div className="rounded-md border p-3">
+                                <p className="text-xs text-muted-foreground">Alíquota</p>
+                                <p className="font-mono text-sm font-medium">{formatPercent(current.tax_rate)}</p>
+                              </div>
+                              <div className="rounded-md border p-3">
+                                <p className="text-xs text-muted-foreground">Vigência</p>
+                                <p className="font-mono text-sm font-medium">
+                                  Desde {formatDate(current.valid_from)}
+                                  {current.valid_until ? ` até ${formatDate(current.valid_until)}` : ''}
+                                </p>
+                              </div>
                             </div>
-                            <div className="rounded-md border p-3">
-                              <p className="text-xs text-muted-foreground">IRRF teórico</p>
-                              <p className="font-mono text-sm font-medium">{formatPercent(current.withholding_rate)}</p>
+                          ) : (
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                              <div className="rounded-md border p-3">
+                                <p className="text-xs text-muted-foreground">Alíquota</p>
+                                <p className="font-mono text-sm font-medium">{formatPercent(current.tax_rate)}</p>
+                              </div>
+                              <div className="rounded-md border p-3">
+                                <p className="text-xs text-muted-foreground">IRRF teórico</p>
+                                <p className="font-mono text-sm font-medium">{formatPercent(current.withholding_rate)}</p>
+                              </div>
+                              <div className="rounded-md border p-3">
+                                <p className="text-xs text-muted-foreground">Limite de isenção</p>
+                                <p className="font-mono text-sm font-medium">{formatCurrencyValue(current.exemption_limit)}</p>
+                              </div>
+                              <div className="rounded-md border p-3">
+                                <p className="text-xs text-muted-foreground">DARF mensal</p>
+                                <p className="text-sm font-medium">{formatBoolean(current.monthly_darf_enabled)}</p>
+                              </div>
+                              <div className="rounded-md border p-3">
+                                <p className="text-xs text-muted-foreground">Código DARF</p>
+                                <p className="font-mono text-sm font-medium">{current.darf_code || '-'}</p>
+                              </div>
+                              <div className="rounded-md border p-3">
+                                <p className="text-xs text-muted-foreground">DARF mínima</p>
+                                <p className="font-mono text-sm font-medium">{formatCurrencyValue(current.minimum_darf_amount)}</p>
+                              </div>
+                              <div className="rounded-md border p-3 sm:col-span-2">
+                                <p className="text-xs text-muted-foreground">Vigência</p>
+                                <p className="font-mono text-sm font-medium">
+                                  Desde {formatDate(current.valid_from)}
+                                  {current.valid_until ? ` até ${formatDate(current.valid_until)}` : ''}
+                                </p>
+                              </div>
                             </div>
-                            <div className="rounded-md border p-3">
-                              <p className="text-xs text-muted-foreground">Limite de isenção</p>
-                              <p className="font-mono text-sm font-medium">{formatCurrencyValue(current.exemption_limit)}</p>
-                            </div>
-                            <div className="rounded-md border p-3">
-                              <p className="text-xs text-muted-foreground">DARF mensal</p>
-                              <p className="text-sm font-medium">{formatBoolean(current.monthly_darf_enabled)}</p>
-                            </div>
-                            <div className="rounded-md border p-3">
-                              <p className="text-xs text-muted-foreground">Código DARF</p>
-                              <p className="font-mono text-sm font-medium">{current.darf_code || '-'}</p>
-                            </div>
-                            <div className="rounded-md border p-3">
-                              <p className="text-xs text-muted-foreground">DARF mínima</p>
-                              <p className="font-mono text-sm font-medium">{formatCurrencyValue(current.minimum_darf_amount)}</p>
-                            </div>
-                            <div className="rounded-md border p-3 sm:col-span-2">
-                              <p className="text-xs text-muted-foreground">Vigência</p>
-                              <p className="font-mono text-sm font-medium">
-                                Desde {formatDate(current.valid_from)}
-                                {current.valid_until ? ` até ${formatDate(current.valid_until)}` : ''}
-                              </p>
-                            </div>
-                          </div>
+                          )
                         ) : (
                           <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                             Este regime não tem uma configuração ativa para a data atual. Use o modo avançado para criar ou reparar a vigência.
@@ -736,9 +767,15 @@ export default function Settings() {
                                       </div>
                                       <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                                         <span>Alíquota: <span className="font-mono">{formatPercent(parameter.tax_rate)}</span></span>
-                                        <span>IRRF: <span className="font-mono">{formatPercent(parameter.withholding_rate)}</span></span>
-                                        <span>DARF mensal: {formatBoolean(parameter.monthly_darf_enabled)}</span>
-                                        <span>Código DARF: <span className="font-mono">{parameter.darf_code || '-'}</span></span>
+                                        {isForeignRegime ? (
+                                          <span>Vigência: <span className="font-mono">{formatDate(parameter.valid_from)} até {formatDate(parameter.valid_until)}</span></span>
+                                        ) : (
+                                          <>
+                                            <span>IRRF: <span className="font-mono">{formatPercent(parameter.withholding_rate)}</span></span>
+                                            <span>DARF mensal: {formatBoolean(parameter.monthly_darf_enabled)}</span>
+                                            <span>Código DARF: <span className="font-mono">{parameter.darf_code || '-'}</span></span>
+                                          </>
+                                        )}
                                       </div>
                                     </div>
                                   );

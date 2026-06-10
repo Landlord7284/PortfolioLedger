@@ -411,12 +411,26 @@ def get_report_year_options(conn: sqlite3.Connection, portfolio_id: int) -> dict
     row = conn.execute(
         """
         SELECT MIN(event_date) AS first_event_date
-        FROM events
-        WHERE portfolio_id = ?
-          AND is_cancelled = 0
-          AND is_storno = 0
+        FROM (
+            SELECT event_date
+            FROM events
+            WHERE portfolio_id = ?
+              AND is_cancelled = 0
+              AND is_storno = 0
+            UNION ALL
+            SELECT event_date
+            FROM schwab_transactions
+            WHERE portfolio_id = ?
+              AND status NOT IN ('duplicate', 'ignored', 'error', 'review')
+            UNION ALL
+            SELECT COALESCE(te.credit_date, e.event_date) AS event_date
+            FROM tax_event te
+            LEFT JOIN events e ON e.id = te.sale_event_id
+            WHERE te.portfolio_id = ?
+        )
+        WHERE event_date IS NOT NULL
         """,
-        (portfolio_id,),
+        (portfolio_id, portfolio_id, portfolio_id),
     ).fetchone()
     first_event_year = int(row["first_event_date"][:4]) if row and row["first_event_date"] else None
     start_year = min(first_event_year, current_year) if first_event_year is not None else current_year

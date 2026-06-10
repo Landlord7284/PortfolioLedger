@@ -348,6 +348,31 @@ class ForeignReportResponse(BaseModel):
     missing_ptax_dates: list[str] = []
 
 
+class ForeignAnnualReportRow(BaseModel):
+    asset_id: Optional[int] = None
+    ticker: Optional[str] = None
+    name: Optional[str] = None
+    bem: str
+    gain_loss: str
+    line_tax_due: str
+    foreign_tax_paid: str
+    taxable_base: str
+    balance: str
+
+
+class ForeignAnnualReportResponse(BaseModel):
+    portfolio_id: int
+    year: int
+    regime: str
+    tax_rate: str
+    initial_loss_carryforward: str
+    rows: list[ForeignAnnualReportRow]
+    final_balance: str
+    consolidated_tax_due: str
+    loss_carryforward: str
+    missing_ptax_dates: list[str] = []
+
+
 class CapitalGainAssetRow(BaseModel):
     asset_id: int
     manual_event_id: Optional[int] = None

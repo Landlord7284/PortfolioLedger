@@ -177,6 +177,10 @@ export const reports = {
     const params = new URLSearchParams({ portfolio_id: portfolioId, year });
     return request(`/reports/capital-gains?${params.toString()}`);
   },
+  foreignAnnual: ({ portfolioId, year }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, year });
+    return request(`/reports/foreign-annual?${params.toString()}`);
+  },
   assetsAndRightsXlsx: ({ portfolioId, year }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, year });
     return requestBlob(`/reports/assets-and-rights.xlsx?${params.toString()}`);

@@ -617,6 +617,7 @@ def _ensure_fiscal_schema(conn: sqlite3.Connection) -> None:
         ("B3_FII_FIAGRO_20", "1900-01-01", None, "0.20", "0.00005", None, "6015", "10.00", "B3_FII_FIAGRO", 1),
         ("FI_INFRA_EXEMPT", "1900-01-01", None, "0", "0", None, None, "10.00", None, 0),
         ("CRYPTO_GCAP", "1900-01-01", None, "0", "0", None, None, "10.00", "CRYPTO_GCAP_INFO", 0),
+        ("FOREIGN_ASSETS_POST_2024", "2024-01-01", None, "0.15", "0", None, None, "0.00", None, 0),
     ]
     for row in defaults:
         exists = conn.execute(
