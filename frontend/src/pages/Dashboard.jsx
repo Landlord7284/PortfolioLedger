@@ -6,7 +6,8 @@ import { dashboard as dashboardApi, positions as posApi } from '../api/client';
 import EventForm from '../components/EventForm';
 import B3MonthlyImportModal from '../components/B3MonthlyImportModal';
 import ImportModal from '../components/ImportModal';
-import { Search, Plus, Download, FolderOpen, Inbox, AlertCircle, Loader2, ArrowDown, ArrowUp, AlertTriangle, Info } from 'lucide-react';
+import SchwabImportModal from '../components/SchwabImportModal';
+import { Search, Plus, Download, FolderOpen, Inbox, AlertCircle, Loader2, ArrowDown, ArrowUp, AlertTriangle, Info, ChevronDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
@@ -18,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ChartContainer, ChartTooltip } from '@/components/ui/chart';
 import { Kbd } from '@/components/ui/kbd';
 import { toast } from 'sonner';
@@ -477,8 +479,10 @@ export default function Dashboard() {
   const [dashboardFilters, setDashboardFilters] = useState(getStoredDashboardFilters);
   const [allocationPath, setAllocationPath] = useState([]);
   const [showEventForm, setShowEventForm] = useState(false);
+  const [showImportMenu, setShowImportMenu] = useState(false);
   const [showB3Import, setShowB3Import] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showSchwabImport, setShowSchwabImport] = useState(false);
   const [assetFilterClass, setAssetFilterClass] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
@@ -497,6 +501,13 @@ export default function Dashboard() {
 
   const handleTabChange = (value) => {
     setSearchParams(value === 'assets' ? { tab: 'assets' } : {}, { replace: true });
+  };
+
+  const openImportFlow = (flow) => {
+    setShowImportMenu(false);
+    if (flow === 'b3') setShowB3Import(true);
+    if (flow === 'positions') setShowImport(true);
+    if (flow === 'schwab') setShowSchwabImport(true);
   };
 
   useEffect(() => {
@@ -521,6 +532,7 @@ export default function Dashboard() {
         || showEventForm
         || showB3Import
         || showImport
+        || showSchwabImport
       ) {
         return;
       }
@@ -532,7 +544,7 @@ export default function Dashboard() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [showEventForm, showB3Import, showImport]);
+  }, [showEventForm, showB3Import, showImport, showSchwabImport]);
 
   const loadPositions = useCallback(async () => {
     if (!activePortfolioId) {
@@ -966,14 +978,28 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-            <Button variant="outline" onClick={() => setShowB3Import(true)}>
-              <Download className="h-4 w-4" />
-              Importar da B3
-            </Button>
-            <Button variant="outline" onClick={() => setShowImport(true)}>
-              <Download className="h-4 w-4" />
-              Importar Posições
-            </Button>
+            <Popover open={showImportMenu} onOpenChange={setShowImportMenu}>
+              <PopoverTrigger asChild>
+                <Button variant="outline">
+                  <Download className="h-4 w-4" />
+                  Importar
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 p-2">
+                <div className="flex flex-col gap-1">
+                  <Button variant="ghost" className="justify-start" onClick={() => openImportFlow('b3')}>
+                    B3 - Relatório Mensal
+                  </Button>
+                  <Button variant="ghost" className="justify-start" onClick={() => openImportFlow('positions')}>
+                    Posições Excel
+                  </Button>
+                  <Button variant="ghost" className="justify-start" onClick={() => openImportFlow('schwab')}>
+                    Schwab
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
             <Button onClick={() => setShowEventForm(true)}>
               <Plus className="h-4 w-4" />
               Novo Evento
@@ -1488,6 +1514,12 @@ export default function Dashboard() {
           portfolioId={activePortfolioId}
           onClose={() => setShowImport(false)}
           onSuccess={refreshData}
+        />
+      )}
+
+      {showSchwabImport && (
+        <SchwabImportModal
+          onClose={() => setShowSchwabImport(false)}
         />
       )}
     </div>
