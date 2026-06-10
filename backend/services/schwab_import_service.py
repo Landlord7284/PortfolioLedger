@@ -453,11 +453,33 @@ def _operation_payload(row: dict, portfolio_id: int, asset_class: str) -> dict:
     }
 
 
+def _existing_us_asset_for_ticker(conn: sqlite3.Connection, ticker: str) -> dict | None:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT a.*
+        FROM assets a
+        JOIN asset_tickers t ON t.asset_id = a.id
+        WHERE t.ticker = ?
+          AND a.market = 'US'
+          AND a.merged_into_asset_id IS NULL
+          AND a.asset_class IN ('Stock', 'REIT', 'ETF')
+        ORDER BY a.id
+        """,
+        (ticker,),
+    ).fetchall()
+    if len(rows) != 1:
+        return None
+    return asset_service.get_asset(conn, rows[0]["id"])
+
+
 def _resolve_asset(conn: sqlite3.Connection, row: dict, portfolio_id: int, *, create_missing: bool) -> tuple[int | None, int | None, list[str]]:
     ticker = row.get("ticker")
     if not ticker:
         return None, None, []
     asset_class = _infer_asset_class(ticker, row.get("source_description"))
+    existing_asset = _existing_us_asset_for_ticker(conn, ticker)
+    if existing_asset:
+        return existing_asset["id"], None, []
     payload = _operation_payload(row, portfolio_id, asset_class)
     match = asset_service.match_asset(
         conn,
@@ -712,8 +734,20 @@ def _create_spin_off_alert(conn: sqlite3.Connection, portfolio_id: int, import_i
     return cur.lastrowid
 
 
-def import_schwab_json_file(conn: sqlite3.Connection, portfolio_id: int, source: SourceFile) -> dict:
-    parsed = parse_schwab_json(source)
+def _parsed_file_sort_key(item: tuple[SourceFile, dict]) -> tuple[str, str, str, str]:
+    source, parsed = item
+    event_dates = [row["event_date"] for row in parsed["rows"] if row.get("event_date")]
+    first_event_date = min(event_dates) if event_dates else "9999-12-31"
+    return (
+        parsed.get("from_date") or first_event_date,
+        parsed.get("to_date") or first_event_date,
+        first_event_date,
+        source.filename,
+    )
+
+
+def import_schwab_json_file(conn: sqlite3.Connection, portfolio_id: int, source: SourceFile, parsed: dict | None = None) -> dict:
+    parsed = parsed or parse_schwab_json(source)
     import_id = _upsert_import(conn, portfolio_id, parsed)
     result = {
         "filename": parsed["filename"],
@@ -972,9 +1006,38 @@ def import_schwab_json_batch(conn: sqlite3.Connection, portfolio_id: int, files:
         "errors": [],
         "files": [],
     }
+    parsed_files = []
+    parse_errors = []
     for source in files:
         try:
-            file_result = import_schwab_json_file(conn, portfolio_id, source)
+            parsed_files.append((source, parse_schwab_json(source)))
+        except Exception as exc:
+            parse_errors.append((source, exc))
+
+    for source, exc in parse_errors:
+        file_result = {
+            "filename": source.filename,
+            "from_date": None,
+            "to_date": None,
+            "total_rows": 0,
+            "imported_ledger_events": 0,
+            "imported_foreign_events": 0,
+            "ignored": 0,
+            "duplicates": 0,
+            "review_count": 0,
+            "warning_count": 0,
+            "duplicate_details": [],
+            "review_details": [],
+            "warnings": [],
+            "errors": [str(exc)],
+        }
+        response["files_processed"] += 1
+        response["files"].append(file_result)
+        response["errors"].extend(f"{file_result['filename']}: {err}" for err in file_result.get("errors", []))
+
+    for source, parsed in sorted(parsed_files, key=_parsed_file_sort_key):
+        try:
+            file_result = import_schwab_json_file(conn, portfolio_id, source, parsed)
         except Exception as exc:
             file_result = {
                 "filename": source.filename,

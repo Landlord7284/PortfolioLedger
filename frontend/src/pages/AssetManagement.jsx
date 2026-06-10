@@ -412,6 +412,10 @@ export default function AssetManagement() {
       .map(({ asset }) => asset);
   }, [filtered, sort]);
 
+  const globalSchwabReviews = schwabReviews.filter((review) => !(
+    review.asset_id && review.duplicate_candidate_event_ids?.length > 0
+  ));
+
   const metadataSuggestions = useMemo(() => buildAssetMetadataSuggestions(assetList), [assetList]);
 
   const mergeOptions = assetList.filter((asset) => (
@@ -558,7 +562,7 @@ export default function AssetManagement() {
         </Card>
       )}
 
-      {schwabReviews.length > 0 && (
+      {globalSchwabReviews.length > 0 && (
         <Card className="border-amber-500/30">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -567,7 +571,7 @@ export default function AssetManagement() {
             <CardDescription>Transações importadas que podem duplicar eventos existentes ou precisam de decisão antes de afetar o ledger.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            {schwabReviews.map((review) => (
+            {globalSchwabReviews.map((review) => (
               <div key={review.id} className="flex flex-col gap-3 rounded-lg border p-3">
                 <div className="flex flex-col gap-1 text-sm">
                   <div className="flex flex-wrap items-center gap-2">

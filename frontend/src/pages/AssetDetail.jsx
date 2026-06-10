@@ -1,7 +1,7 @@
 import { useState, useEffect, useContext, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
-import { assets as assetsApi, events as eventsApi, positions as posApi } from '../api/client';
+import { assets as assetsApi, events as eventsApi, positions as posApi, schwab as schwabApi } from '../api/client';
 import EventForm from '../components/EventForm';
 import SharedAssetMetadataCard, { buildAssetMetadataSuggestions } from '../components/AssetMetadataCard';
 import { ArrowLeft, Edit2, Check, X, Plus, Trash2, AlertCircle, HelpCircle, Loader2 } from 'lucide-react';
@@ -170,6 +170,7 @@ export default function AssetDetail() {
   const [metadataAssetList, setMetadataAssetList] = useState([]);
   const [position, setPosition] = useState(null);
   const [eventList, setEventList] = useState([]);
+  const [schwabDuplicateReviews, setSchwabDuplicateReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showEventForm, setShowEventForm] = useState(false);
   const [isLargeModal, setIsLargeModal] = useState(false);
@@ -183,17 +184,27 @@ export default function AssetDetail() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, evts, metadataAssets] = await Promise.all([
+      const [a, evts, metadataAssets, schwabReviews] = await Promise.all([
         assetsApi.get(assetId),
         eventsApi.list({ assetId, portfolioId: activePortfolioId }),
         assetsApi.list().catch((listErr) => {
           console.error(listErr);
           return [];
         }),
+        schwabApi.reviews({ portfolioId: activePortfolioId }).catch((reviewErr) => {
+          console.error(reviewErr);
+          return [];
+        }),
       ]);
       setAsset(a);
       setEventList(evts);
       setMetadataAssetList(metadataAssets);
+      setSchwabDuplicateReviews(
+        schwabReviews.filter((review) => (
+          Number(review.asset_id) === Number(assetId)
+          && review.duplicate_candidate_event_ids?.length > 0
+        ))
+      );
 
       try {
         const pos = await posApi.get(activePortfolioId, assetId);
@@ -234,6 +245,12 @@ export default function AssetDetail() {
         toast.success('Evento excluído com sucesso.');
       } else if (alertTarget.type === 'duplicate') {
         toast.success(alertTarget.payload.confirm ? 'Evento duplicado confirmado como válido.' : 'Evento duplicado excluído.');
+      } else if (alertTarget.type === 'schwab-duplicate') {
+        toast.success('Duplicidade Schwab/TDA confirmada.');
+      } else if (alertTarget.type === 'schwab-ignore') {
+        toast.success('Transação Schwab/TDA ignorada.');
+      } else if (alertTarget.type === 'schwab-accept') {
+        toast.success('Evento Schwab/TDA importado no ledger.');
       }
 
       if (alertTarget.type === 'asset-delete') {
@@ -308,6 +325,42 @@ export default function AssetDetail() {
     });
   };
 
+  const confirmSchwabDuplicate = (review, ledgerEventId) => {
+    setAlertTarget({
+      type: 'schwab-duplicate',
+      payload: { reviewId: review.id, ledgerEventId },
+      title: 'Confirmar Duplicidade Schwab/TDA',
+      desc: `Confirma que a transação Schwab/TDA #${review.id} já está representada pelo evento #${ledgerEventId} no ledger?`,
+      actionLabel: 'Confirmar Duplicidade',
+      variant: 'default',
+      actionFn: ({ reviewId, ledgerEventId }) => schwabApi.confirmDuplicate(reviewId, { ledger_event_id: ledgerEventId })
+    });
+  };
+
+  const ignoreSchwabReview = (review) => {
+    setAlertTarget({
+      type: 'schwab-ignore',
+      payload: review.id,
+      title: 'Ignorar Transação Schwab/TDA',
+      desc: `Ignorar a transação Schwab/TDA #${review.id} sem alterar o ledger?`,
+      actionLabel: 'Ignorar',
+      variant: 'destructive',
+      actionFn: (reviewId) => schwabApi.ignoreReview(reviewId)
+    });
+  };
+
+  const acceptSchwabReview = (review) => {
+    setAlertTarget({
+      type: 'schwab-accept',
+      payload: review.id,
+      title: 'Aceitar Como Novo Evento',
+      desc: `Lançar a transação Schwab/TDA #${review.id} como novo evento deste ativo no ledger?`,
+      actionLabel: 'Aceitar Como Novo',
+      variant: 'default',
+      actionFn: (reviewId) => schwabApi.acceptReview(reviewId, { asset_id: Number(assetId) })
+    });
+  };
+
   const toggleSelect = (id) => {
     const next = new Set(selectedEvents);
     if (next.has(id)) next.delete(id);
@@ -349,6 +402,7 @@ export default function AssetDetail() {
 
   const validEvents = eventList.filter(ev => !ev.is_cancelled && !ev.is_storno);
   const orderedEventList = [...eventList].reverse();
+  const hasDuplicateReview = asset.duplicate_flag || schwabDuplicateReviews.length > 0;
 
   return (
     <div className="space-y-6">
@@ -360,7 +414,7 @@ export default function AssetDetail() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-3">
             {asset.current_ticker || `Ativo #${asset.id}`}
-            {asset.duplicate_flag && (
+            {hasDuplicateReview && (
               <Badge variant="outline" className="text-xs gap-1">
                 <AlertCircle className="w-3 h-3" /> Duplicado detectado
               </Badge>
@@ -433,6 +487,77 @@ export default function AssetDetail() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {schwabDuplicateReviews.length > 0 && (
+        <Card className="border-amber-500/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertCircle className="w-4 h-4 text-amber-500" /> Revisões Schwab/TDA neste ativo
+            </CardTitle>
+            <CardDescription>Transações do JSON que podem duplicar eventos existentes no ledger deste ativo.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {schwabDuplicateReviews.map((review) => (
+              <div key={review.id} className="rounded-lg border p-3">
+                <div className="flex flex-col gap-1 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">#{review.id} · {review.source_action || review.normalized_type || '-'}</span>
+                    <Badge variant="secondary">{review.normalized_category}</Badge>
+                    <span className="text-muted-foreground">{formatDisplayDate(review.event_date)}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{review.review_reason || 'Possível duplicidade patrimonial contra evento existente no ledger.'}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Importado: {review.source_symbol || review.current_ticker || '-'} · qtd {displayQuantity(review.quantity)} · valor {operationMoneyPrefix} {displayMoney(review.amount)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Origem: {review.filename || 'Schwab/TDA JSON'} · linha {review.source_row}</p>
+                </div>
+
+                {review.candidate_events?.length > 0 && (
+                  <div className="mt-3 overflow-x-auto rounded-md border bg-muted/30">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>ID</TableHead>
+                          <TableHead>Evento</TableHead>
+                          <TableHead>Data</TableHead>
+                          <TableHead className="text-right">Quantidade</TableHead>
+                          <TableHead className="text-right">Valor</TableHead>
+                          <TableHead className="text-right">Ação</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {review.candidate_events.map((event) => (
+                          <TableRow key={event.id}>
+                            <TableCell className="font-mono text-xs">#{event.id}</TableCell>
+                            <TableCell>{event.event_type}</TableCell>
+                            <TableCell>{formatDisplayDate(event.event_date)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{displayQuantity(event.quantity)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{operationMoneyPrefix} {displayMoney(event.event_value)}</TableCell>
+                            <TableCell className="text-right">
+                              <Button size="sm" onClick={() => confirmSchwabDuplicate(review, event.id)}>
+                                <Check className="w-3 h-3" /> Confirmar duplicado
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <Button size="sm" variant="outline" onClick={() => ignoreSchwabReview(review)}>
+                    Ignorar importado
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => acceptSchwabReview(review)}>
+                    Aceitar como novo
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
 
       <Card>

@@ -198,6 +198,20 @@ def _buy_transaction():
     }
 
 
+def _sell_transaction():
+    return {
+        "Date": "11/28/2024",
+        "Action": "Sell",
+        "Symbol": "SCCO",
+        "Description": "SOUTHERN COPPER CORP",
+        "Quantity": "1",
+        "Price": "$110.00",
+        "Fees & Comm": "$0.01",
+        "Amount": "$109.99",
+        "AcctgRuleCd": "1",
+    }
+
+
 def _cash_in_lieu_transaction():
     return {
         "Date": "12/01/2025 as of 11/28/2025",
@@ -284,6 +298,41 @@ def test_schwab_import_is_idempotent_for_same_file(tmp_path, monkeypatch):
     assert events_count == 3
     assert tx_count == 13
     assert alerts_count == 1
+
+
+def test_schwab_import_processes_multiple_files_chronologically(tmp_path, monkeypatch):
+    _patch_ptax(monkeypatch)
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+
+        result = import_schwab_json_batch(
+            conn,
+            portfolio["id"],
+            [
+                SourceFile(
+                    "2024-11-28-sell.json",
+                    _json_bytes([_sell_transaction()], from_date="11/28/2024", to_date="11/28/2024"),
+                ),
+                SourceFile(
+                    "2024-11-27-buy.json",
+                    _json_bytes([_buy_transaction()], from_date="11/27/2024", to_date="11/27/2024"),
+                ),
+            ],
+        )
+        events = conn.execute("SELECT * FROM events ORDER BY event_date, sequence_num").fetchall()
+        position = event_service.get_position(conn, portfolio["id"], events[0]["asset_id"])
+
+    assert [file["filename"] for file in result["files"]] == [
+        "2024-11-27-buy.json",
+        "2024-11-28-sell.json",
+    ]
+    assert result["imported_ledger_events"] == 2
+    assert result["errors"] == []
+    assert [event["event_type"] for event in events] == [EventType.COMPRA.value, EventType.VENDA.value]
+    assert position["quantity"] == "1"
 
 
 def test_schwab_import_sends_existing_manual_buy_to_review(tmp_path, monkeypatch):
