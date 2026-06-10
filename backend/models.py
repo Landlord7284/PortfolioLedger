@@ -767,6 +767,54 @@ class SchwabAssetAlertResponse(BaseModel):
     resolved_at: Optional[str] = None
 
 
+class SchwabTransactionReviewResponse(BaseModel):
+    id: int
+    import_id: int
+    portfolio_id: int
+    source_row: int
+    account_key: str
+    asset_id: Optional[int] = None
+    ledger_event_id: Optional[int] = None
+    source_action: Optional[str] = None
+    source_description: Optional[str] = None
+    source_symbol: Optional[str] = None
+    event_date: Optional[str] = None
+    effective_date: Optional[str] = None
+    quantity: Optional[str] = None
+    price: Optional[str] = None
+    amount: Optional[str] = None
+    fees_comm: Optional[str] = None
+    normalized_category: str
+    normalized_type: Optional[str] = None
+    normalized_subtype: Optional[str] = None
+    status: str
+    duplicate_of_transaction_id: Optional[int] = None
+    duplicate_of_ledger_event_id: Optional[int] = None
+    duplicate_candidate_event_ids: list[int] = []
+    review_reason: Optional[str] = None
+    filename: Optional[str] = None
+    file_hash: Optional[str] = None
+    asset_class: Optional[str] = None
+    current_ticker: Optional[str] = None
+    current_name: Optional[str] = None
+    raw_payload: Any = None
+    candidate_events: list[dict[str, Any]] = []
+    created_at: str
+    updated_at: str
+    reviewed_at: Optional[str] = None
+
+
+class SchwabTransactionReviewDecision(BaseModel):
+    ledger_event_id: Optional[int] = None
+    asset_id: Optional[int] = None
+    ticker: Optional[str] = None
+    event_type: Optional[str] = None
+    event_date: Optional[str] = None
+    quantity: Optional[str] = None
+    event_value: Optional[str] = None
+    gross_value: Optional[str] = None
+
+
 class B3IncomeSummary(BaseModel):
     total_net_value: str
     monthly_average: str

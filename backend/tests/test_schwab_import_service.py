@@ -2,8 +2,8 @@ import json
 from decimal import Decimal
 
 from backend.database import get_db, init_db
-from backend.domain.enums import EventType
-from backend.services import event_service, foreign_report_service, portfolio_service
+from backend.domain.enums import AssetClass, EventType
+from backend.services import asset_service, event_service, foreign_report_service, portfolio_service
 from backend.services import schwab_import_service as schwab_service
 from backend.services.schwab_import_service import SourceFile, import_schwab_json_batch
 
@@ -171,6 +171,61 @@ def _sample_json_bytes():
     return json.dumps(payload).encode("utf-8")
 
 
+def _json_bytes(transactions, *, from_date="01/01/2024", to_date="12/31/2025"):
+    return json.dumps(
+        {
+            "AccountNumber": "XXX910",
+            "FromDate": from_date,
+            "ToDate": to_date,
+            "TotalTransactionsAmount": "$0.00",
+            "TotalFeesAndCommAmount": "$0.00",
+            "BrokerageTransactions": transactions,
+        }
+    ).encode("utf-8")
+
+
+def _buy_transaction():
+    return {
+        "Date": "11/27/2024",
+        "Action": "Buy",
+        "Symbol": "SCCO",
+        "Description": "SOUTHERN COPPER CORP",
+        "Quantity": "2",
+        "Price": "$100.1977",
+        "Fees & Comm": "",
+        "Amount": "-$200.40",
+        "AcctgRuleCd": "1",
+    }
+
+
+def _cash_in_lieu_transaction():
+    return {
+        "Date": "12/01/2025 as of 11/28/2025",
+        "Action": "Cash In Lieu",
+        "Symbol": "SCCO",
+        "Description": "SOUTHERN COPPER CORP",
+        "Quantity": "",
+        "Price": "",
+        "Fees & Comm": "",
+        "Amount": "$2.30",
+        "AcctgRuleCd": "1",
+    }
+
+
+def _dividend_transaction(amount="$1.80"):
+    return {
+        "Date": "12/29/2024",
+        "Action": "Cash Dividend",
+        "Symbol": "SCCO",
+        "Description": "SOUTHERN COPPER CORP",
+        "Quantity": "",
+        "Price": "",
+        "Fees & Comm": "",
+        "Amount": amount,
+        "AcctgRuleCd": "1",
+    }
+
+
 def test_schwab_import_classifies_and_persists_events(tmp_path, monkeypatch):
     _patch_ptax(monkeypatch)
     db_path = tmp_path / "ledger.db"
@@ -225,10 +280,119 @@ def test_schwab_import_is_idempotent_for_same_file(tmp_path, monkeypatch):
 
     assert first["imported_ledger_events"] == 3
     assert second["imported_ledger_events"] == 0
-    assert second["duplicates"] == 3
+    assert second["duplicates"] == 10
     assert events_count == 3
     assert tx_count == 13
     assert alerts_count == 1
+
+
+def test_schwab_import_sends_existing_manual_buy_to_review(tmp_path, monkeypatch):
+    _patch_ptax(monkeypatch)
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.STOCK.value, "SCCO", market="US")
+        existing = event_service.create_event(
+            conn,
+            portfolio_id=portfolio["id"],
+            asset_id=asset["id"],
+            event_type=EventType.COMPRA.value,
+            event_date="2024-11-27",
+            quantity="2",
+            event_value="200.40",
+        )
+
+        result = import_schwab_json_batch(
+            conn,
+            portfolio["id"],
+            [SourceFile("schwab-buy.json", _json_bytes([_buy_transaction()]))],
+        )
+        events_count = conn.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"]
+        tx = conn.execute("SELECT * FROM schwab_transactions").fetchone()
+
+        confirmed = schwab_service.confirm_transaction_duplicate(conn, tx["id"])
+
+    assert result["imported_ledger_events"] == 0
+    assert result["review_count"] == 1
+    assert events_count == 1
+    assert tx["status"] == "review"
+    assert json.loads(tx["duplicate_candidate_event_ids"]) == [existing["id"]]
+    assert confirmed["status"] == "duplicate_confirmed"
+    assert confirmed["duplicate_of_ledger_event_id"] == existing["id"]
+
+
+def test_schwab_import_is_idempotent_for_overlapping_financial_events(tmp_path, monkeypatch):
+    _patch_ptax(monkeypatch)
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    interest = {
+        "Date": "12/30/2024",
+        "Action": "Credit Interest",
+        "Symbol": "",
+        "Description": "SCHWAB1 INT 11/27-12/29",
+        "Quantity": "",
+        "Price": "",
+        "Fees & Comm": "",
+        "Amount": "$0.02",
+        "AcctgRuleCd": "1",
+    }
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        first = import_schwab_json_batch(
+            conn,
+            portfolio["id"],
+            [SourceFile("first.json", _json_bytes([_dividend_transaction()], to_date="12/29/2024"))],
+        )
+        second = import_schwab_json_batch(
+            conn,
+            portfolio["id"],
+            [SourceFile("overlap.json", _json_bytes([_dividend_transaction(), interest], to_date="12/30/2024"))],
+        )
+        tx_count = conn.execute("SELECT COUNT(*) AS count FROM schwab_transactions").fetchone()["count"]
+
+    assert first["imported_foreign_events"] == 1
+    assert second["duplicates"] == 1
+    assert second["imported_foreign_events"] == 1
+    assert second["review_count"] == 0
+    assert tx_count == 3
+
+
+def test_schwab_cash_in_lieu_uses_v_fracao_and_duplicate_review(tmp_path, monkeypatch):
+    _patch_ptax(monkeypatch)
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.STOCK.value, "SCCO", market="US")
+        existing = event_service.create_event(
+            conn,
+            portfolio_id=portfolio["id"],
+            asset_id=asset["id"],
+            event_type=EventType.VENDA_FRACAO.value,
+            event_date="2025-12-01",
+            quantity=None,
+            event_value="2.30",
+        )
+
+        result = import_schwab_json_batch(
+            conn,
+            portfolio["id"],
+            [SourceFile("cash-in-lieu.json", _json_bytes([_cash_in_lieu_transaction()]))],
+        )
+        events = conn.execute("SELECT * FROM events ORDER BY id").fetchall()
+        tx = conn.execute("SELECT * FROM schwab_transactions").fetchone()
+
+    assert result["imported_ledger_events"] == 0
+    assert result["review_count"] == 1
+    assert len(events) == 1
+    assert events[0]["event_type"] == EventType.VENDA_FRACAO.value
+    assert tx["status"] == "review"
+    assert json.loads(tx["duplicate_candidate_event_ids"]) == [existing["id"]]
 
 
 def test_foreign_report_consolidates_schwab_events(tmp_path, monkeypatch):

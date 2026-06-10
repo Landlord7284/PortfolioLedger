@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
-import { assets as assetsApi, b3 as b3Api } from '../api/client';
+import { assets as assetsApi, b3 as b3Api, schwab as schwabApi } from '../api/client';
 import AssetMetadataCard, { buildAssetMetadataSuggestions, getMissingAssetMetadata } from '../components/AssetMetadataCard';
 import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, Check, ChevronsUpDown, ExternalLink, GitMerge, Loader2, Search, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -170,6 +170,7 @@ export default function AssetManagement() {
   const [assetList, setAssetList] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [assetAlerts, setAssetAlerts] = useState([]);
+  const [schwabReviews, setSchwabReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterClass, setFilterClass] = useState('');
@@ -183,6 +184,7 @@ export default function AssetManagement() {
   const [sanitizeMonth, setSanitizeMonth] = useState('');
   const [sanitizeConfirm, setSanitizeConfirm] = useState('');
   const [sanitizing, setSanitizing] = useState(false);
+  const [schwabAssetMap, setSchwabAssetMap] = useState({});
   const navigate = useNavigate();
   const searchInputRef = useRef(null);
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
@@ -190,14 +192,16 @@ export default function AssetManagement() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [assets, pending, alerts] = await Promise.all([
+      const [assets, pending, alerts, schwabPending] = await Promise.all([
         assetsApi.list(null, includeMerged),
         assetsApi.reviews(),
         assetsApi.alerts({ portfolioId: activePortfolioId }),
+        schwabApi.reviews({ portfolioId: activePortfolioId }),
       ]);
       setAssetList(assets);
       setReviews(pending);
       setAssetAlerts(alerts);
+      setSchwabReviews(schwabPending);
     } catch (err) {
       toast.error(err.message || 'Falha ao carregar Gestão de Ativos.');
     } finally {
@@ -338,6 +342,45 @@ export default function AssetManagement() {
       await openAsset(asset);
     } catch (err) {
       toast.error(err.message || 'Falha ao criar ativo a partir da revisão.');
+    }
+  };
+
+  const ignoreSchwabReview = async (id) => {
+    try {
+      await schwabApi.ignoreReview(id);
+      toast.success('Transação Schwab/TDA ignorada.');
+      await load();
+    } catch (err) {
+      toast.error(err.message || 'Falha ao ignorar revisão Schwab/TDA.');
+    }
+  };
+
+  const confirmSchwabDuplicate = async (review) => {
+    try {
+      await schwabApi.confirmDuplicate(review.id, {
+        ledger_event_id: review.duplicate_candidate_event_ids?.[0],
+      });
+      toast.success('Duplicidade Schwab/TDA confirmada.');
+      await load();
+    } catch (err) {
+      toast.error(err.message || 'Falha ao confirmar duplicidade Schwab/TDA.');
+    }
+  };
+
+  const acceptSchwabReview = async (review) => {
+    const mappedAssetId = schwabAssetMap[review.id]?.trim();
+    const assetId = mappedAssetId ? Number(mappedAssetId) : review.asset_id;
+    if (!assetId) {
+      toast.error('Informe o ativo antes de aceitar este evento.');
+      return;
+    }
+    try {
+      await schwabApi.acceptReview(review.id, { asset_id: assetId });
+      toast.success('Evento Schwab/TDA importado no ledger.');
+      setSchwabAssetMap((current) => ({ ...current, [review.id]: '' }));
+      await load();
+    } catch (err) {
+      toast.error(err.message || 'Falha ao aceitar evento Schwab/TDA.');
     }
   };
 
@@ -508,6 +551,101 @@ export default function AssetManagement() {
                   <Button size="sm" variant="outline" onClick={() => resolveAssetAlert(alert.id)}>
                     <Check className="w-4 h-4" /> Marcar resolvido
                   </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {schwabReviews.length > 0 && (
+        <Card className="border-amber-500/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="w-4 h-4 text-amber-500" /> Revisões Schwab/TDA
+            </CardTitle>
+            <CardDescription>Transações importadas que podem duplicar eventos existentes ou precisam de decisão antes de afetar o ledger.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {schwabReviews.map((review) => (
+              <div key={review.id} className="flex flex-col gap-3 rounded-lg border p-3">
+                <div className="flex flex-col gap-1 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">#{review.id} · {review.source_action || review.normalized_type || '-'}</span>
+                    <Badge variant="secondary">{review.normalized_category}</Badge>
+                    <span className="text-muted-foreground">{formatDate(review.event_date)}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{review.review_reason || 'Revisão manual necessária.'}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Origem: {review.filename || 'Schwab/TDA JSON'} · linha {review.source_row} · conta {review.account_key || 'UNKNOWN'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Importado: {review.source_symbol || review.current_ticker || '-'} · qtd {formatQuantity(review.quantity)} · valor US$ {formatMoney(review.amount)}
+                  </p>
+                  {review.asset_id && (
+                    <p className="text-xs text-muted-foreground">Ativo resolvido: #{review.asset_id} · {review.current_ticker || '-'}</p>
+                  )}
+                </div>
+
+                {review.candidate_events?.length > 0 && (
+                  <div className="rounded-md border bg-muted/30">
+                    <div className="border-b px-3 py-2 text-xs font-medium uppercase text-muted-foreground">Candidatos no ledger</div>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>ID</TableHead>
+                            <TableHead>Evento</TableHead>
+                            <TableHead>Data</TableHead>
+                            <TableHead>Ticker</TableHead>
+                            <TableHead className="text-right">Quantidade</TableHead>
+                            <TableHead className="text-right">Valor</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {review.candidate_events.map((event) => (
+                            <TableRow key={event.id}>
+                              <TableCell className="font-mono text-xs">#{event.id}</TableCell>
+                              <TableCell>{event.event_type}</TableCell>
+                              <TableCell>{formatDate(event.event_date)}</TableCell>
+                              <TableCell>{event.ticker || `#${event.asset_id}`}</TableCell>
+                              <TableCell className="text-right">{formatQuantity(event.quantity)}</TableCell>
+                              <TableCell className="text-right">{formatMoney(event.event_value)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor={`schwab-asset-${review.id}`} className="text-xs text-muted-foreground">Ativo #</Label>
+                    <Input
+                      id={`schwab-asset-${review.id}`}
+                      className="h-8 w-28"
+                      placeholder={review.asset_id ? String(review.asset_id) : 'ID'}
+                      value={schwabAssetMap[review.id] || ''}
+                      onChange={(event) => setSchwabAssetMap((current) => ({ ...current, [review.id]: event.target.value }))}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {review.asset_id && (
+                      <Button size="sm" variant="outline" onClick={() => navigate(`/assets/${review.asset_id}`)}>
+                        <ExternalLink className="w-4 h-4" /> Abrir ativo
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => ignoreSchwabReview(review.id)}>
+                      Ignorar importado
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => confirmSchwabDuplicate(review)} disabled={!review.duplicate_candidate_event_ids?.length}>
+                      Confirmar duplicado
+                    </Button>
+                    <Button size="sm" onClick={() => acceptSchwabReview(review)}>
+                      Aceitar como novo
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}

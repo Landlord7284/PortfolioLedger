@@ -25,6 +25,7 @@ from backend.services import asset_service, event_service
 SOURCE = "SCHWAB"
 SOURCE_FORMAT = "JSON"
 UNKNOWN_ACCOUNT = "UNKNOWN"
+USD = "USD"
 
 DIVIDEND_ACTIONS = {
     "Cash Dividend",
@@ -43,6 +44,16 @@ WITHHOLDING_ACTIONS = {
 INTEREST_ACTIONS = {"Credit Interest", "Bond Interest"}
 TRADE_ACTIONS = {"Buy", "Sell"}
 _TICKER_IN_PARENS_RE = re.compile(r"\(([A-Z0-9./\- ]+)\)\s*$", re.IGNORECASE)
+_EXTERNAL_KEY_FIELDS = (
+    "TransactionId",
+    "Transaction ID",
+    "ActivityId",
+    "Activity ID",
+    "ExternalId",
+    "External ID",
+    "Id",
+    "ID",
+)
 
 
 @dataclass
@@ -120,6 +131,36 @@ def _source_file_hash(content: bytes) -> str:
 def _normalize_account_key(value: str | None) -> str:
     text = _clean_text(value)
     return text.upper() if text else UNKNOWN_ACCOUNT
+
+
+def _account_key_from_payload(payload: dict, fallback: str | None) -> str:
+    if fallback:
+        return _normalize_account_key(fallback)
+    for key in ("AccountKey", "Account Key", "AccountNumber", "Account Number", "AccountId", "Account ID", "Account"):
+        value = _clean_text(payload.get(key))
+        if value:
+            return _normalize_account_key(value)
+    return UNKNOWN_ACCOUNT
+
+
+def _external_record_key(raw: dict) -> str | None:
+    for key in _EXTERNAL_KEY_FIELDS:
+        value = _clean_text(raw.get(key))
+        if value:
+            return value.upper()
+    return None
+
+
+def _canonical_decimal(value: str | None) -> str:
+    if value is None:
+        return ""
+    dec = Decimal(str(value))
+    return format(dec.normalize(), "f")
+
+
+def _stable_hash(parts: list[object | None]) -> str:
+    raw = "|".join("" if value is None else str(value) for value in parts)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _normalize_schwab_ticker(value: str | None) -> str | None:
@@ -210,7 +251,7 @@ def parse_schwab_json(source: SourceFile) -> dict:
     if not isinstance(transactions, list):
         raise ValueError("JSON Schwab deve conter BrokerageTransactions como lista.")
 
-    account_key = _normalize_account_key(source.account_key)
+    account_key = _account_key_from_payload(payload, source.account_key)
     rows = []
     for row_index, raw in enumerate(transactions, start=1):
         if not isinstance(raw, dict):
@@ -235,6 +276,7 @@ def parse_schwab_json(source: SourceFile) -> dict:
             "amount": _money(raw.get("Amount")),
             "fees_comm": _money(raw.get("Fees & Comm")),
             "acctg_rule_cd": _clean_text(raw.get("AcctgRuleCd")),
+            "external_record_key": _external_record_key(raw),
             "normalized_category": category,
             "normalized_type": normalized_type,
             "normalized_subtype": subtype,
@@ -343,9 +385,17 @@ def _upsert_transaction(conn: sqlite3.Connection, values: dict) -> tuple[sqlite3
         values.get("normalized_subtype"),
         values["status"],
         values.get("economic_fingerprint"),
+        values.get("external_record_key"),
+        values.get("normalized_event_key"),
+        values.get("financial_identity_key"),
         values.get("duplicate_of_transaction_id"),
+        values.get("duplicate_of_ledger_event_id"),
+        _json_dumps(values.get("duplicate_candidate_event_ids") or []),
         values.get("asset_match_review_id"),
         values.get("asset_alert_id"),
+        values.get("review_reason"),
+        _json_dumps(values.get("decision_payload") or {}) if values.get("decision_payload") else None,
+        values.get("reviewed_at"),
         _json_dumps(values.get("raw_payload") or {}),
     )
     if existing:
@@ -356,8 +406,10 @@ def _upsert_transaction(conn: sqlite3.Connection, values: dict) -> tuple[sqlite3
                 source_action = ?, source_description = ?, source_symbol = ?, source_date_raw = ?,
                 event_date = ?, effective_date = ?, quantity = ?, price = ?, amount = ?, fees_comm = ?,
                 acctg_rule_cd = ?, normalized_category = ?, normalized_type = ?, normalized_subtype = ?,
-                status = ?, economic_fingerprint = ?, duplicate_of_transaction_id = ?,
-                asset_match_review_id = ?, asset_alert_id = ?, raw_payload = ?, updated_at = datetime('now')
+                status = ?, economic_fingerprint = ?, external_record_key = ?, normalized_event_key = ?,
+                financial_identity_key = ?, duplicate_of_transaction_id = ?, duplicate_of_ledger_event_id = ?,
+                duplicate_candidate_event_ids = ?, asset_match_review_id = ?, asset_alert_id = ?,
+                review_reason = ?, decision_payload = ?, reviewed_at = ?, raw_payload = ?, updated_at = datetime('now')
             WHERE id = ?
             """,
             (*params, existing["id"]),
@@ -371,9 +423,11 @@ def _upsert_transaction(conn: sqlite3.Connection, values: dict) -> tuple[sqlite3
             source_action, source_description, source_symbol, source_date_raw,
             event_date, effective_date, quantity, price, amount, fees_comm, acctg_rule_cd,
             normalized_category, normalized_type, normalized_subtype, status, economic_fingerprint,
-            duplicate_of_transaction_id, asset_match_review_id, asset_alert_id, raw_payload
+            external_record_key, normalized_event_key, financial_identity_key,
+            duplicate_of_transaction_id, duplicate_of_ledger_event_id, duplicate_candidate_event_ids,
+            asset_match_review_id, asset_alert_id, review_reason, decision_payload, reviewed_at, raw_payload
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (values["import_id"], values["portfolio_id"], values["source_row"], *params[1:]),
     )
@@ -446,18 +500,169 @@ def _ledger_values(row: dict) -> tuple[str, str | None, str | None]:
     raise ValueError(f"Acao nao lancavel no ledger: {action}")
 
 
-def _create_ledger_event(conn: sqlite3.Connection, portfolio_id: int, asset_id: int, row: dict) -> int:
-    event_type = {
+def _ledger_event_type(row: dict) -> str:
+    return {
         "Buy": EventType.COMPRA.value,
         "Sell": EventType.VENDA.value,
         "Cash In Lieu": EventType.VENDA_FRACAO.value,
     }[row["source_action"]]
+
+
+def _normalized_event_key(row: dict, asset_id: int | None = None) -> str:
+    if row["normalized_category"] == "ledger":
+        event_value, gross_value, quantity = _ledger_values(row)
+        event_type = _ledger_event_type(row)
+    else:
+        event_value = row.get("amount")
+        gross_value = None
+        quantity = row.get("quantity")
+        event_type = row.get("normalized_type")
+    return _stable_hash(
+        [
+            SOURCE,
+            row.get("account_key") or UNKNOWN_ACCOUNT,
+            row.get("external_record_key"),
+            row.get("event_date"),
+            asset_id or row.get("ticker"),
+            event_type,
+            _canonical_decimal(quantity),
+            _canonical_decimal(event_value),
+            _canonical_decimal(gross_value),
+            USD,
+        ]
+    )
+
+
+def _financial_identity_key(row: dict, asset_id: int | None = None) -> str | None:
+    if row["normalized_category"] not in {"dividend", "foreign_tax", "interest", "cash_transfer"}:
+        return None
+    return _stable_hash(
+        [
+            SOURCE,
+            row.get("account_key") or UNKNOWN_ACCOUNT,
+            row.get("external_record_key"),
+            row.get("event_date"),
+            row.get("effective_date"),
+            asset_id or row.get("ticker"),
+            row.get("normalized_category"),
+            row.get("normalized_type"),
+            row.get("normalized_subtype"),
+            USD,
+        ]
+    )
+
+
+def _decimal_equal(left: str | None, right: str | None) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    return Decimal(str(left)) == Decimal(str(right))
+
+
+def _gross_compatible(imported: str | None, existing: str | None) -> bool:
+    if imported is None or existing is None:
+        return True
+    return _decimal_equal(imported, existing)
+
+
+def _find_prior_source_transaction(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    account_key: str,
+    import_id: int,
+    *,
+    external_record_key: str | None,
+    normalized_event_key: str | None,
+) -> sqlite3.Row | None:
+    conditions = []
+    params: list[Any] = [portfolio_id, account_key, import_id]
+    if external_record_key:
+        conditions.append("external_record_key = ?")
+        params.append(external_record_key)
+    if normalized_event_key:
+        conditions.append("normalized_event_key = ?")
+        params.append(normalized_event_key)
+    if not conditions:
+        return None
+    return conn.execute(
+        f"""
+        SELECT * FROM schwab_transactions
+        WHERE portfolio_id = ?
+          AND account_key = ?
+          AND import_id <> ?
+          AND ({' OR '.join(conditions)})
+        ORDER BY id LIMIT 1
+        """,
+        params,
+    ).fetchone()
+
+
+def _find_financial_identity_conflict(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    account_key: str,
+    import_id: int,
+    financial_identity_key: str | None,
+) -> sqlite3.Row | None:
+    if not financial_identity_key:
+        return None
+    return conn.execute(
+        """
+        SELECT * FROM schwab_transactions
+        WHERE portfolio_id = ?
+          AND account_key = ?
+          AND import_id <> ?
+          AND financial_identity_key = ?
+        ORDER BY id LIMIT 1
+        """,
+        (portfolio_id, account_key, import_id, financial_identity_key),
+    ).fetchone()
+
+
+def _candidate_ledger_events(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    asset_id: int,
+    event_type: str,
+    event_date: str,
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT * FROM events
+        WHERE portfolio_id = ?
+          AND asset_id = ?
+          AND event_type = ?
+          AND event_date = ?
+          AND is_cancelled = 0
+          AND is_storno = 0
+        ORDER BY sequence_num, id
+        """,
+        (portfolio_id, asset_id, event_type, event_date),
+    ).fetchall()
+
+
+def _ledger_duplicate_candidates(conn: sqlite3.Connection, portfolio_id: int, asset_id: int, row: dict) -> tuple[list[int], list[int]]:
+    event_type = _ledger_event_type(row)
+    event_value, gross_value, quantity = _ledger_values(row)
+    strong: list[int] = []
+    conflicts: list[int] = []
+    for candidate in _candidate_ledger_events(conn, portfolio_id, asset_id, event_type, row["event_date"]):
+        same_quantity = _decimal_equal(quantity, candidate["quantity"])
+        same_value = _decimal_equal(event_value, candidate["event_value"])
+        same_gross = _gross_compatible(gross_value, candidate["gross_value"])
+        if same_quantity and same_value and same_gross:
+            strong.append(candidate["id"])
+        else:
+            conflicts.append(candidate["id"])
+    return strong, conflicts
+
+
+def _create_ledger_event(conn: sqlite3.Connection, portfolio_id: int, asset_id: int, row: dict) -> int:
     value, gross_value, quantity = _ledger_values(row)
     event = event_service.create_event(
         conn,
         portfolio_id=portfolio_id,
         asset_id=asset_id,
-        event_type=event_type,
+        event_type=_ledger_event_type(row),
         event_date=row["event_date"],
         quantity=quantity,
         event_value=value,
@@ -536,28 +741,38 @@ def import_schwab_json_file(conn: sqlite3.Connection, portfolio_id: int, source:
             "ledger_event_id": None,
             "status": "imported",
             "duplicate_of_transaction_id": None,
+            "duplicate_of_ledger_event_id": None,
+            "duplicate_candidate_event_ids": [],
             "asset_match_review_id": None,
             "asset_alert_id": None,
+            "normalized_event_key": _normalized_event_key(row),
+            "financial_identity_key": _financial_identity_key(row),
+            "review_reason": None,
+            "decision_payload": None,
+            "reviewed_at": None,
         }
         try:
             existing = _existing_transaction(conn, import_id, row["source_row"])
-            if existing and existing["ledger_event_id"]:
+            if existing and existing["status"] != "error":
                 values["asset_id"] = existing["asset_id"]
                 values["ledger_event_id"] = existing["ledger_event_id"]
                 values["status"] = existing["status"]
+                values["duplicate_of_transaction_id"] = existing["duplicate_of_transaction_id"]
+                values["duplicate_of_ledger_event_id"] = existing["duplicate_of_ledger_event_id"]
+                values["duplicate_candidate_event_ids"] = json.loads(existing["duplicate_candidate_event_ids"] or "[]")
+                values["asset_match_review_id"] = existing["asset_match_review_id"]
+                values["asset_alert_id"] = existing["asset_alert_id"]
+                values["review_reason"] = existing["review_reason"]
                 _upsert_transaction(conn, values)
-                result["duplicates"] += 1
-                result["duplicate_details"].append(f"Linha {row['source_row']}: ja processada neste arquivo")
-                continue
-
-            duplicate = _find_prior_duplicate(conn, portfolio_id, parsed["account_key"], row["economic_fingerprint"], import_id)
-            if duplicate:
-                values["asset_id"] = duplicate["asset_id"]
-                values["duplicate_of_transaction_id"] = duplicate["id"]
-                values["status"] = "duplicate"
-                _upsert_transaction(conn, values)
-                result["duplicates"] += 1
-                result["duplicate_details"].append(f"Linha {row['source_row']}: duplicidade economica de transacao Schwab/TDA #{duplicate['id']}")
+                if existing["status"] == "review":
+                    result["review_count"] += 1
+                    result["review_details"].append(f"Linha {row['source_row']}: revisao pendente reaproveitada")
+                elif existing["status"] == "ignored":
+                    result["ignored"] += 1
+                    result["duplicate_details"].append(f"Linha {row['source_row']}: ja ignorada anteriormente")
+                else:
+                    result["duplicates"] += 1
+                    result["duplicate_details"].append(f"Linha {row['source_row']}: ja processada anteriormente")
                 continue
 
             category = row["normalized_category"]
@@ -571,6 +786,45 @@ def import_schwab_json_file(conn: sqlite3.Connection, portfolio_id: int, source:
                     result["review_count"] += 1
                     result["review_details"].extend(reviews or [f"Linha {row['source_row']}: ativo nao resolvido"])
                     continue
+                values["normalized_event_key"] = _normalized_event_key(row, asset_id)
+                values["financial_identity_key"] = _financial_identity_key(row, asset_id)
+                duplicate = _find_prior_source_transaction(
+                    conn,
+                    portfolio_id,
+                    parsed["account_key"],
+                    import_id,
+                    external_record_key=row.get("external_record_key"),
+                    normalized_event_key=values["normalized_event_key"],
+                ) or _find_prior_duplicate(conn, portfolio_id, parsed["account_key"], row["economic_fingerprint"], import_id)
+                if duplicate:
+                    values["asset_id"] = duplicate["asset_id"] or asset_id
+                    values["duplicate_of_transaction_id"] = duplicate["id"]
+                    values["duplicate_of_ledger_event_id"] = duplicate["ledger_event_id"] or duplicate["duplicate_of_ledger_event_id"]
+                    values["status"] = "review" if duplicate["status"] == "review" else "duplicate"
+                    _upsert_transaction(conn, values)
+                    if values["status"] == "review":
+                        result["review_count"] += 1
+                        result["review_details"].append(f"Linha {row['source_row']}: revisao Schwab/TDA pendente ja existia")
+                    else:
+                        result["duplicates"] += 1
+                        result["duplicate_details"].append(f"Linha {row['source_row']}: transacao Schwab/TDA ja processada #{duplicate['id']}")
+                    continue
+                strong, conflicts = _ledger_duplicate_candidates(conn, portfolio_id, asset_id, row)
+                if strong or conflicts:
+                    candidate_ids = strong or conflicts
+                    values["status"] = "review"
+                    values["duplicate_candidate_event_ids"] = candidate_ids
+                    values["review_reason"] = (
+                        "Possivel duplicidade patrimonial contra evento existente no ledger."
+                        if strong
+                        else "Conflito patrimonial com evento existente no ledger."
+                    )
+                    _upsert_transaction(conn, values)
+                    result["review_count"] += 1
+                    result["review_details"].append(
+                        f"Linha {row['source_row']}: {row.get('ticker') or '#'+str(asset_id)} {_ledger_event_type(row)} em {row['event_date']} enviado para revisao de duplicidade"
+                    )
+                    continue
                 values["ledger_event_id"] = _create_ledger_event(conn, portfolio_id, asset_id, row)
                 values["status"] = "ledger_event_created"
                 _upsert_transaction(conn, values)
@@ -579,6 +833,32 @@ def import_schwab_json_file(conn: sqlite3.Connection, portfolio_id: int, source:
                 asset_id, match_review_id, reviews = _resolve_asset(conn, row, portfolio_id, create_missing=True)
                 values["asset_id"] = asset_id
                 values["asset_match_review_id"] = match_review_id
+                values["normalized_event_key"] = _normalized_event_key(row, asset_id)
+                values["financial_identity_key"] = _financial_identity_key(row, asset_id)
+                duplicate = _find_prior_source_transaction(
+                    conn,
+                    portfolio_id,
+                    parsed["account_key"],
+                    import_id,
+                    external_record_key=row.get("external_record_key"),
+                    normalized_event_key=values["normalized_event_key"],
+                )
+                if duplicate:
+                    values["duplicate_of_transaction_id"] = duplicate["id"]
+                    values["status"] = "duplicate"
+                    _upsert_transaction(conn, values)
+                    result["duplicates"] += 1
+                    result["duplicate_details"].append(f"Linha {row['source_row']}: provento/imposto Schwab/TDA ja processado #{duplicate['id']}")
+                    continue
+                conflict = _find_financial_identity_conflict(conn, portfolio_id, parsed["account_key"], import_id, values["financial_identity_key"])
+                if conflict and not _decimal_equal(row.get("amount"), conflict["amount"]):
+                    values["duplicate_of_transaction_id"] = conflict["id"]
+                    values["status"] = "review"
+                    values["review_reason"] = "Conflito material de valor em provento/imposto Schwab/TDA ja importado."
+                    _upsert_transaction(conn, values)
+                    result["review_count"] += 1
+                    result["review_details"].append(f"Linha {row['source_row']}: conflito material de provento/imposto ja importado")
+                    continue
                 values["status"] = "review" if not asset_id and row.get("ticker") else "imported"
                 _upsert_transaction(conn, values)
                 if values["status"] == "review":
@@ -587,10 +867,44 @@ def import_schwab_json_file(conn: sqlite3.Connection, portfolio_id: int, source:
                 else:
                     result["imported_foreign_events"] += 1
             elif category == "interest":
+                values["normalized_event_key"] = _normalized_event_key(row)
+                values["financial_identity_key"] = _financial_identity_key(row)
+                duplicate = _find_prior_source_transaction(
+                    conn,
+                    portfolio_id,
+                    parsed["account_key"],
+                    import_id,
+                    external_record_key=row.get("external_record_key"),
+                    normalized_event_key=values["normalized_event_key"],
+                )
+                if duplicate:
+                    values["duplicate_of_transaction_id"] = duplicate["id"]
+                    values["status"] = "duplicate"
+                    _upsert_transaction(conn, values)
+                    result["duplicates"] += 1
+                    result["duplicate_details"].append(f"Linha {row['source_row']}: juros Schwab/TDA ja processado #{duplicate['id']}")
+                    continue
                 values["status"] = "imported"
                 _upsert_transaction(conn, values)
                 result["imported_foreign_events"] += 1
             elif category == "cash_transfer":
+                values["normalized_event_key"] = _normalized_event_key(row)
+                values["financial_identity_key"] = _financial_identity_key(row)
+                duplicate = _find_prior_source_transaction(
+                    conn,
+                    portfolio_id,
+                    parsed["account_key"],
+                    import_id,
+                    external_record_key=row.get("external_record_key"),
+                    normalized_event_key=values["normalized_event_key"],
+                )
+                if duplicate:
+                    values["duplicate_of_transaction_id"] = duplicate["id"]
+                    values["status"] = "duplicate"
+                    _upsert_transaction(conn, values)
+                    result["duplicates"] += 1
+                    result["duplicate_details"].append(f"Linha {row['source_row']}: movimentacao financeira Schwab/TDA ja processada #{duplicate['id']}")
+                    continue
                 values["status"] = "cash_preserved"
                 _upsert_transaction(conn, values)
                 result["imported_foreign_events"] += 1
@@ -710,3 +1024,180 @@ def resolve_asset_alert(conn: sqlite3.Connection, alert_id: int) -> dict | None:
     )
     row = conn.execute("SELECT * FROM schwab_asset_alerts WHERE id = ?", (alert_id,)).fetchone()
     return dict(row) if row else None
+
+
+def _candidate_event_dicts(conn: sqlite3.Connection, candidate_ids: list[int]) -> list[dict]:
+    if not candidate_ids:
+        return []
+    placeholders = ",".join("?" for _ in candidate_ids)
+    rows = conn.execute(
+        f"""
+        SELECT e.*, t.ticker, t.name
+        FROM events e
+        LEFT JOIN asset_tickers t ON t.asset_id = e.asset_id AND t.valid_until IS NULL
+        WHERE e.id IN ({placeholders})
+        ORDER BY e.event_date, e.sequence_num, e.id
+        """,
+        candidate_ids,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _review_dict(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    data = dict(row)
+    candidate_ids = json.loads(data.get("duplicate_candidate_event_ids") or "[]")
+    if data.get("duplicate_of_ledger_event_id") and data["duplicate_of_ledger_event_id"] not in candidate_ids:
+        candidate_ids.append(data["duplicate_of_ledger_event_id"])
+    data["duplicate_candidate_event_ids"] = candidate_ids
+    data["candidate_events"] = _candidate_event_dicts(conn, candidate_ids)
+    try:
+        data["raw_payload"] = json.loads(data.get("raw_payload") or "{}")
+    except json.JSONDecodeError:
+        data["raw_payload"] = {}
+    return data
+
+
+def list_transaction_reviews(conn: sqlite3.Connection, portfolio_id: int | None = None, status: str = "review") -> list[dict]:
+    conditions = ["t.status = ?"]
+    params: list[Any] = [status]
+    if portfolio_id is not None:
+        conditions.append("t.portfolio_id = ?")
+        params.append(portfolio_id)
+    rows = conn.execute(
+        f"""
+        SELECT t.*, i.filename, i.file_hash, i.from_date, i.to_date,
+               a.asset_class, at.ticker AS current_ticker, at.name AS current_name
+        FROM schwab_transactions t
+        JOIN schwab_imports i ON i.id = t.import_id
+        LEFT JOIN assets a ON a.id = t.asset_id
+        LEFT JOIN asset_tickers at ON at.asset_id = t.asset_id AND at.valid_until IS NULL
+        WHERE {' AND '.join(conditions)}
+        ORDER BY t.event_date DESC, t.id DESC
+        """,
+        params,
+    ).fetchall()
+    return [_review_dict(conn, row) for row in rows]
+
+
+def get_transaction_review(conn: sqlite3.Connection, transaction_id: int) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT t.*, i.filename, i.file_hash, i.from_date, i.to_date,
+               a.asset_class, at.ticker AS current_ticker, at.name AS current_name
+        FROM schwab_transactions t
+        JOIN schwab_imports i ON i.id = t.import_id
+        LEFT JOIN assets a ON a.id = t.asset_id
+        LEFT JOIN asset_tickers at ON at.asset_id = t.asset_id AND at.valid_until IS NULL
+        WHERE t.id = ?
+        """,
+        (transaction_id,),
+    ).fetchone()
+    return _review_dict(conn, row) if row else None
+
+
+def ignore_transaction_review(conn: sqlite3.Connection, transaction_id: int) -> dict:
+    row = conn.execute("SELECT * FROM schwab_transactions WHERE id = ?", (transaction_id,)).fetchone()
+    if not row:
+        raise ValueError("Revisão Schwab/TDA não encontrada.")
+    conn.execute(
+        """
+        UPDATE schwab_transactions
+        SET status = 'ignored', reviewed_at = datetime('now'), updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (transaction_id,),
+    )
+    return get_transaction_review(conn, transaction_id)
+
+
+def confirm_transaction_duplicate(conn: sqlite3.Connection, transaction_id: int, ledger_event_id: int | None = None) -> dict:
+    row = conn.execute("SELECT * FROM schwab_transactions WHERE id = ?", (transaction_id,)).fetchone()
+    if not row:
+        raise ValueError("Revisão Schwab/TDA não encontrada.")
+    candidate_ids = json.loads(row["duplicate_candidate_event_ids"] or "[]")
+    target_event_id = ledger_event_id or row["duplicate_of_ledger_event_id"] or (candidate_ids[0] if candidate_ids else None)
+    if not target_event_id:
+        raise ValueError("Informe o evento do ledger que representa a duplicidade.")
+    event = conn.execute(
+        "SELECT id FROM events WHERE id = ? AND portfolio_id = ? AND is_cancelled = 0 AND is_storno = 0",
+        (target_event_id, row["portfolio_id"]),
+    ).fetchone()
+    if not event:
+        raise ValueError("Evento do ledger não encontrado para confirmar duplicidade.")
+    conn.execute(
+        """
+        UPDATE schwab_transactions
+        SET status = 'duplicate_confirmed', duplicate_of_ledger_event_id = ?,
+            decision_payload = ?, reviewed_at = datetime('now'), updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (target_event_id, _json_dumps({"action": "confirm_duplicate", "ledger_event_id": target_event_id}), transaction_id),
+    )
+    return get_transaction_review(conn, transaction_id)
+
+
+def accept_transaction_review(conn: sqlite3.Connection, transaction_id: int, corrections: dict | None = None) -> dict:
+    corrections = corrections or {}
+    row = conn.execute("SELECT * FROM schwab_transactions WHERE id = ?", (transaction_id,)).fetchone()
+    if not row:
+        raise ValueError("Revisão Schwab/TDA não encontrada.")
+    if row["normalized_category"] != "ledger":
+        raise ValueError("Apenas eventos patrimoniais Schwab/TDA podem ser aceitos no ledger.")
+    if row["ledger_event_id"]:
+        raise ValueError("Transação Schwab/TDA já possui evento no ledger.")
+
+    row_dict = dict(row)
+    asset_id = corrections.get("asset_id") or row["asset_id"]
+    if not asset_id:
+        raise ValueError("Mapeie um ativo antes de aceitar este evento.")
+    asset = asset_service.get_asset(conn, int(asset_id))
+    if not asset:
+        raise ValueError("Ativo informado não encontrado.")
+
+    event_value, gross_value, quantity = _ledger_values(row_dict)
+    event_type = corrections.get("event_type") or _ledger_event_type(row_dict)
+    event_date = corrections.get("event_date") or row["event_date"]
+    quantity = corrections.get("quantity", quantity)
+    event_value = corrections.get("event_value", event_value)
+    gross_value = corrections.get("gross_value", gross_value)
+    event = event_service.create_event(
+        conn,
+        portfolio_id=row["portfolio_id"],
+        asset_id=int(asset_id),
+        event_type=event_type,
+        event_date=event_date,
+        quantity=quantity,
+        event_value=event_value,
+        gross_value=gross_value,
+        notes=f"Importado da Schwab/TDA JSON apos revisao: {row['source_action']} - {row['source_description'] or ''}".strip(),
+    )
+    normalized_event_key = _stable_hash(
+        [
+            SOURCE,
+            row["account_key"],
+            row["external_record_key"],
+            event_date,
+            int(asset_id),
+            event_type,
+            _canonical_decimal(quantity),
+            _canonical_decimal(event_value),
+            _canonical_decimal(gross_value),
+            USD,
+        ]
+    )
+    conn.execute(
+        """
+        UPDATE schwab_transactions
+        SET asset_id = ?, ledger_event_id = ?, status = 'ledger_event_created',
+            normalized_event_key = ?, decision_payload = ?, reviewed_at = datetime('now'), updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (
+            int(asset_id),
+            event["id"],
+            normalized_event_key,
+            _json_dumps({"action": "accept_new", "corrections": corrections}),
+            transaction_id,
+        ),
+    )
+    return get_transaction_review(conn, transaction_id)

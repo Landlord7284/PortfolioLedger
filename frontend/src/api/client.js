@@ -212,15 +212,23 @@ export const b3 = {
 };
 
 export const schwab = {
-  importJson: ({ portfolioId, files, accountKey }) => {
+  importJson: ({ portfolioId, files }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId });
-    const normalizedAccountKey = accountKey?.trim();
-    if (normalizedAccountKey) params.set('account_key', normalizedAccountKey);
     return request(`/schwab/import?${params.toString()}`, {
       method: 'POST',
       body: filesFormData(files),
     });
   },
+  reviews: ({ portfolioId, status } = {}) => {
+    const params = new URLSearchParams();
+    if (portfolioId) params.set('portfolio_id', portfolioId);
+    if (status) params.set('status', status);
+    const qs = params.toString();
+    return request(`/schwab/reviews${qs ? '?' + qs : ''}`);
+  },
+  ignoreReview: (id) => request(`/schwab/reviews/${id}/ignore`, { method: 'POST' }),
+  confirmDuplicate: (id, data = {}) => request(`/schwab/reviews/${id}/confirm-duplicate`, { method: 'POST', body: JSON.stringify(data) }),
+  acceptReview: (id, data = {}) => request(`/schwab/reviews/${id}/accept`, { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export const tax = {

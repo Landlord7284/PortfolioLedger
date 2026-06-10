@@ -6,8 +6,6 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import FileDropzone from './FileDropzone';
 
 function StatCard({ label, value, className = '' }) {
@@ -49,7 +47,6 @@ function isJsonFile(file) {
 }
 
 export default function SchwabImportModal({ portfolioId, onClose, onSuccess }) {
-  const [accountKey, setAccountKey] = useState('');
   const [files, setFiles] = useState([]);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
@@ -79,11 +76,9 @@ export default function SchwabImportModal({ portfolioId, onClose, onSuccess }) {
     setImporting(true);
     setError('');
     try {
-      const trimmedAccountKey = accountKey.trim();
       const res = await schwabApi.importJson({
         portfolioId,
         files,
-        accountKey: trimmedAccountKey || undefined,
       });
       setResult(res);
       setFiles([]);
@@ -122,19 +117,6 @@ export default function SchwabImportModal({ portfolioId, onClose, onSuccess }) {
 
         {!result ? (
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="schwab-account-key" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Conta / account_key
-              </Label>
-              <Input
-                id="schwab-account-key"
-                value={accountKey}
-                onChange={(event) => setAccountKey(event.target.value)}
-                disabled={importing}
-                placeholder="Opcional"
-              />
-            </div>
-
             <FileDropzone
               files={files}
               accept=".json"

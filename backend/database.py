@@ -699,9 +699,17 @@ def _ensure_schwab_schema(conn: sqlite3.Connection) -> None:
             normalized_subtype          TEXT,
             status                      TEXT    NOT NULL DEFAULT 'imported',
             economic_fingerprint        TEXT,
+            external_record_key         TEXT,
+            normalized_event_key        TEXT,
+            financial_identity_key      TEXT,
             duplicate_of_transaction_id INTEGER REFERENCES schwab_transactions(id) ON DELETE SET NULL,
+            duplicate_of_ledger_event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+            duplicate_candidate_event_ids TEXT,
             asset_match_review_id       INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
             asset_alert_id              INTEGER,
+            review_reason               TEXT,
+            decision_payload            TEXT,
+            reviewed_at                 TEXT,
             raw_payload                 TEXT,
             created_at                  TEXT    NOT NULL DEFAULT (datetime('now')),
             updated_at                  TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -710,6 +718,15 @@ def _ensure_schwab_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_schwab_transactions_economic
             ON schwab_transactions(portfolio_id, account_key, economic_fingerprint, status);
+
+        CREATE INDEX IF NOT EXISTS idx_schwab_transactions_normalized_event
+            ON schwab_transactions(portfolio_id, account_key, normalized_event_key, status);
+
+        CREATE INDEX IF NOT EXISTS idx_schwab_transactions_external_record
+            ON schwab_transactions(portfolio_id, account_key, external_record_key, status);
+
+        CREATE INDEX IF NOT EXISTS idx_schwab_transactions_financial_identity
+            ON schwab_transactions(portfolio_id, account_key, financial_identity_key, status);
 
         CREATE INDEX IF NOT EXISTS idx_schwab_transactions_asset_date
             ON schwab_transactions(portfolio_id, event_date, asset_id, normalized_category, status);
@@ -736,6 +753,23 @@ def _ensure_schwab_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_schwab_asset_alerts_pending
             ON schwab_asset_alerts(status, portfolio_id, event_date, id);
         """
+    )
+    _add_column_if_missing(conn, "schwab_transactions", "external_record_key", "external_record_key TEXT")
+    _add_column_if_missing(conn, "schwab_transactions", "normalized_event_key", "normalized_event_key TEXT")
+    _add_column_if_missing(conn, "schwab_transactions", "financial_identity_key", "financial_identity_key TEXT")
+    _add_column_if_missing(conn, "schwab_transactions", "duplicate_of_ledger_event_id", "duplicate_of_ledger_event_id INTEGER REFERENCES events(id) ON DELETE SET NULL")
+    _add_column_if_missing(conn, "schwab_transactions", "duplicate_candidate_event_ids", "duplicate_candidate_event_ids TEXT")
+    _add_column_if_missing(conn, "schwab_transactions", "review_reason", "review_reason TEXT")
+    _add_column_if_missing(conn, "schwab_transactions", "decision_payload", "decision_payload TEXT")
+    _add_column_if_missing(conn, "schwab_transactions", "reviewed_at", "reviewed_at TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schwab_transactions_normalized_event ON schwab_transactions(portfolio_id, account_key, normalized_event_key, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schwab_transactions_external_record ON schwab_transactions(portfolio_id, account_key, external_record_key, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schwab_transactions_financial_identity ON schwab_transactions(portfolio_id, account_key, financial_identity_key, status)"
     )
 
 
