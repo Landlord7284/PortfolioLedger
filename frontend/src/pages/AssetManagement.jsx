@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
 import { assets as assetsApi, b3 as b3Api, schwab as schwabApi } from '../api/client';
 import AssetMetadataCard, { buildAssetMetadataSuggestions, getMissingAssetMetadata } from '../components/AssetMetadataCard';
-import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, Check, ChevronsUpDown, ExternalLink, GitMerge, Loader2, Search, Trash2 } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, ChevronsUpDown, ExternalLink, GitMerge, Loader2, Search, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,16 @@ const STATUS_PRIORITY = {
   duplicate: 3,
   merged: 4,
 };
+
+const COLLAPSED_STORAGE_PREFIX = 'assetManagement.collapsed.';
+
+function readCollapsedGroups() {
+  if (typeof window === 'undefined') return {};
+  return ['reviews', 'b3IncomePendings', 'schwabAlerts', 'schwabReviews'].reduce((acc, key) => {
+    acc[key] = window.localStorage.getItem(`${COLLAPSED_STORAGE_PREFIX}${key}`) === 'true';
+    return acc;
+  }, {});
+}
 
 function formatDate(value) {
   if (!value) return 'Desde sempre';
@@ -117,6 +127,27 @@ function MetadataGapIcon({ missingFields }) {
   );
 }
 
+function CollapsibleCardHeader({ icon, title, count, collapsed, onToggle, children }) {
+  const ChevronIcon = collapsed ? ChevronRight : ChevronDown;
+
+  return (
+    <CardHeader>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+            {icon} {title}
+            <Badge variant="secondary">{count}</Badge>
+          </CardTitle>
+          {!collapsed && children}
+        </div>
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={onToggle} aria-label={collapsed ? `Expandir ${title}` : `Minimizar ${title}`}>
+          <ChevronIcon className="h-4 w-4" />
+        </Button>
+      </div>
+    </CardHeader>
+  );
+}
+
 function AssetCombobox({ options, value, onChange }) {
   const [open, setOpen] = useState(false);
   const selected = options.find((option) => option.id.toString() === value);
@@ -190,6 +221,7 @@ export default function AssetManagement() {
   const [b3IncomeAssetId, setB3IncomeAssetId] = useState('');
   const [resolvingB3Income, setResolvingB3Income] = useState(false);
   const [schwabAssetMap, setSchwabAssetMap] = useState({});
+  const [collapsedGroups, setCollapsedGroups] = useState(readCollapsedGroups);
   const navigate = useNavigate();
   const searchInputRef = useRef(null);
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
@@ -468,6 +500,16 @@ export default function AssetManagement() {
     !asset.merged_into_asset_id
   ));
 
+  const toggleCollapsedGroup = (key) => {
+    setCollapsedGroups((current) => {
+      const nextValue = !current[key];
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(`${COLLAPSED_STORAGE_PREFIX}${key}`, String(nextValue));
+      }
+      return { ...current, [key]: nextValue };
+    });
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
@@ -505,13 +547,16 @@ export default function AssetManagement() {
 
       {reviews.length > 0 && (
         <Card className="border-amber-500/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <AlertTriangle className="w-4 h-4 text-amber-500" /> Revisões Pendentes
-            </CardTitle>
+          <CollapsibleCardHeader
+            icon={<AlertTriangle className="w-4 h-4 text-amber-500" />}
+            title="Revisões Pendentes"
+            count={reviews.length}
+            collapsed={collapsedGroups.reviews}
+            onToggle={() => toggleCollapsedGroup('reviews')}
+          >
             <CardDescription>Casos ambíguos não foram criados nem mesclados automaticamente.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
+          </CollapsibleCardHeader>
+          {!collapsedGroups.reviews && <CardContent className="space-y-2">
             {reviews.map((review) => (
               <div key={review.id} className="flex flex-col gap-3 rounded-lg border p-3">
                 <div className="text-sm">
@@ -567,19 +612,22 @@ export default function AssetManagement() {
                 )}
               </div>
             ))}
-          </CardContent>
+          </CardContent>}
         </Card>
       )}
 
       {b3IncomePendings.length > 0 && (
         <Card className="border-emerald-500/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <AlertTriangle className="w-4 h-4 text-emerald-500" /> Proventos B3 Pendentes
-            </CardTitle>
+          <CollapsibleCardHeader
+            icon={<AlertTriangle className="w-4 h-4 text-emerald-500" />}
+            title="Proventos B3 Pendentes"
+            count={b3IncomePendings.length}
+            collapsed={collapsedGroups.b3IncomePendings}
+            onToggle={() => toggleCollapsedGroup('b3IncomePendings')}
+          >
             <CardDescription>Proventos importados da B3 com valor preservado, aguardando vínculo manual com um ativo real.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
+          </CollapsibleCardHeader>
+          {!collapsedGroups.b3IncomePendings && <CardContent className="space-y-2">
             {b3IncomePendings.map((pending) => (
               <div key={pending.id} className="flex flex-col gap-3 rounded-lg border p-3">
                 <div className="flex flex-col gap-1 text-sm">
@@ -602,33 +650,40 @@ export default function AssetManagement() {
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {parseCandidateIds(pending.candidate_asset_ids).map((id) => (
-                    <Button key={id} size="sm" variant="outline" onClick={() => navigate(`/assets/${id}`)}>
-                      <ExternalLink className="w-4 h-4" /> Abrir #{id}
-                    </Button>
-                  ))}
                   <Button size="sm" variant="secondary" onClick={() => openB3IncomeResolve(pending)}>
                     <GitMerge className="w-4 h-4" /> Vincular ativo
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => discardB3IncomePending(pending)}>
                     <Check className="w-4 h-4" /> Descartar pendência
                   </Button>
+                  {parseCandidateIds(pending.candidate_asset_ids).length > 0 && (
+                    <>
+                      {parseCandidateIds(pending.candidate_asset_ids).map((id) => (
+                        <Button key={id} size="sm" variant="outline" onClick={() => navigate(`/assets/${id}`)}>
+                          <ExternalLink className="w-4 h-4" /> Abrir #{id}
+                        </Button>
+                      ))}
+                    </>
+                  )}
                 </div>
               </div>
             ))}
-          </CardContent>
+          </CardContent>}
         </Card>
       )}
 
       {assetAlerts.length > 0 && (
         <Card className="border-sky-500/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <AlertCircle className="w-4 h-4 text-sky-500" /> Alertas Schwab/TDA
-            </CardTitle>
+          <CollapsibleCardHeader
+            icon={<AlertCircle className="w-4 h-4 text-sky-500" />}
+            title="Alertas Schwab/TDA"
+            count={assetAlerts.length}
+            collapsed={collapsedGroups.schwabAlerts}
+            onToggle={() => toggleCollapsedGroup('schwabAlerts')}
+          >
             <CardDescription>Eventos societários importados que exigem revisão manual antes de afetar custo ou posição.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
+          </CollapsibleCardHeader>
+          {!collapsedGroups.schwabAlerts && <CardContent className="space-y-2">
             {assetAlerts.map((alert) => (
               <div key={alert.id} className="flex flex-col gap-3 rounded-lg border p-3">
                 <div className="text-sm">
@@ -651,19 +706,22 @@ export default function AssetManagement() {
                 </div>
               </div>
             ))}
-          </CardContent>
+          </CardContent>}
         </Card>
       )}
 
       {globalSchwabReviews.length > 0 && (
         <Card className="border-amber-500/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <AlertTriangle className="w-4 h-4 text-amber-500" /> Revisões Schwab/TDA
-            </CardTitle>
+          <CollapsibleCardHeader
+            icon={<AlertTriangle className="w-4 h-4 text-amber-500" />}
+            title="Revisões Schwab/TDA"
+            count={globalSchwabReviews.length}
+            collapsed={collapsedGroups.schwabReviews}
+            onToggle={() => toggleCollapsedGroup('schwabReviews')}
+          >
             <CardDescription>Transações importadas que podem duplicar eventos existentes ou precisam de decisão antes de afetar o ledger.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+          </CollapsibleCardHeader>
+          {!collapsedGroups.schwabReviews && <CardContent className="flex flex-col gap-3">
             {globalSchwabReviews.map((review) => (
               <div key={review.id} className="flex flex-col gap-3 rounded-lg border p-3">
                 <div className="flex flex-col gap-1 text-sm">
@@ -746,7 +804,7 @@ export default function AssetManagement() {
                 </div>
               </div>
             ))}
-          </CardContent>
+          </CardContent>}
         </Card>
       )}
 
