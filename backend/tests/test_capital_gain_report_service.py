@@ -106,6 +106,25 @@ def test_action_profit_under_monthly_limit_is_exempt(tmp_path):
     assert row["assets"][0]["effective_irrf"] == "0.00"
 
 
+def test_venda_fracao_with_quantity_enters_capital_gains_with_cost_basis(tmp_path):
+    _, ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        asset = asset_service.create_asset(conn, AssetClass.ETF.value, "ETF11", market="BR")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.COMPRA.value, "2025-04-01", "2.5", "254.40")
+        event_service.create_event(conn, portfolio["id"], asset["id"], EventType.VENDA_FRACAO.value, "2025-04-02", "0.5", "32.68")
+
+        report = capital_gain_report_service.list_capital_gains(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    row = _regime(report, "2025-04", "B3_COMMON_15")
+    assert row["gross_sale"] == "32.68"
+    assert row["realized_result"] == "-18.20"
+    assert row["taxable_result_before_compensation"] == "-18.20"
+    assert row["assets"][0]["cost_basis"] == "50.88"
+    assert row["assets"][0]["realized_result"] == "-18.20"
+
+
 def test_january_snapshot_is_included_when_requested_to_show_prior_loss(tmp_path):
     _, ctx, conn, portfolio = _setup(tmp_path)
     try:

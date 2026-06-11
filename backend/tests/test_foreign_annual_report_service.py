@@ -267,6 +267,33 @@ def test_fraction_sale_enters_as_patrimonial_sale_without_schwab_double_count(tm
     assert row["taxable_base"] == "10.00"
 
 
+def test_fraction_sale_with_quantity_uses_cost_basis_in_foreign_report(tmp_path):
+    ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        _seed_ptax(conn, "2025-11-27", venda="5.00")
+        _seed_ptax(conn, "2025-11-28", venda="5.00")
+        asset = _stock(conn)
+        _buy(conn, portfolio, asset, "2025-11-27", "2.5", "254.40")
+        event_service.create_event(
+            conn,
+            portfolio["id"],
+            asset["id"],
+            EventType.VENDA_FRACAO.value,
+            "2025-11-28",
+            "0.5",
+            "32.68",
+        )
+
+        report = foreign_annual_report_service.list_foreign_annual_report(conn, portfolio["id"], 2025)
+    finally:
+        _close(ctx)
+
+    row = _first_row(report)
+    assert row["gain_loss"] == "-91.00"
+    assert row["taxable_base"] == "-91.00"
+    assert report["loss_carryforward"] == "91.00"
+
+
 def test_schwab_dividends_and_withholding_are_not_reduced_by_partial_sale(tmp_path):
     ctx, conn, portfolio = _setup(tmp_path)
     try:

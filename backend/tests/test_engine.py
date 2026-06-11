@@ -143,6 +143,40 @@ class TestVenda:
             process_event(ev, state)
 
 
+class TestVendaFracao:
+    def test_zero_quantity_keeps_position_and_realizes_full_value(self):
+        events = [
+            _ev(1, EventType.COMPRA, "2.5", "254.40", date="2024-04-01"),
+            _ev(2, EventType.VENDA_FRACAO, "0", "32.68", date="2024-04-02"),
+        ]
+
+        pos = replay_events(events)
+
+        assert pos.quantity == D("2.5")
+        assert pos.total_cost == D("254.40")
+        assert pos.realized_result == D("32.68")
+
+    def test_positive_quantity_behaves_like_partial_sale(self):
+        events = [
+            _ev(1, EventType.COMPRA, "2.5", "254.40", date="2024-04-01"),
+            _ev(2, EventType.VENDA_FRACAO, "0.5", "32.68", date="2024-04-02"),
+        ]
+
+        pos = replay_events(events)
+
+        assert pos.quantity == D("2.0")
+        assert pos.total_cost == D("203.520")
+        assert pos.average_price == D("101.76")
+        assert pos.realized_result == D("-18.20")
+
+    def test_positive_quantity_cannot_exceed_current_position(self):
+        state = PositionState(quantity=D("0.25"), total_cost=D("25.44"), average_price=D("101.76"))
+        ev = _ev(1, EventType.VENDA_FRACAO, "0.5", "32.68")
+
+        with pytest.raises(EngineValidationError, match="excede"):
+            process_event(ev, state)
+
+
 class TestDesdobramento:
     def test_split_increases_qty_reduces_avg(self):
         events = [

@@ -176,7 +176,7 @@ def _fetch_sales(conn: sqlite3.Connection, portfolio_id: int, year: int) -> list
             realized = process_event(event, state, skip_validation=True)
             if event.is_cancelled or event.is_storno:
                 continue
-            if event_type != EventType.VENDA:
+            if event_type not in {EventType.VENDA, EventType.VENDA_FRACAO}:
                 continue
             regime = _resolve_regime(row)
             if not regime:

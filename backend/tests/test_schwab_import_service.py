@@ -233,6 +233,12 @@ def _cash_in_lieu_transaction():
     }
 
 
+def _cash_in_lieu_transaction_with_quantity():
+    row = _cash_in_lieu_transaction()
+    row["Quantity"] = "0.5"
+    return row
+
+
 def _dividend_transaction(amount="$1.80", date="12/29/2024"):
     return {
         "Date": date,
@@ -597,6 +603,35 @@ def test_schwab_cash_in_lieu_uses_v_fracao_and_duplicate_review(tmp_path, monkey
     assert events[0]["quantity"] == "0"
     assert tx["status"] == "review"
     assert json.loads(tx["duplicate_candidate_event_ids"]) == [existing["id"]]
+
+
+def test_schwab_cash_in_lieu_uses_source_quantity_when_present(tmp_path, monkeypatch):
+    _patch_ptax(monkeypatch)
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.STOCK.value, "SCCO", market="US")
+        event_service.create_event(
+            conn,
+            portfolio_id=portfolio["id"],
+            asset_id=asset["id"],
+            event_type=EventType.COMPRA.value,
+            event_date="2025-11-01",
+            quantity="1",
+            event_value="10.00",
+        )
+        result = import_schwab_json_batch(
+            conn,
+            portfolio["id"],
+            [SourceFile("cash-in-lieu.json", _json_bytes([_cash_in_lieu_transaction_with_quantity()]))],
+        )
+        event = conn.execute("SELECT * FROM events WHERE event_type = ?", (EventType.VENDA_FRACAO.value,)).fetchone()
+
+    assert result["imported_ledger_events"] == 1
+    assert event["event_type"] == EventType.VENDA_FRACAO.value
+    assert event["quantity"] == "0.5"
 
 
 def test_foreign_report_consolidates_schwab_events(tmp_path, monkeypatch):

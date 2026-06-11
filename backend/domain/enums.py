@@ -85,7 +85,7 @@ class EventType(str, Enum):
     @classmethod
     def exit_events(cls) -> set["EventType"]:
         """Events that reduce quantity and produce realized result."""
-        return {cls.VENDA, cls.RESGATE_ANTECIPADO, cls.RESGATE_VENCIMENTO}
+        return {cls.VENDA, cls.VENDA_FRACAO, cls.RESGATE_ANTECIPADO, cls.RESGATE_VENCIMENTO}
 
     @classmethod
     def quantity_optional(cls) -> set["EventType"]:

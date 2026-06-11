@@ -150,7 +150,7 @@ def validate_event(event: EventRecord, state: PositionState) -> None:
         )
 
     # ── exit events: cannot leave quantity negative ──────────
-    if et in EventType.exit_events() and qty is not None:
+    if et in EventType.exit_events() and qty is not None and qty > _ZERO:
         if qty > state.quantity:
             raise EngineValidationError(
                 f"{et.value}: quantidade vendida/resgatada ({qty}) "
@@ -208,7 +208,9 @@ def _process_venda(state: PositionState, qty: Decimal, val: Decimal) -> Decimal:
     return realized
 
 
-def _process_venda_fracao(_state: PositionState, _qty: Decimal | None, val: Decimal) -> Decimal:
+def _process_venda_fracao(state: PositionState, qty: Decimal | None, val: Decimal) -> Decimal:
+    if qty is not None and qty > _ZERO:
+        return _process_venda(state, qty, val)
     return val
 
 

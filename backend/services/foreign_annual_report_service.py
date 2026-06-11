@@ -8,7 +8,7 @@ import sqlite3
 from typing import Any
 
 from backend.domain.enums import EventType
-from backend.domain.engine import to_decimal
+from backend.domain.engine import EventRecord, PositionState, process_event, to_decimal
 from backend.services import tax_service
 from backend.services.fiscal_regime_service import REGIME_FOREIGN_ASSETS_POST_2024
 
@@ -192,10 +192,7 @@ def _add_fraction_sales(
     rows = conn.execute(
         f"""
         SELECT
-            e.asset_id,
-            e.event_date,
-            e.event_value,
-            e.event_value_brl,
+            e.*,
             a.name,
             (
                 SELECT ticker FROM asset_tickers
@@ -206,28 +203,50 @@ def _add_fraction_sales(
         FROM events e
         JOIN assets a ON a.id = e.asset_id
         WHERE e.portfolio_id = ?
-          AND e.event_date BETWEEN ? AND ?
-          AND e.event_type = ?
+          AND e.event_date <= ?
           AND e.is_cancelled = 0
           AND e.is_storno = 0
           AND {_is_us_asset_where("a")}
-        ORDER BY e.event_date, e.sequence_num, e.id
+        ORDER BY e.asset_id, e.event_date, e.sequence_num, e.id
         """,
-        (portfolio_id, f"{year}-01-01", f"{year}-12-31", EventType.VENDA_FRACAO.value),
+        (portfolio_id, f"{year}-12-31"),
     ).fetchall()
+
+    state_by_asset: dict[int, PositionState] = {}
+    start_date = f"{year}-01-01"
+    end_date = f"{year}-12-31"
     for row in rows:
-        if row["event_value_brl"] is not None:
-            amount_brl = _d(row["event_value_brl"])
-        else:
+        event_type = EventType(row["event_type"])
+        event_value_brl = row["event_value_brl"]
+        if event_type == EventType.VENDA_FRACAO and start_date <= row["event_date"] <= end_date and event_value_brl is None:
             converted, missing_ptax = _ptax_brl(conn, row["event_date"], _d(row["event_value"]))
             if missing_ptax:
                 missing_ptax_dates.add(row["event_date"])
-                continue
-            amount_brl = converted or ZERO
+            else:
+                event_value_brl = converted
+
+        event = EventRecord(
+            id=row["id"],
+            event_type=event_type,
+            event_date=row["event_date"],
+            quantity=_d(row["quantity"]),
+            event_value=_d(row["event_value"]),
+            event_value_brl=_d(event_value_brl) if event_value_brl is not None else None,
+            sequence_num=row["sequence_num"],
+            is_cancelled=bool(row["is_cancelled"]),
+            is_storno=bool(row["is_storno"]),
+        )
+        state = state_by_asset.setdefault(row["asset_id"], PositionState())
+        realized = process_event(event, state, skip_validation=True)
+
+        if event_type != EventType.VENDA_FRACAO or not (start_date <= row["event_date"] <= end_date):
+            continue
+        if row["event_value_brl"] is None and event_value_brl is None:
+            continue
         key = _asset_key(row)
         asset_id, ticker, name = _asset_label_parts(row)
         aggregate = _ensure_aggregate(aggregates, key, asset_id, ticker, name)
-        aggregate.capital_result += amount_brl
+        aggregate.capital_result += realized
 
 
 def _add_schwab_financial_events(
