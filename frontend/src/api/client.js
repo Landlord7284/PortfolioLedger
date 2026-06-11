@@ -210,7 +210,7 @@ export const b3 = {
     request(`/b3/income-pendings/${id}/resolve`, { method: 'POST', body: JSON.stringify(data) }),
   discardIncomePending: (id) =>
     request(`/b3/income-pendings/${id}/discard`, { method: 'POST' }),
-  incomes: ({ portfolioId, period, assetId, assetClass, eventType, chartGroupBy, tableYear, tableMonth, tableAssetClass }) => {
+  incomes: ({ portfolioId, period, assetId, assetClass, eventType, chartGroupBy, tableYear, tableMonth, tableAssetClass, tableAssetId, tableEventType }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, period });
     if (assetId) params.set('asset_id', assetId);
     if (assetClass) params.set('asset_class', assetClass);
@@ -219,6 +219,8 @@ export const b3 = {
     if (tableYear) params.set('table_year', tableYear);
     if (tableMonth) params.set('table_month', tableMonth);
     if (tableAssetClass) params.set('table_asset_class', tableAssetClass);
+    if (tableAssetId) params.set('table_asset_id', tableAssetId);
+    if (tableEventType) params.set('table_event_type', tableEventType);
     return request(`/b3/incomes?${params.toString()}`);
   },
 };

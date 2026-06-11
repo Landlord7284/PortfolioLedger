@@ -935,6 +935,7 @@ class B3IncomeTableRow(BaseModel):
     event_type: str
     quantity: str
     net_value: str
+    yoc: Optional[str] = None
     status: str
 
 
@@ -945,6 +946,12 @@ class B3IncomeTable(BaseModel):
     rows: list[B3IncomeTableRow]
 
 
+class B3IncomeMetadata(BaseModel):
+    data_updated_at: Optional[str] = None
+    latest_b3_file_reference: Optional[str] = None
+    pending_review_count: int = 0
+
+
 class B3IncomeReportResponse(BaseModel):
     portfolio_id: int
     period: str
@@ -952,6 +959,7 @@ class B3IncomeReportResponse(BaseModel):
     filters: B3IncomeFilters
     chart: B3IncomeChart
     table: B3IncomeTable
+    metadata: B3IncomeMetadata
 
 
 # ── Patrimonial dashboard ────────────────────────────────────

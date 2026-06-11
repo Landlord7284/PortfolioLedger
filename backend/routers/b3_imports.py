@@ -61,13 +61,16 @@ def list_b3_incomes(
     asset_id: Optional[int] = Query(None),
     asset_class: Optional[str] = Query(None),
     event_type: Optional[str] = Query(None),
-    chart_group_by: str = Query("asset", pattern="^(asset|asset_class|event_type)$"),
+    chart_group_by: str = Query("asset_class", pattern="^(asset|asset_class|event_type)$"),
     table_year: Optional[str] = Query(None),
     table_month: Optional[str] = Query(None),
     table_asset_class: Optional[str] = Query(None),
+    table_asset_id: Optional[str] = Query(None),
+    table_event_type: Optional[str] = Query(None),
 ):
     parsed_table_year = _parse_optional_int_filter(table_year, "table_year")
     parsed_table_month = _parse_optional_int_filter(table_month, "table_month")
+    parsed_table_asset_id = _parse_optional_int_filter(table_asset_id, "table_asset_id")
     if parsed_table_month is not None and not 1 <= parsed_table_month <= 12:
         raise HTTPException(422, "table_month invalido.")
 
@@ -86,6 +89,8 @@ def list_b3_incomes(
                 table_year=parsed_table_year,
                 table_month=parsed_table_month,
                 table_asset_class=table_asset_class,
+                table_asset_id=parsed_table_asset_id,
+                table_event_type=None if table_event_type in (None, "", "all") else table_event_type,
                 use_default_table_period=table_year is None and table_month is None,
             )
         except ValueError as exc:

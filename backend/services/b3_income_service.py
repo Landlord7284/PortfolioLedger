@@ -191,6 +191,7 @@ def _table_row(row: sqlite3.Row) -> dict[str, Any]:
         "event_type": row["event_type"],
         "quantity": row["quantity"] or "0",
         "net_value": _money(_to_decimal(row["net_value"])),
+        "yoc": None,
         "status": row["status"],
     }
 
@@ -280,6 +281,38 @@ def _chart(rows: list[sqlite3.Row], start_date: str, end_date: str, chart_group_
     return {"segment_keys": segment_names, "months": months}
 
 
+def _metadata(conn: sqlite3.Connection, portfolio_id: int) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT
+            MAX(m.updated_at) AS data_updated_at,
+            MAX(m.reference_month) AS latest_b3_file_reference
+        FROM b3_monthly_imports m
+        WHERE m.portfolio_id = ?
+          AND EXISTS (
+              SELECT 1
+              FROM b3_income_events i
+              WHERE i.import_id = m.id
+          )
+        """,
+        (portfolio_id,),
+    ).fetchone()
+    pending_row = conn.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM b3_income_events
+        WHERE portfolio_id = ?
+          AND status = 'review'
+        """,
+        (portfolio_id,),
+    ).fetchone()
+    return {
+        "data_updated_at": row["data_updated_at"] if row else None,
+        "latest_b3_file_reference": row["latest_b3_file_reference"] if row else None,
+        "pending_review_count": pending_row["count"] if pending_row else 0,
+    }
+
+
 def list_b3_incomes(
     conn: sqlite3.Connection,
     portfolio_id: int,
@@ -287,10 +320,12 @@ def list_b3_incomes(
     asset_id: int | None = None,
     asset_class: str | None = None,
     event_type: str | None = None,
-    chart_group_by: str = "asset",
+    chart_group_by: str = "asset_class",
     table_year: int | None = None,
     table_month: int | None = None,
     table_asset_class: str | None = None,
+    table_asset_id: int | None = None,
+    table_event_type: str | None = None,
     use_default_table_period: bool = True,
 ) -> dict[str, Any]:
     if chart_group_by not in CHART_GROUPS:
@@ -317,7 +352,9 @@ def list_b3_incomes(
     table_rows = _income_rows(
         conn,
         portfolio_id,
+        asset_id=table_asset_id,
         asset_class=table_asset_class,
+        event_type=table_event_type,
         table_year=selected_year,
         table_month=selected_month,
     )
@@ -351,4 +388,5 @@ def list_b3_incomes(
             "total_net_value": _money(table_total),
             "rows": [_table_row(row) for row in table_rows],
         },
+        "metadata": _metadata(conn, portfolio_id),
     }

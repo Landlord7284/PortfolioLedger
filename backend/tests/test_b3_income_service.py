@@ -73,12 +73,16 @@ def test_b3_incomes_summary_chart_filters_and_table(tmp_path, monkeypatch):
     assert report["filters"]["asset_classes"] == [AssetClass.ACAO.value, AssetClass.FII.value]
     march = next(month for month in report["chart"]["months"] if month["month"] == "2026-03")
     assert march["total_net_value"] == "120.00"
-    assert report["chart"]["segment_keys"] == ["ITSA4"]
-    assert march["segments"] == [{"key": "ITSA4", "value": "120.00"}]
+    assert report["chart"]["segment_keys"] == [AssetClass.ACAO.value]
+    assert march["segments"] == [{"key": AssetClass.ACAO.value, "value": "120.00"}]
     assert march["top_events"][0]["label"] == "ITSA4"
     assert march["top_events"][0]["share"] == "100.00"
     assert report["table"]["total_net_value"] == "200.00"
     assert [row["ticker"] for row in report["table"]["rows"]] == ["ITSA4", "KNRI11"]
+    assert report["table"]["rows"][0]["yoc"] is None
+    assert report["metadata"]["latest_b3_file_reference"] == "2026-03"
+    assert report["metadata"]["data_updated_at"] is not None
+    assert report["metadata"]["pending_review_count"] == 0
 
     with get_db(db_path) as conn:
         by_class = b3_income_service.list_b3_incomes(
@@ -129,6 +133,24 @@ def test_b3_incomes_table_filters_are_independent(tmp_path, monkeypatch):
             table_asset_class=AssetClass.ACAO.value,
             use_default_table_period=False,
         )
+        asset_filtered = b3_income_service.list_b3_incomes(
+            conn,
+            portfolio["id"],
+            period="year",
+            table_year=2026,
+            table_month=3,
+            table_asset_id=knri["id"],
+            use_default_table_period=False,
+        )
+        type_filtered = b3_income_service.list_b3_incomes(
+            conn,
+            portfolio["id"],
+            period="year",
+            table_year=2026,
+            table_month=4,
+            table_event_type="Juros sobre Capital Proprio",
+            use_default_table_period=False,
+        )
 
     assert latest_default["table"]["year"] == 2026
     assert latest_default["table"]["month"] == 4
@@ -141,7 +163,13 @@ def test_b3_incomes_table_filters_are_independent(tmp_path, monkeypatch):
     assert [row["ticker"] for row in all_history["table"]["rows"]] == ["ITSA4", "KNRI11", "ITSA4"]
     assert class_filtered["table"]["total_net_value"] == "120.00"
     assert [row["ticker"] for row in class_filtered["table"]["rows"]] == ["ITSA4"]
-    assert class_filtered["chart"]["segment_keys"] == ["ITSA4", "KNRI11"]
+    assert class_filtered["chart"]["segment_keys"] == [AssetClass.ACAO.value, AssetClass.FII.value]
+    assert asset_filtered["table"]["total_net_value"] == "80.00"
+    assert [row["ticker"] for row in asset_filtered["table"]["rows"]] == ["KNRI11"]
+    assert type_filtered["table"]["total_net_value"] == "60.00"
+    assert [row["ticker"] for row in type_filtered["table"]["rows"]] == ["ITSA4"]
+    assert latest_default["metadata"]["latest_b3_file_reference"] == "2026-04"
+    assert latest_default["metadata"]["pending_review_count"] == 0
 
 
 def test_b3_incomes_includes_review_fallback_rows(tmp_path, monkeypatch):
@@ -160,6 +188,7 @@ def test_b3_incomes_includes_review_fallback_rows(tmp_path, monkeypatch):
     assert report["filters"]["assets"] == []
     assert report["table"]["rows"][0]["ticker"] == "XPTO3"
     assert report["table"]["rows"][0]["name"] == "XPTO3 - Empresa XPTO"
+    assert report["metadata"]["pending_review_count"] == 1
 
 
 def test_b3_incomes_includes_summary_only_and_excludes_ledger_events(tmp_path, monkeypatch):
