@@ -19,7 +19,7 @@ from typing import Any
 from backend.domain.engine import to_decimal
 from backend.domain.enums import AssetClass, EventType
 from backend.domain.normalization import normalize_ticker
-from backend.services import asset_service, event_service
+from backend.services import asset_service, event_service, ptax_service
 
 
 SOURCE = "SCHWAB"
@@ -746,6 +746,17 @@ def _parsed_file_sort_key(item: tuple[SourceFile, dict]) -> tuple[str, str, str,
     )
 
 
+def _warm_ptax_for_schwab_financial_row(conn: sqlite3.Connection, row: dict, result: dict) -> None:
+    event_date = row.get("event_date")
+    if not event_date:
+        return
+    try:
+        ptax_service.get_ptax(event_date, conn=conn)
+    except Exception as exc:
+        result["warning_count"] += 1
+        result["warnings"].append(f"Linha {row['source_row']}: PTAX nao cacheada para {event_date}: {exc}")
+
+
 def import_schwab_json_file(conn: sqlite3.Connection, portfolio_id: int, source: SourceFile, parsed: dict | None = None) -> dict:
     parsed = parsed or parse_schwab_json(source)
     import_id = _upsert_import(conn, portfolio_id, parsed)
@@ -899,6 +910,7 @@ def import_schwab_json_file(conn: sqlite3.Connection, portfolio_id: int, source:
                     result["review_count"] += 1
                     result["review_details"].extend(reviews or [f"Linha {row['source_row']}: ativo nao resolvido"])
                 else:
+                    _warm_ptax_for_schwab_financial_row(conn, row, result)
                     result["imported_foreign_events"] += 1
             elif category == "interest":
                 values["normalized_event_key"] = _normalized_event_key(row)
@@ -920,6 +932,7 @@ def import_schwab_json_file(conn: sqlite3.Connection, portfolio_id: int, source:
                     continue
                 values["status"] = "imported"
                 _upsert_transaction(conn, values)
+                _warm_ptax_for_schwab_financial_row(conn, row, result)
                 result["imported_foreign_events"] += 1
             elif category == "cash_transfer":
                 values["normalized_event_key"] = _normalized_event_key(row)

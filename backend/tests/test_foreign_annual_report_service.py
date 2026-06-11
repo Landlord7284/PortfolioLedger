@@ -8,6 +8,7 @@ from backend.services import (
     event_service,
     foreign_annual_report_service,
     portfolio_service,
+    ptax_service,
 )
 
 
@@ -159,6 +160,33 @@ def test_sale_and_dividends_in_same_year_sum_gain_loss(tmp_path):
     assert row["gain_loss"] == "690.00"
     assert row["line_tax_due"] == "103.50"
     assert row["taxable_base"] == "690.00"
+
+
+def test_foreign_annual_report_fetches_and_caches_missing_ptax(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_fetch(value):
+        calls.append(value.isoformat())
+        return {"compra": Decimal("4.90"), "venda": Decimal("5.00")}
+
+    monkeypatch.setattr(ptax_service, "_fetch_ptax_from_bcb", fake_fetch)
+    ctx, conn, portfolio = _setup(tmp_path)
+    try:
+        asset = _stock(conn)
+        import_id = _schwab_import(conn, portfolio)
+        _schwab_tx(conn, import_id, portfolio, 1, "dividend", "10.00", "2024-05-15", asset=asset)
+
+        report = foreign_annual_report_service.list_foreign_annual_report(conn, portfolio["id"], 2024)
+        cached = conn.execute("SELECT compra, venda FROM ptax_cache WHERE date = ?", ("2024-05-15",)).fetchone()
+    finally:
+        _close(ctx)
+
+    row = _first_row(report)
+    assert calls == ["2024-05-15"]
+    assert row["gain_loss"] == "50.00"
+    assert report["missing_ptax_dates"] == []
+    assert cached["compra"] == 4.9
+    assert cached["venda"] == 5.0
 
 
 def test_dividend_with_withholding_above_national_rate_zeroes_taxable_base(tmp_path):

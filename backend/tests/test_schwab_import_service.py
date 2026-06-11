@@ -3,7 +3,14 @@ from decimal import Decimal
 
 from backend.database import get_db, init_db
 from backend.domain.enums import AssetClass, EventType
-from backend.services import asset_service, event_service, foreign_report_service, portfolio_service
+from backend.services import (
+    asset_service,
+    event_service,
+    foreign_annual_report_service,
+    foreign_report_service,
+    portfolio_service,
+    ptax_service,
+)
 from backend.services import schwab_import_service as schwab_service
 from backend.services.schwab_import_service import SourceFile, import_schwab_json_batch
 
@@ -226,9 +233,9 @@ def _cash_in_lieu_transaction():
     }
 
 
-def _dividend_transaction(amount="$1.80"):
+def _dividend_transaction(amount="$1.80", date="12/29/2024"):
     return {
-        "Date": "12/29/2024",
+        "Date": date,
         "Action": "Cash Dividend",
         "Symbol": "SCCO",
         "Description": "SOUTHERN COPPER CORP",
@@ -238,6 +245,153 @@ def _dividend_transaction(amount="$1.80"):
         "Amount": amount,
         "AcctgRuleCd": "1",
     }
+
+
+def _foreign_tax_transaction(amount="-$0.54"):
+    return {
+        "Date": "03/21/2024",
+        "Action": "NRA Tax Adj",
+        "Symbol": "SCCO",
+        "Description": "SOUTHERN COPPER CORP",
+        "Quantity": "",
+        "Price": "",
+        "Fees & Comm": "",
+        "Amount": amount,
+        "AcctgRuleCd": "1",
+    }
+
+
+def _interest_transaction(amount="$0.02"):
+    return {
+        "Date": "03/22/2024",
+        "Action": "Credit Interest",
+        "Symbol": "",
+        "Description": "SCHWAB1 INT 02/27-03/21",
+        "Quantity": "",
+        "Price": "",
+        "Fees & Comm": "",
+        "Amount": amount,
+        "AcctgRuleCd": "1",
+    }
+
+
+def test_schwab_import_warms_ptax_cache_for_financial_events(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    calls = []
+
+    def fake_fetch(value):
+        calls.append(value.isoformat())
+        return {"compra": Decimal("4.90"), "venda": Decimal("5.00")}
+
+    monkeypatch.setattr(ptax_service, "_fetch_ptax_from_bcb", fake_fetch)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        result = import_schwab_json_batch(
+            conn,
+            portfolio["id"],
+            [
+                SourceFile(
+                    "financial.json",
+                    _json_bytes(
+                        [
+                            _dividend_transaction("$10.00", date="03/20/2024"),
+                            _foreign_tax_transaction("-$2.00"),
+                            _interest_transaction("$0.50"),
+                        ],
+                        to_date="03/22/2024",
+                    ),
+                )
+            ],
+        )
+        cached = conn.execute("SELECT date, compra, venda FROM ptax_cache ORDER BY date").fetchall()
+
+    assert result["imported_foreign_events"] == 3
+    assert result["warning_count"] == 0
+    assert result["errors"] == []
+    assert calls == ["2024-03-20", "2024-03-21", "2024-03-22"]
+    assert [(row["date"], row["compra"], row["venda"]) for row in cached] == [
+        ("2024-03-20", 4.9, 5.0),
+        ("2024-03-21", 4.9, 5.0),
+        ("2024-03-22", 4.9, 5.0),
+    ]
+
+
+def test_schwab_import_keeps_financial_events_when_ptax_warm_fails(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    def fail_get_ptax(_date, conn=None):
+        raise RuntimeError("BC indisponivel")
+
+    monkeypatch.setattr(ptax_service, "get_ptax", fail_get_ptax)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        result = import_schwab_json_batch(
+            conn,
+            portfolio["id"],
+            [
+                SourceFile(
+                    "financial.json",
+                    _json_bytes(
+                        [
+                            _dividend_transaction("$10.00", date="03/20/2024"),
+                            _foreign_tax_transaction("-$2.00"),
+                            _interest_transaction("$0.50"),
+                        ],
+                        to_date="03/22/2024",
+                    ),
+                )
+            ],
+        )
+        tx_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM schwab_transactions WHERE status = 'imported'"
+        ).fetchone()["count"]
+        cache_count = conn.execute("SELECT COUNT(*) AS count FROM ptax_cache").fetchone()["count"]
+
+    assert result["imported_foreign_events"] == 3
+    assert result["warning_count"] == 3
+    assert result["errors"] == []
+    assert tx_count == 3
+    assert cache_count == 0
+    assert all("PTAX nao cacheada" in warning for warning in result["files"][0]["warnings"])
+
+
+def test_foreign_annual_report_uses_ptax_cache_warmed_by_schwab_import(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    def fake_fetch(value):
+        return {"compra": Decimal("4.90"), "venda": Decimal("5.00")}
+
+    monkeypatch.setattr(ptax_service, "_fetch_ptax_from_bcb", fake_fetch)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        import_schwab_json_batch(
+            conn,
+            portfolio["id"],
+            [
+                SourceFile(
+                    "dividend.json",
+                    _json_bytes(
+                        [_dividend_transaction("$10.00", date="03/20/2024")],
+                        to_date="03/20/2024",
+                    ),
+                )
+            ],
+        )
+
+        def fail_fetch(_date):
+            raise AssertionError("BCB should not be called after import warmed PTAX cache")
+
+        monkeypatch.setattr(ptax_service, "_fetch_ptax_from_bcb", fail_fetch)
+        report = foreign_annual_report_service.list_foreign_annual_report(conn, portfolio["id"], 2024)
+
+    assert report["missing_ptax_dates"] == []
+    assert report["rows"][0]["gain_loss"] == "50.00"
 
 
 def test_schwab_import_classifies_and_persists_events(tmp_path, monkeypatch):
