@@ -1,11 +1,10 @@
 import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ChevronDown, ChevronRight, Download, Edit2, Loader2, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronRight, Download, Edit2, Loader2, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppContext } from '../App';
 import { reports as reportsApi, tax as taxApi } from '../api/client';
 import { useReportYearOptions } from '../hooks/useReportYearOptions';
 import { applyCurrencyMask, currencyToBackend, formatMoney } from '@/lib/formatters';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,11 +12,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const currentYear = new Date().getFullYear();
-const ALL = 'all';
 const REGIME_B3_COMMON = 'B3_COMMON_15';
 const IRRF_REGIMES = new Set(['B3_COMMON_15', 'B3_FII_FIAGRO_20']);
 
@@ -37,6 +38,14 @@ const MONTHS = [
 ];
 
 const REGIME_ORDER = ['B3_COMMON_15', 'B3_FII_FIAGRO_20', 'FI_INFRA_EXEMPT', 'CRYPTO_GCAP'];
+
+const REPORT_TABS = [
+  { value: 'acoes', label: 'Ações', regime: 'B3_COMMON_15' },
+  { value: 'fii', label: 'FII', regime: 'B3_FII_FIAGRO_20' },
+  { value: 'fi-infra', label: 'FI-INFRA', regime: 'FI_INFRA_EXEMPT' },
+];
+
+const DEFAULT_REPORT_TAB = REPORT_TABS[0].value;
 
 const REGIME_LABELS = {
   B3_COMMON_15: 'B3 - Operações Comuns',
@@ -256,16 +265,17 @@ function hasManualTaxPaidDifferentFromCalculated(row) {
   return hasManualTaxPaid(row) && !moneyEquals(row.manual_tax_paid, row.calculated_net_tax_payable);
 }
 
-function SummaryCard({ title, value, hideValues }) {
+function SummaryCard({ title, value, hideValues, action }) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
+    <Card size="sm" className="gap-2">
+      <CardHeader className="flex flex-row items-start justify-between gap-2 pb-1">
         <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           {title}
         </CardTitle>
+        {action}
       </CardHeader>
-      <CardContent>
-        <div className="font-mono text-2xl font-semibold tabular-nums">
+      <CardContent className="pt-0">
+        <div className="font-mono text-xl font-semibold tabular-nums">
           {formatMoney(value, hideValues)}
         </div>
       </CardContent>
@@ -369,7 +379,9 @@ function RegimeTable({
               {rows.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={expandedColSpan} className="h-20 text-center text-sm text-muted-foreground">
-                    Nenhum mês com apuração automática. Use Venda de Direitos para cadastrar um evento manual.
+                    {canAddManualRights
+                      ? 'Nenhum mês com apuração automática. Use Venda de Direitos para cadastrar um evento manual.'
+                      : 'Nenhuma apuração encontrada para este regime no ano selecionado.'}
                   </TableCell>
                 </TableRow>
               ) : rows.map((row) => {
@@ -432,29 +444,29 @@ function RegimeTable({
   );
 }
 
-function DarfSuggestionsTable({ suggestions, hideValues, paymentConfirmationsByKey, rowsByKey, savingPaymentKeys, onTogglePayment }) {
-  if (suggestions.length === 0) return null;
-  const hasAccumulatedDarf = suggestions.some((suggestion) => moneyGreaterThanZero(suggestion.final_darf_carryforward));
-
+function DarfSuggestionsPopoverContent({ suggestions, hideValues, paymentConfirmationsByKey, rowsByKey, savingPaymentKeys, onTogglePayment }) {
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="border-b">
-        <CardTitle className="text-base">Apuração de DARF por regime</CardTitle>
-        <CardDescription>
-          Guia estimada após cada regime aplicar prejuízo e IRRF próprios. Regimes com o mesmo código de receita são exibidos separadamente.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="p-0">
-        <div className="overflow-x-auto">
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="text-sm font-medium">DARFs do ano</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Regimes com o mesmo código de receita são exibidos separadamente.
+        </p>
+      </div>
+      {suggestions.length === 0 ? (
+        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Nenhuma DARF estimada para o ano selecionado.
+        </div>
+      ) : (
+        <div className="max-h-[min(60vh,28rem)] overflow-auto rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Mês</TableHead>
                 <TableHead>Código</TableHead>
                 <TableHead>Regime</TableHead>
-                <TableHead className="text-right">DARF</TableHead>
+                <TableHead className="text-right">Valor</TableHead>
                 <TableHead className="text-center">Pago</TableHead>
-                {hasAccumulatedDarf && <TableHead className="text-right">DARF Acumulado</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -471,7 +483,7 @@ function DarfSuggestionsTable({ suggestions, hideValues, paymentConfirmationsByK
                       {monthLabel(suggestion.month)} / {suggestion.year_month.slice(0, 4)}
                     </TableCell>
                     <TableCell className="font-mono text-sm">{suggestion.darf_code}</TableCell>
-                    <TableCell className="min-w-[260px] text-sm">
+                    <TableCell className="min-w-40 text-sm">
                       {REGIME_LABELS[suggestion.regime] || suggestion.regime || (suggestion.included_regimes || [])
                         .map((regime) => REGIME_LABELS[regime] || regime)
                         .join(', ')}
@@ -487,19 +499,14 @@ function DarfSuggestionsTable({ suggestions, hideValues, paymentConfirmationsByK
                         aria-label={`Confirmar pagamento do DARF de ${monthLabel(suggestion.month)} / ${suggestion.year_month.slice(0, 4)}`}
                       />
                     </TableCell>
-                    {hasAccumulatedDarf && (
-                      <TableCell className="text-right font-mono text-sm">
-                        {formatMoney(suggestion.final_darf_carryforward, hideValues)}
-                      </TableCell>
-                    )}
                   </TableRow>
                 );
               })}
             </TableBody>
           </Table>
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 }
 
@@ -512,10 +519,7 @@ export default function CapitalGainsReport() {
   const [darfPaymentConfirmations, setDarfPaymentConfirmations] = useState([]);
   const [manualEvents, setManualEvents] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [monthFilter, setMonthFilter] = useState(ALL);
-  const [regimeFilter, setRegimeFilter] = useState(ALL);
-  const [classFilter, setClassFilter] = useState(ALL);
-  const [assetFilter, setAssetFilter] = useState(ALL);
+  const [activeTab, setActiveTab] = useState(DEFAULT_REPORT_TAB);
   const [expanded, setExpanded] = useState(new Set());
   const [irrfDialog, setIrrfDialog] = useState(null);
   const [savingIrrf, setSavingIrrf] = useState(false);
@@ -618,72 +622,23 @@ export default function CapitalGainsReport() {
     });
   }, [report]);
 
-  const classOptions = useMemo(() => {
-    return [...new Set(rows.flatMap((row) => row.assets.map((asset) => asset.asset_class)).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  const visibleRows = useMemo(() => {
+    return [...rows]
+      .sort((a, b) => a.year_month.localeCompare(b.year_month) || compareRegimes(a.regime, b.regime));
   }, [rows]);
 
-  const effectiveClassFilter = classFilter !== ALL && classOptions.includes(classFilter) ? classFilter : ALL;
+  const activeTabConfig = useMemo(() => {
+    return REPORT_TABS.find((tab) => tab.value === activeTab) || REPORT_TABS[0];
+  }, [activeTab]);
 
-  const assetOptions = useMemo(() => {
-    const assets = rows.flatMap((row) => row.assets)
-      .filter((asset) => effectiveClassFilter === ALL || asset.asset_class === effectiveClassFilter);
-    const byId = new Map();
-    assets.forEach((asset) => {
-      byId.set(String(asset.asset_id), asset);
-    });
-    return [...byId.values()].sort((a, b) => String(a.ticker || '').localeCompare(String(b.ticker || ''), 'pt-BR', { sensitivity: 'base' }));
-  }, [rows, effectiveClassFilter]);
-
-  const effectiveAssetFilter = assetFilter !== ALL && assetOptions.some((asset) => String(asset.asset_id) === assetFilter)
-    ? assetFilter
-    : ALL;
-
-  const visibleRows = useMemo(() => {
-    return rows
-      .filter((row) => monthFilter === ALL || String(row.month) === monthFilter)
-      .filter((row) => regimeFilter === ALL || row.regime === regimeFilter)
-      .map((row) => {
-        const filteredAssets = row.assets.filter((asset) => {
-          if (effectiveClassFilter !== ALL && asset.asset_class !== effectiveClassFilter) return false;
-          if (effectiveAssetFilter !== ALL && String(asset.asset_id) !== effectiveAssetFilter) return false;
-          return true;
-        });
-        const assetFiltersActive = effectiveClassFilter !== ALL || effectiveAssetFilter !== ALL;
-        return {
-          ...row,
-          assets: assetFiltersActive ? filteredAssets : row.assets,
-          _matchesAssetFilter: !assetFiltersActive || filteredAssets.length > 0,
-        };
-      })
-      .filter((row) => row._matchesAssetFilter)
-      .sort((a, b) => a.year_month.localeCompare(b.year_month) || compareRegimes(a.regime, b.regime));
-  }, [effectiveAssetFilter, effectiveClassFilter, monthFilter, regimeFilter, rows]);
-
-  const groupedRows = useMemo(() => {
-    const groups = REGIME_ORDER.map((regime) => ({
-      regime,
-      rows: visibleRows.filter((row) => row.regime === regime),
-    })).filter((group) => group.rows.length > 0);
-    const canShowEmptyCommon = (regimeFilter === ALL || regimeFilter === REGIME_B3_COMMON)
-      && effectiveClassFilter === ALL
-      && effectiveAssetFilter === ALL
-      && !groups.some((group) => group.regime === REGIME_B3_COMMON);
-    if (canShowEmptyCommon) {
-      return [{ regime: REGIME_B3_COMMON, rows: [] }, ...groups];
-    }
-    return groups;
-  }, [effectiveAssetFilter, effectiveClassFilter, regimeFilter, visibleRows]);
-
-  const visibleMonthKeys = useMemo(() => new Set(visibleRows.map((row) => row.year_month)), [visibleRows]);
+  const activeRegimeRows = useMemo(() => {
+    return visibleRows.filter((row) => row.regime === activeTabConfig.regime);
+  }, [activeTabConfig.regime, visibleRows]);
 
   const visibleDarfSuggestions = useMemo(() => {
-    return darfSuggestions
-      .filter((suggestion) => monthFilter === ALL || String(suggestion.month) === monthFilter)
-      .filter((suggestion) => visibleMonthKeys.has(suggestion.year_month))
-      .filter((suggestion) => regimeFilter === ALL || suggestion.regime === regimeFilter || (suggestion.included_regimes || []).includes(regimeFilter))
+    return [...darfSuggestions]
       .sort((a, b) => a.year_month.localeCompare(b.year_month) || a.darf_code.localeCompare(b.darf_code) || compareRegimes(a.regime, b.regime));
-  }, [darfSuggestions, monthFilter, regimeFilter, visibleMonthKeys]);
+  }, [darfSuggestions]);
 
   const hasPendingDarfPayment = useMemo(() => {
     return visibleDarfSuggestions.some((suggestion) => {
@@ -697,39 +652,33 @@ export default function CapitalGainsReport() {
 
   const finalLossBalance = useMemo(() => {
     const latestByRegime = new Map();
-    visibleRows.forEach((row) => {
+    activeRegimeRows.forEach((row) => {
       const current = latestByRegime.get(row.regime);
       if (!current || row.year_month > current.year_month) {
         latestByRegime.set(row.regime, row);
       }
     });
     return [...latestByRegime.values()].reduce((total, row) => total + decimalToCents(row.final_loss_carryforward), 0n);
-  }, [visibleRows]);
+  }, [activeRegimeRows]);
 
   const finalIrrfBalance = useMemo(() => {
     const latestByRegime = new Map();
-    visibleRows.forEach((row) => {
+    activeRegimeRows.forEach((row) => {
       const current = latestByRegime.get(row.regime);
       if (!current || row.year_month > current.year_month) {
         latestByRegime.set(row.regime, row);
       }
     });
     return [...latestByRegime.values()].reduce((total, row) => total + decimalToCents(row.final_irrf_carryforward), 0n);
-  }, [visibleRows]);
+  }, [activeRegimeRows]);
 
   const summary = useMemo(() => ({
-    realizedResult: centsToMoneyString(addMoney(visibleRows, 'realized_result')),
-    exemptGain: centsToMoneyString(addMoney(visibleRows, 'exempt_gain')),
+    realizedResult: centsToMoneyString(addMoney(activeRegimeRows, 'realized_result')),
+    exemptGain: centsToMoneyString(addMoney(activeRegimeRows, 'exempt_gain')),
     finalIrrf: centsToMoneyString(finalIrrfBalance),
     darfEstimated: centsToMoneyString(addMoney(visibleDarfSuggestions, 'darf_estimated')),
     finalLoss: centsToMoneyString(finalLossBalance),
-  }), [finalIrrfBalance, finalLossBalance, visibleDarfSuggestions, visibleRows]);
-
-  const alerts = useMemo(() => {
-    const result = [];
-    if (visibleRows.some((row) => row.regime === 'CRYPTO_GCAP')) result.push('Cripto exibido apenas como apuração informativa nesta fase.');
-    return result;
-  }, [visibleRows]);
+  }), [activeRegimeRows, finalIrrfBalance, finalLossBalance, visibleDarfSuggestions]);
 
   const toggleExpanded = (key) => {
     setExpanded((current) => {
@@ -741,13 +690,6 @@ export default function CapitalGainsReport() {
       }
       return next;
     });
-  };
-
-  const resetFilters = () => {
-    setMonthFilter(ALL);
-    setRegimeFilter(ALL);
-    setClassFilter(ALL);
-    setAssetFilter(ALL);
   };
 
   const toggleDarfPaymentConfirmation = async (suggestion) => {
@@ -809,7 +751,7 @@ export default function CapitalGainsReport() {
   };
 
   const openManualRightsDialog = () => {
-    const month = monthFilter !== ALL ? Number(monthFilter) : 1;
+    const month = 1;
     const row = commonRowForMonth(month);
     const key = overrideKey(row.year_month, row.regime);
     const overrideRecord = overridesByKey.get(key);
@@ -1010,138 +952,87 @@ export default function CapitalGainsReport() {
         </div>
       </div>
 
-      <Card>
-        <CardContent className="pt-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Mês</Label>
-              <Select value={monthFilter} onValueChange={setMonthFilter}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={ALL}>Todos</SelectItem>
-                    {MONTHS.map((month) => <SelectItem key={month.value} value={month.value}>{month.label}</SelectItem>)}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Regime fiscal</Label>
-              <Select value={regimeFilter} onValueChange={setRegimeFilter}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={ALL}>Todos</SelectItem>
-                    {REGIME_ORDER.map((regime) => (
-                      <SelectItem key={regime} value={regime}>{REGIME_LABELS[regime]}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Classe</Label>
-              <Select value={effectiveClassFilter} onValueChange={(value) => { setClassFilter(value); setAssetFilter(ALL); }}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={ALL}>Todas</SelectItem>
-                    {classOptions.map((assetClass) => <SelectItem key={assetClass} value={assetClass}>{assetClass}</SelectItem>)}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Ativo</Label>
-              <Select value={effectiveAssetFilter} onValueChange={setAssetFilter}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={ALL}>Todos</SelectItem>
-                    {assetOptions.map((asset) => (
-                      <SelectItem key={asset.asset_id} value={String(asset.asset_id)}>
-                        {asset.ticker || `Ativo #${asset.asset_id}`}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-end">
-              <Button variant="outline" className="w-full" onClick={resetFilters}>
-                <RotateCcw data-icon="inline-start" />
-                Limpar
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {alerts.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {alerts.map((message) => (
-            <Alert key={message}>
-              <AlertCircle />
-              <AlertDescription>{message}</AlertDescription>
-            </Alert>
-          ))}
-        </div>
-      )}
-
       <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
         <SummaryCard title="Resultado líquido" value={summary.realizedResult} hideValues={hideValues} />
         <SummaryCard title="Ganhos isentos" value={summary.exemptGain} hideValues={hideValues} />
         <SummaryCard title="Saldo IRRF a compensar" value={summary.finalIrrf} hideValues={hideValues} />
-        <SummaryCard title="DARF Total" value={summary.darfEstimated} hideValues={hideValues} />
         <SummaryCard title="Prejuízo final" value={summary.finalLoss} hideValues={hideValues} />
+        <SummaryCard
+          title="DARFs"
+          value={summary.darfEstimated}
+          hideValues={hideValues}
+          action={(
+            <div className="-mt-1 flex items-center gap-1">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="xs" className="text-muted-foreground">
+                    Ver DARFs
+                    <ChevronDown data-icon="inline-end" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[calc(100vw-2rem)] max-w-2xl p-3 sm:w-[44rem]">
+                  <DarfSuggestionsPopoverContent
+                    suggestions={visibleDarfSuggestions}
+                    hideValues={hideValues}
+                    paymentConfirmationsByKey={darfPaymentConfirmationsByKey}
+                    rowsByKey={rowsByKey}
+                    savingPaymentKeys={savingPaymentKeys}
+                    onTogglePayment={toggleDarfPaymentConfirmation}
+                  />
+                </PopoverContent>
+              </Popover>
+              {hasPendingDarfPayment && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon-xs" aria-label="DARF pendente de confirmação de pagamento">
+                      <AlertCircle />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>DARF pendente de confirmação de pagamento.</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          )}
+        />
       </div>
 
-      {hasPendingDarfPayment && (
-        <Alert>
-          <AlertCircle />
-          <AlertDescription>DARF pendente de confirmação de pagamento.</AlertDescription>
-        </Alert>
-      )}
-
-      <DarfSuggestionsTable
-        suggestions={visibleDarfSuggestions}
-        hideValues={hideValues}
-        paymentConfirmationsByKey={darfPaymentConfirmationsByKey}
-        rowsByKey={rowsByKey}
-        savingPaymentKeys={savingPaymentKeys}
-        onTogglePayment={toggleDarfPaymentConfirmation}
-      />
-
-      {loading ? (
-        <Card>
-          <CardContent className="flex min-h-[260px] items-center justify-center gap-2 text-muted-foreground">
-            <Loader2 className="animate-spin" />
-            <span className="text-sm">Carregando relatório...</span>
-          </CardContent>
-        </Card>
-      ) : groupedRows.length === 0 ? (
-        <Card>
-          <CardContent className="flex min-h-[260px] items-center justify-center text-center text-sm text-muted-foreground">
-            Nenhum ganho de capital encontrado para os filtros atuais.
-          </CardContent>
-        </Card>
-      ) : (
-        groupedRows.map((group) => (
-          <RegimeTable
-            key={group.regime}
-            regime={group.regime}
-            rows={group.rows}
-            expanded={expanded}
-            hideValues={hideValues}
-            overridesByKey={overridesByKey}
-            taxPaidOverridesByKey={taxPaidOverridesByKey}
-            manualEventsByKey={manualEventsByKey}
-            onToggle={toggleExpanded}
-            onEditIrrf={openIrrfDialog}
-            onAddManualRights={openManualRightsDialog}
-          />
-        ))
-      )}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col gap-4">
+        <div className="overflow-x-auto">
+          <TabsList className="min-w-max justify-start">
+            {REPORT_TABS.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value}>{tab.label}</TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+        {REPORT_TABS.map((tab) => {
+          const tabRows = visibleRows.filter((row) => row.regime === tab.regime);
+          return (
+            <TabsContent key={tab.value} value={tab.value} className="mt-0">
+              {loading ? (
+                <Card>
+                  <CardContent className="flex min-h-[260px] items-center justify-center gap-2 text-muted-foreground">
+                    <Loader2 className="animate-spin" />
+                    <span className="text-sm">Carregando relatório...</span>
+                  </CardContent>
+                </Card>
+              ) : (
+                <RegimeTable
+                  regime={tab.regime}
+                  rows={tabRows}
+                  expanded={expanded}
+                  hideValues={hideValues}
+                  overridesByKey={overridesByKey}
+                  taxPaidOverridesByKey={taxPaidOverridesByKey}
+                  manualEventsByKey={manualEventsByKey}
+                  onToggle={toggleExpanded}
+                  onEditIrrf={openIrrfDialog}
+                  onAddManualRights={openManualRightsDialog}
+                />
+              )}
+            </TabsContent>
+          );
+        })}
+      </Tabs>
 
       <Dialog open={!!irrfDialog} onOpenChange={(open) => !open && !savingIrrf && setIrrfDialog(null)}>
         <DialogContent className="sm:max-w-md">
