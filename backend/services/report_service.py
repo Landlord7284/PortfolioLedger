@@ -210,7 +210,7 @@ def _add_capital_gain_exempt_income(
 ) -> None:
     from backend.services import capital_gain_report_service
 
-    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year, include_neutral_months=True)
+    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year)
     stock_exempt_gain = _ZERO
     fi_infra_exempt_gain = _ZERO
 
@@ -676,13 +676,7 @@ def _append_capital_gain_detail_rows(worksheet, regime: str, rows: list[tuple[di
 def _append_capital_gain_sheets(workbook: Workbook, conn: sqlite3.Connection, portfolio_id: int, year: int) -> None:
     from backend.services import capital_gain_report_service, tax_service
 
-    report = capital_gain_report_service.list_capital_gains(
-        conn,
-        portfolio_id,
-        year,
-        include_neutral_months=True,
-        include_january_snapshot=True,
-    )
+    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year)
     paid_confirmations = {
         (row["year_month"], row["regime"])
         for row in tax_service.list_capital_gain_darf_payment_confirmations(conn, portfolio_id, year)

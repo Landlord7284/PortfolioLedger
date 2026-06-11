@@ -26,7 +26,7 @@ from backend.services.fiscal_regime_service import (
 
 ZERO = Decimal("0")
 CENTS = Decimal("0.01")
-JANUARY_SNAPSHOT_REGIMES = [REGIME_B3_COMMON, REGIME_B3_FII, REGIME_FI_INFRA_EXEMPT, REGIME_CRYPTO]
+CAPITAL_GAIN_REGIMES = [REGIME_B3_COMMON, REGIME_B3_FII, REGIME_FI_INFRA_EXEMPT, REGIME_CRYPTO]
 
 
 @dataclass
@@ -446,23 +446,10 @@ def _allocate_effective_irrf(row: dict) -> None:
             aggregate.effective_irrf = ZERO
 
 
-def _should_include_month(month: str, rows: list[dict]) -> bool:
-    if month.endswith("-01"):
-        return bool(rows)
-    return any(
-        row["taxable_result_before_compensation"] != ZERO
-        or row["darf_estimated"] != ZERO
-        or row["effective_irrf"] != ZERO
-        for row in rows
-    )
-
-
 def list_capital_gains(
     conn: sqlite3.Connection,
     portfolio_id: int,
     year: int,
-    include_neutral_months: bool = False,
-    include_january_snapshot: bool = False,
 ) -> dict:
     sales_by_month_regime: dict[tuple[str, str], list[SaleItem]] = defaultdict(list)
     for item in [*_fetch_sales(conn, portfolio_id, year), *_fetch_manual_events(conn, portfolio_id, year)]:
@@ -476,13 +463,13 @@ def list_capital_gains(
     months = []
     current_irrf_year: str | None = None
 
+    selected_year_months = {f"{year}-{month:02d}" for month in range(1, 13)}
     year_months = (
         {month for month, _ in sales_by_month_regime}
         | {month for month, _ in overrides}
         | {month for month, _ in tax_paid_overrides}
+        | selected_year_months
     )
-    if include_january_snapshot:
-        year_months.add(f"{year}-01")
     year_months = sorted(year_months)
 
     for month in year_months:
@@ -509,8 +496,8 @@ def list_capital_gains(
                  if key_month == month and is_supported_capital_gain_regime(regime)
              }
         )
-        if include_january_snapshot and month == f"{year}-01":
-            month_regimes = sorted({*month_regimes, *JANUARY_SNAPSHOT_REGIMES})
+        if month_year == str(year):
+            month_regimes = sorted({*month_regimes, *CAPITAL_GAIN_REGIMES})
 
         for regime in month_regimes:
             items = sales_by_month_regime.get((month, regime), [])
@@ -655,10 +642,7 @@ def list_capital_gains(
                 guide_row["darf_estimated"] = darf_estimated
                 guide_row["final_darf_carryforward"] = final_carry
 
-        should_include_january_snapshot = include_january_snapshot and month == f"{year}-01" and bool(month_raw_rows)
-        if month_year == str(year) and (
-            include_neutral_months or should_include_january_snapshot or _should_include_month(month, month_raw_rows)
-        ):
+        if month_year == str(year):
             months.append(
                 {
                     "year_month": month,

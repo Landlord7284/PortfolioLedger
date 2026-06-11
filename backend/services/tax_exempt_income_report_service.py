@@ -148,7 +148,7 @@ def _format_group(group: dict) -> dict:
 
 
 def _add_stock_exemptions(conn: sqlite3.Connection, portfolio_id: int, year: int, group: dict) -> None:
-    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year, include_neutral_months=True)
+    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year)
     for month in report["months"]:
         row = next((regime for regime in month["regimes"] if regime["regime"] == REGIME_B3_COMMON), None)
         if not row or _d(row["exempt_gain"]) <= ZERO:
@@ -191,7 +191,7 @@ def _is_fi_infra_exempt(row: sqlite3.Row) -> bool:
 
 
 def _add_fi_infra_capital_gains(conn: sqlite3.Connection, portfolio_id: int, year: int, group: dict) -> None:
-    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year, include_neutral_months=True)
+    report = capital_gain_report_service.list_capital_gains(conn, portfolio_id, year)
     for month in report["months"]:
         row = next((regime for regime in month["regimes"] if regime["regime"] == REGIME_FI_INFRA_EXEMPT), None)
         if not row:
