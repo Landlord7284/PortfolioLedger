@@ -5,8 +5,14 @@ from typing import Optional
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 from backend.database import get_db
-from backend.models import B3IncomeReportResponse, B3MonthlyImportResponse, B3MonthlySanitizeResponse
-from backend.services import b3_income_service
+from backend.models import (
+    B3IncomePendingResolveRequest,
+    B3IncomePendingResponse,
+    B3IncomeReportResponse,
+    B3MonthlyImportResponse,
+    B3MonthlySanitizeResponse,
+)
+from backend.services import b3_income_service, b3_monthly_import_service
 from backend.services.b3_monthly_import_service import SourceFile, import_b3_monthly_batch, sanitize_b3_monthly_import
 from backend.services.portfolio_service import get_portfolio
 
@@ -86,15 +92,48 @@ def list_b3_incomes(
             raise HTTPException(400, str(exc))
 
 
-@router.delete("/monthly-import", response_model=B3MonthlySanitizeResponse)
-def sanitize_b3_monthly(
+@router.get("/income-pendings", response_model=list[B3IncomePendingResponse])
+def list_b3_income_pendings(
     portfolio_id: int = Query(...),
-    reference_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    status: str = Query("pending", pattern="^(pending|resolved|discarded|all)$"),
 ):
     with get_db() as conn:
         if not get_portfolio(conn, portfolio_id):
             raise HTTPException(404, f"Carteira {portfolio_id} nao encontrada.")
         try:
-            return sanitize_b3_monthly_import(conn, portfolio_id, reference_month)
+            return b3_monthly_import_service.list_income_pendings(conn, portfolio_id, status)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+
+@router.post("/income-pendings/{income_id}/resolve", response_model=B3IncomePendingResponse)
+def resolve_b3_income_pending(income_id: int, body: B3IncomePendingResolveRequest):
+    with get_db() as conn:
+        try:
+            return b3_monthly_import_service.resolve_income_pending(conn, income_id, body.asset_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+
+@router.post("/income-pendings/{income_id}/discard", response_model=B3IncomePendingResponse)
+def discard_b3_income_pending(income_id: int):
+    with get_db() as conn:
+        try:
+            return b3_monthly_import_service.discard_income_pending(conn, income_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+
+@router.delete("/monthly-import", response_model=B3MonthlySanitizeResponse)
+def sanitize_b3_monthly(
+    portfolio_id: int = Query(...),
+    reference_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    remove_manual_resolutions: bool = Query(False),
+):
+    with get_db() as conn:
+        if not get_portfolio(conn, portfolio_id):
+            raise HTTPException(404, f"Carteira {portfolio_id} nao encontrada.")
+        try:
+            return sanitize_b3_monthly_import(conn, portfolio_id, reference_month, remove_manual_resolutions)
         except ValueError as exc:
             raise HTTPException(422, str(exc))

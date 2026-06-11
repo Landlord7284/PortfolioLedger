@@ -349,12 +349,12 @@ def _add_fi_infra_b3_incomes(
         WHERE i.portfolio_id = ?
           AND i.payment_date BETWEEN ? AND ?
           AND i.asset_id IS NOT NULL
-          AND i.status != ?
+          AND i.status NOT IN (?, ?)
           AND i.ledger_event_id IS NULL
           AND a.merged_into_asset_id IS NULL
         ORDER BY current_ticker, i.payment_date, i.id
         """,
-        (portfolio_id, start_date, end_date, B3IncomeEventStatus.REVIEW.value),
+        (portfolio_id, start_date, end_date, B3IncomeEventStatus.REVIEW.value, B3IncomeEventStatus.DISCARDED.value),
     ).fetchall()
 
     for row in rows:

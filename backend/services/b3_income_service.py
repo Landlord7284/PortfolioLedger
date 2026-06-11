@@ -80,7 +80,7 @@ def _income_rows(
     table_year: int | None = None,
     table_month: int | None = None,
 ) -> list[sqlite3.Row]:
-    conditions = ["i.portfolio_id = ?", "i.status NOT LIKE 'ledger_%'"]
+    conditions = ["i.portfolio_id = ?", "i.status NOT LIKE 'ledger_%'", "i.status != 'discarded'"]
     params: list[Any] = [portfolio_id]
     if start_date:
         conditions.append("i.payment_date >= ?")

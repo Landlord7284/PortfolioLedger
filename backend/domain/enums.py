@@ -147,6 +147,7 @@ class B3IncomeEventStatus(str, Enum):
     IMPORTED = "imported"
     SUMMARY_ONLY = "summary_only"
     REVIEW = "review"
+    DISCARDED = "discarded"
     LEDGER_EVENT_CREATED = "ledger_event_created"
     LEDGER_ERROR = "ledger_error"
 

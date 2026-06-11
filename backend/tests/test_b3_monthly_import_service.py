@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from backend.database import get_db, init_db
 from backend.domain.enums import AssetClass, EventType
 from backend.services import b3_monthly_import_service as b3_service
-from backend.services import asset_service, event_service, portfolio_service
+from backend.services import asset_service, event_service, portfolio_service, report_service
 from backend.services.b3_monthly_import_service import SourceFile, import_b3_monthly_batch, sanitize_b3_monthly_import
 
 
@@ -239,6 +239,7 @@ def test_sanitize_b3_monthly_import_removes_b3_rows_and_cancels_auto_ledger_even
         "market_prices_removed": 5,
         "income_events_removed": 1,
         "ledger_events_cancelled": 1,
+        "manual_resolutions_removed": 0,
     }
     assert imports == 0
     assert prices == 0
@@ -480,6 +481,105 @@ def test_b3_income_l_suffix_keeps_review_when_registered_name_conflicts(tmp_path
     assert income["status"] == "review"
     assert len(reviews) == 1
     assert reviews[0]["ticker"] == "FRAS3"
+
+
+def test_b3_income_pending_can_be_resolved_manually_and_reports_value(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Proventos Recebidos": [
+                ["HGLG13 - CSHG LOGÍSTICA FDO INV IMOB - FII", "15/08/2023", "Rendimento", "ITAU", "500", "0,2568", "128,40"],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.FII.value, "HGLG11", market="BR", name="PÁTRIA LOG")
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2023-08.xlsx", content)])
+        pending = b3_service.list_income_pendings(conn, portfolio["id"])
+
+        resolved = b3_service.resolve_income_pending(conn, pending[0]["id"], asset["id"])
+        report = report_service.list_income_report(conn, portfolio["id"], 2023)
+        income = conn.execute("SELECT * FROM b3_income_events").fetchone()
+
+    assert result["review_count"] == 1
+    assert len(pending) == 1
+    assert pending[0]["net_value"] == "128.40"
+    assert pending[0]["institution"] == "ITAU"
+    assert resolved["status"] == "resolved"
+    assert resolved["asset_id"] == asset["id"]
+    assert income["asset_id"] == asset["id"]
+    assert income["status"] == "imported"
+    rows = [row for table in report["tables"] for row in table["rows"]]
+    assert any(row["ticker"] == "HGLG11" and row["value"] == "128.40" for row in rows)
+
+
+def test_b3_income_manual_decision_survives_sanitize_and_reapplies_on_reimport(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Proventos Recebidos": [
+                ["HGLG13 - CSHG LOGÍSTICA FDO INV IMOB - FII", "15/08/2023", "Rendimento", "ITAU", "500", "0,2568", "128,40"],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.FII.value, "HGLG11", market="BR")
+        import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2023-08.xlsx", content)])
+        pending = b3_service.list_income_pendings(conn, portfolio["id"])[0]
+        b3_service.resolve_income_pending(conn, pending["id"], asset["id"])
+
+        sanitized = sanitize_b3_monthly_import(conn, portfolio["id"], "2023-08")
+        after_sanitize_incomes = conn.execute("SELECT COUNT(*) AS count FROM b3_income_events").fetchone()["count"]
+        decisions_after_sanitize = conn.execute("SELECT COUNT(*) AS count FROM b3_income_resolution_decisions").fetchone()["count"]
+
+        reimport = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2023-08.xlsx", content)])
+        income = conn.execute("SELECT * FROM b3_income_events").fetchone()
+        pendings = b3_service.list_income_pendings(conn, portfolio["id"])
+
+    assert sanitized["income_events_removed"] == 1
+    assert sanitized["manual_resolutions_removed"] == 0
+    assert after_sanitize_incomes == 0
+    assert decisions_after_sanitize == 1
+    assert reimport["review_count"] == 0
+    assert income["asset_id"] == asset["id"]
+    assert income["status"] == "imported"
+    assert pendings == []
+
+
+def test_b3_sanitize_can_remove_manual_resolution_decisions(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Proventos Recebidos": [
+                ["HGLG13 - CSHG LOGÍSTICA FDO INV IMOB - FII", "15/08/2023", "Rendimento", "ITAU", "500", "0,2568", "128,40"],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.FII.value, "HGLG11", market="BR")
+        import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2023-08.xlsx", content)])
+        pending = b3_service.list_income_pendings(conn, portfolio["id"])[0]
+        b3_service.resolve_income_pending(conn, pending["id"], asset["id"])
+
+        sanitized = sanitize_b3_monthly_import(conn, portfolio["id"], "2023-08", remove_manual_resolutions=True)
+        decisions_after_sanitize = conn.execute("SELECT COUNT(*) AS count FROM b3_income_resolution_decisions").fetchone()["count"]
+        reimport = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2023-08.xlsx", content)])
+        pendings = b3_service.list_income_pendings(conn, portfolio["id"])
+
+    assert sanitized["manual_resolutions_removed"] == 1
+    assert decisions_after_sanitize == 0
+    assert reimport["review_count"] == 1
+    assert len(pendings) == 1
 
 
 def test_b3_market_price_consolidates_fixed_income_and_treasury_positions(tmp_path):

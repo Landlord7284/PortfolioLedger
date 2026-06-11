@@ -198,10 +198,18 @@ export const b3 = {
       body: filesFormData(files),
     });
   },
-  sanitizeMonthlyImport: ({ portfolioId, referenceMonth }) =>
-    request(`/b3/monthly-import?portfolio_id=${portfolioId}&reference_month=${encodeURIComponent(referenceMonth)}`, {
+  sanitizeMonthlyImport: ({ portfolioId, referenceMonth, removeManualResolutions = false }) =>
+    request(`/b3/monthly-import?portfolio_id=${portfolioId}&reference_month=${encodeURIComponent(referenceMonth)}&remove_manual_resolutions=${removeManualResolutions ? 'true' : 'false'}`, {
       method: 'DELETE',
     }),
+  incomePendings: ({ portfolioId, status = 'pending' }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, status });
+    return request(`/b3/income-pendings?${params.toString()}`);
+  },
+  resolveIncomePending: (id, data) =>
+    request(`/b3/income-pendings/${id}/resolve`, { method: 'POST', body: JSON.stringify(data) }),
+  discardIncomePending: (id) =>
+    request(`/b3/income-pendings/${id}/discard`, { method: 'POST' }),
   incomes: ({ portfolioId, period, assetId, assetClass, eventType, chartGroupBy, tableYear, tableMonth, tableAssetClass }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId, period });
     if (assetId) params.set('asset_id', assetId);

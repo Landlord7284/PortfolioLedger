@@ -858,6 +858,29 @@ def _ensure_b3_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_b3_income_events_asset_date
             ON b3_income_events(portfolio_id, payment_date, asset_id, status);
+
+        CREATE TABLE IF NOT EXISTS b3_income_resolution_decisions (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id       INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+            reference_month    TEXT    NOT NULL,
+            source_sheet       TEXT    NOT NULL DEFAULT 'Proventos Recebidos',
+            source_row         INTEGER,
+            product            TEXT,
+            ticker             TEXT,
+            payment_date       TEXT    NOT NULL,
+            event_type         TEXT    NOT NULL,
+            net_value          TEXT    NOT NULL,
+            institution        TEXT,
+            account            TEXT,
+            fingerprint        TEXT    NOT NULL,
+            resolved_asset_id  INTEGER NOT NULL REFERENCES assets(id),
+            created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(portfolio_id, fingerprint)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_b3_income_resolution_decisions_month
+            ON b3_income_resolution_decisions(portfolio_id, reference_month, id);
         """
     )
     _migrate_b3_unique_constraints(conn)
@@ -950,6 +973,55 @@ def _migrate_b3_unique_constraints(conn: sqlite3.Connection) -> None:
             )
             SELECT id, import_id, portfolio_id, asset_id,
                    COALESCE(NULLIF(source_row, 0), id), payment_date,
+                   event_type, product, ticker, quantity, unit_price, net_value,
+                   status, ledger_event_id, review_id, raw_payload, created_at, updated_at
+            FROM b3_income_events_old
+            """
+        )
+        conn.execute("DROP TABLE b3_income_events_old")
+        conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_b3_income_events_import_row ON b3_income_events(import_id, source_row) WHERE source_row > 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_income_events_import ON b3_income_events(import_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_b3_income_events_asset_date ON b3_income_events(portfolio_id, payment_date, asset_id, status)")
+
+    create_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'b3_income_events'"
+    ).fetchone()
+    if create_sql and "discarded" not in (create_sql["sql"] or ""):
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("ALTER TABLE b3_income_events RENAME TO b3_income_events_old")
+        conn.execute(
+            f"""
+            CREATE TABLE b3_income_events (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                import_id        INTEGER NOT NULL REFERENCES b3_monthly_imports(id) ON DELETE CASCADE,
+                portfolio_id     INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+                asset_id         INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+                source_row       INTEGER NOT NULL DEFAULT 0,
+                payment_date     TEXT    NOT NULL,
+                event_type       TEXT    NOT NULL,
+                product          TEXT,
+                ticker           TEXT,
+                quantity         TEXT,
+                unit_price       TEXT,
+                net_value        TEXT,
+                status           TEXT    NOT NULL DEFAULT 'imported' CHECK (status IN {_B3_INCOME_EVENT_STATUS_VALUES}),
+                ledger_event_id  INTEGER REFERENCES events(id) ON DELETE SET NULL,
+                review_id        INTEGER REFERENCES asset_match_reviews(id) ON DELETE SET NULL,
+                raw_payload      TEXT,
+                created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+                updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO b3_income_events (
+                id, import_id, portfolio_id, asset_id, source_row, payment_date,
+                event_type, product, ticker, quantity, unit_price, net_value,
+                status, ledger_event_id, review_id, raw_payload, created_at, updated_at
+            )
+            SELECT id, import_id, portfolio_id, asset_id, source_row, payment_date,
                    event_type, product, ticker, quantity, unit_price, net_value,
                    status, ledger_event_id, review_id, raw_payload, created_at, updated_at
             FROM b3_income_events_old

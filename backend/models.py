@@ -740,6 +740,37 @@ class B3MonthlySanitizeResponse(BaseModel):
     market_prices_removed: int
     income_events_removed: int
     ledger_events_cancelled: int
+    manual_resolutions_removed: int = 0
+
+
+class B3IncomePendingResolveRequest(BaseModel):
+    asset_id: int
+
+
+class B3IncomePendingResponse(BaseModel):
+    id: int
+    import_id: int
+    portfolio_id: int
+    reference_month: str
+    filename: str
+    source_row: int
+    payment_date: str
+    event_type: str
+    product: Optional[str] = None
+    ticker: Optional[str] = None
+    quantity: Optional[str] = None
+    unit_price: Optional[str] = None
+    net_value: Optional[str] = None
+    currency: str = "BRL"
+    institution: Optional[str] = None
+    account: Optional[str] = None
+    status: str
+    reason: Optional[str] = None
+    review_id: Optional[int] = None
+    candidate_asset_ids: Optional[str] = None
+    asset_id: Optional[int] = None
+    ledger_event_id: Optional[int] = None
+    raw_payload: Optional[str] = None
 
 
 class SchwabImportFileResult(BaseModel):

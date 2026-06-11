@@ -8,6 +8,7 @@ ledger event automatically when the asset/date/type key is not already present.
 from __future__ import annotations
 
 import calendar
+import hashlib
 import json
 import re
 import sqlite3
@@ -123,6 +124,16 @@ def _optional_ticker(value: str | None) -> str | None:
 
 def _json_dumps(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _json_loads(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _date_str(value) -> str | None:
@@ -371,6 +382,138 @@ def _create_review(
     return review["id"]
 
 
+def _income_raw_field(raw_payload: dict, key: str) -> str | None:
+    return _clean_str(raw_payload.get(_header_key(key)))
+
+
+def _income_fingerprint(
+    *,
+    portfolio_id: int,
+    reference_month: str,
+    product: str | None,
+    ticker: str | None,
+    payment_date: str,
+    event_type: str,
+    quantity: str | None,
+    unit_price: str | None,
+    net_value: str,
+    institution: str | None,
+    account: str | None,
+) -> str:
+    parts = [
+        str(portfolio_id),
+        reference_month,
+        _norm_text(product),
+        payment_date,
+        _norm_text(event_type),
+        quantity or "",
+        unit_price or "",
+        net_value,
+        _norm_text(institution),
+        _norm_text(account),
+    ]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _income_fingerprint_from_values(values: dict, reference_month: str) -> str:
+    raw_payload = values.get("raw_payload") if isinstance(values.get("raw_payload"), dict) else {}
+    return _income_fingerprint(
+        portfolio_id=values["portfolio_id"],
+        reference_month=reference_month,
+        product=values.get("product"),
+        ticker=values.get("ticker"),
+        payment_date=values["payment_date"],
+        event_type=values["event_type"],
+        quantity=values.get("quantity"),
+        unit_price=values.get("unit_price"),
+        net_value=values.get("net_value") or "0",
+        institution=_income_raw_field(raw_payload, "Instituição"),
+        account=_income_raw_field(raw_payload, "Conta"),
+    )
+
+
+def _income_fingerprint_from_row(row: sqlite3.Row, reference_month: str) -> str:
+    raw_payload = _json_loads(row["raw_payload"])
+    return _income_fingerprint(
+        portfolio_id=row["portfolio_id"],
+        reference_month=reference_month,
+        product=row["product"],
+        ticker=row["ticker"],
+        payment_date=row["payment_date"],
+        event_type=row["event_type"],
+        quantity=row["quantity"],
+        unit_price=row["unit_price"],
+        net_value=row["net_value"] or "0",
+        institution=_income_raw_field(raw_payload, "Instituição"),
+        account=_income_raw_field(raw_payload, "Conta"),
+    )
+
+
+def _find_income_decision(conn: sqlite3.Connection, values: dict, reference_month: str) -> sqlite3.Row | None:
+    fingerprint = _income_fingerprint_from_values(values, reference_month)
+    return conn.execute(
+        """
+        SELECT d.*
+        FROM b3_income_resolution_decisions d
+        JOIN assets a ON a.id = d.resolved_asset_id
+        WHERE d.portfolio_id = ?
+          AND d.fingerprint = ?
+          AND a.merged_into_asset_id IS NULL
+        """,
+        (values["portfolio_id"], fingerprint),
+    ).fetchone()
+
+
+def _upsert_income_decision(conn: sqlite3.Connection, income: sqlite3.Row, asset_id: int) -> None:
+    import_row = conn.execute(
+        "SELECT reference_month FROM b3_monthly_imports WHERE id = ?",
+        (income["import_id"],),
+    ).fetchone()
+    if not import_row:
+        raise ValueError("Import B3 de origem nao encontrado.")
+    reference_month = import_row["reference_month"]
+    raw_payload = _json_loads(income["raw_payload"])
+    institution = _income_raw_field(raw_payload, "Instituição")
+    account = _income_raw_field(raw_payload, "Conta")
+    fingerprint = _income_fingerprint_from_row(income, reference_month)
+    conn.execute(
+        """
+        INSERT INTO b3_income_resolution_decisions (
+            portfolio_id, reference_month, source_sheet, source_row, product, ticker,
+            payment_date, event_type, net_value, institution, account, fingerprint,
+            resolved_asset_id
+        )
+        VALUES (?, ?, 'Proventos Recebidos', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(portfolio_id, fingerprint) DO UPDATE SET
+            reference_month = excluded.reference_month,
+            source_row = excluded.source_row,
+            product = excluded.product,
+            ticker = excluded.ticker,
+            payment_date = excluded.payment_date,
+            event_type = excluded.event_type,
+            net_value = excluded.net_value,
+            institution = excluded.institution,
+            account = excluded.account,
+            resolved_asset_id = excluded.resolved_asset_id,
+            updated_at = datetime('now')
+        """,
+        (
+            income["portfolio_id"],
+            reference_month,
+            income["source_row"],
+            income["product"],
+            income["ticker"],
+            income["payment_date"],
+            income["event_type"],
+            income["net_value"] or "0",
+            institution,
+            account,
+            fingerprint,
+            asset_id,
+        ),
+    )
+
+
 def _resolve_asset(
     conn: sqlite3.Connection,
     *,
@@ -617,12 +760,14 @@ def _upsert_income(conn: sqlite3.Connection, values: dict) -> bool:
     ticker = _optional_ticker(values.get("ticker"))
     existing = conn.execute(
         """
-        SELECT id FROM b3_income_events
+        SELECT * FROM b3_income_events
         WHERE import_id = ? AND source_row = ?
         """,
         (values["import_id"], values["source_row"]),
     ).fetchone()
     if existing:
+        if existing["status"] == B3IncomeEventStatus.DISCARDED.value:
+            return False
         conn.execute(
             """
             UPDATE b3_income_events
@@ -696,6 +841,183 @@ def _existing_income(conn: sqlite3.Connection, import_id: int, source_row: int) 
         """,
         (import_id, source_row),
     ).fetchone()
+
+
+def _income_pending_status(row: sqlite3.Row) -> str:
+    if row["income_status"] == B3IncomeEventStatus.DISCARDED.value:
+        return "discarded"
+    if row["income_status"] == B3IncomeEventStatus.REVIEW.value:
+        return "pending"
+    return "resolved"
+
+
+def _income_pending_response(row: sqlite3.Row) -> dict:
+    raw_payload = _json_loads(row["raw_payload"])
+    return {
+        "id": row["id"],
+        "import_id": row["import_id"],
+        "portfolio_id": row["portfolio_id"],
+        "reference_month": row["reference_month"],
+        "filename": row["filename"],
+        "source_row": row["source_row"],
+        "payment_date": row["payment_date"],
+        "event_type": row["event_type"],
+        "product": row["product"],
+        "ticker": row["ticker"],
+        "quantity": row["quantity"],
+        "unit_price": row["unit_price"],
+        "net_value": row["net_value"],
+        "currency": "BRL",
+        "institution": _income_raw_field(raw_payload, "Instituição"),
+        "account": _income_raw_field(raw_payload, "Conta"),
+        "status": _income_pending_status(row),
+        "reason": row["reason"],
+        "review_id": row["review_id"],
+        "candidate_asset_ids": row["candidate_asset_ids"],
+        "asset_id": row["asset_id"],
+        "ledger_event_id": row["ledger_event_id"],
+        "raw_payload": row["raw_payload"],
+    }
+
+
+def list_income_pendings(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    status: str = "pending",
+) -> list[dict]:
+    conditions = ["i.portfolio_id = ?"]
+    params: list[object] = [portfolio_id]
+    if status == "pending":
+        conditions.append("i.status = ?")
+        params.append(B3IncomeEventStatus.REVIEW.value)
+    elif status == "resolved":
+        conditions.append("i.status NOT IN (?, ?)")
+        params.extend([B3IncomeEventStatus.REVIEW.value, B3IncomeEventStatus.DISCARDED.value])
+        conditions.append("i.asset_id IS NOT NULL")
+    elif status == "discarded":
+        conditions.append("i.status = ?")
+        params.append(B3IncomeEventStatus.DISCARDED.value)
+    elif status != "all":
+        raise ValueError("Status de pendencia B3 invalido.")
+    rows = conn.execute(
+        f"""
+        SELECT
+            i.id,
+            i.import_id,
+            i.portfolio_id,
+            i.asset_id,
+            i.source_row,
+            i.payment_date,
+            i.event_type,
+            i.product,
+            i.ticker,
+            i.quantity,
+            i.unit_price,
+            i.net_value,
+            i.status AS income_status,
+            i.ledger_event_id,
+            i.review_id,
+            i.raw_payload,
+            m.reference_month,
+            m.filename,
+            r.reason,
+            r.candidate_asset_ids
+        FROM b3_income_events i
+        JOIN b3_monthly_imports m ON m.id = i.import_id
+        LEFT JOIN asset_match_reviews r ON r.id = i.review_id
+        WHERE {' AND '.join(conditions)}
+        ORDER BY m.reference_month DESC, i.payment_date DESC, i.id DESC
+        """,
+        params,
+    ).fetchall()
+    return [_income_pending_response(row) for row in rows]
+
+
+def _get_income_for_decision(conn: sqlite3.Connection, income_id: int, portfolio_id: int | None = None) -> sqlite3.Row | None:
+    conditions = ["i.id = ?"]
+    params: list[object] = [income_id]
+    if portfolio_id is not None:
+        conditions.append("i.portfolio_id = ?")
+        params.append(portfolio_id)
+    return conn.execute(
+        f"""
+        SELECT i.*, m.reference_month, m.filename, r.reason, r.candidate_asset_ids,
+               i.status AS income_status
+        FROM b3_income_events i
+        JOIN b3_monthly_imports m ON m.id = i.import_id
+        LEFT JOIN asset_match_reviews r ON r.id = i.review_id
+        WHERE {' AND '.join(conditions)}
+        """,
+        params,
+    ).fetchone()
+
+
+def resolve_income_pending(conn: sqlite3.Connection, income_id: int, asset_id: int) -> dict:
+    income = _get_income_for_decision(conn, income_id)
+    if not income:
+        raise ValueError("Pendencia B3 nao encontrada.")
+    if income["income_status"] == B3IncomeEventStatus.DISCARDED.value:
+        raise ValueError("Pendencia B3 descartada nao pode ser resolvida.")
+    if income["income_status"] != B3IncomeEventStatus.REVIEW.value:
+        raise ValueError("Pendencia B3 ja foi resolvida.")
+    asset = asset_service.get_asset(conn, asset_id)
+    if not asset or asset.get("merged_into_asset_id"):
+        raise ValueError("Ativo destino nao encontrado ou esta mesclado.")
+
+    ledger_event_id = income["ledger_event_id"]
+    status = B3IncomeEventStatus.IMPORTED.value
+    if _is_amortization(income["event_type"]):
+        if ledger_event_id:
+            raise ValueError("Pendencia B3 ja possui evento ledger vinculado.")
+        ledger_event_id, _duplicate_reason = _auto_create_amortization(
+            conn,
+            income["portfolio_id"],
+            asset_id,
+            income["payment_date"],
+            income["net_value"] or "0",
+        )
+        status = B3IncomeEventStatus.LEDGER_EVENT_CREATED.value
+
+    ticker = _optional_ticker(_get_current_ticker(conn, asset_id) or income["ticker"])
+    conn.execute(
+        """
+        UPDATE b3_income_events
+        SET asset_id = ?,
+            ticker = ?,
+            status = ?,
+            ledger_event_id = COALESCE(ledger_event_id, ?),
+            updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (asset_id, ticker, status, ledger_event_id, income_id),
+    )
+    if income["review_id"]:
+        asset_service.resolve_match_review(conn, income["review_id"])
+    updated = _get_income_for_decision(conn, income_id)
+    _upsert_income_decision(conn, updated, asset_id)
+    return _income_pending_response(updated)
+
+
+def discard_income_pending(conn: sqlite3.Connection, income_id: int) -> dict:
+    income = _get_income_for_decision(conn, income_id)
+    if not income:
+        raise ValueError("Pendencia B3 nao encontrada.")
+    if income["ledger_event_id"]:
+        raise ValueError("Pendencia B3 com evento ledger vinculado nao pode ser descartada.")
+    if income["income_status"] != B3IncomeEventStatus.REVIEW.value:
+        raise ValueError("Apenas pendencias B3 em aberto podem ser descartadas.")
+    conn.execute(
+        """
+        UPDATE b3_income_events
+        SET status = ?, updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (B3IncomeEventStatus.DISCARDED.value, income_id),
+    )
+    if income["review_id"]:
+        asset_service.resolve_match_review(conn, income["review_id"])
+    updated = _get_income_for_decision(conn, income_id)
+    return _income_pending_response(updated)
 
 
 def _ledger_amortization_exists(conn: sqlite3.Connection, portfolio_id: int, asset_id: int, payment_date: str) -> bool:
@@ -942,6 +1264,7 @@ def _process_income_sheet(
     *,
     import_id: int,
     portfolio_id: int,
+    reference_month: str,
     fixed_income_positions: list[dict] | None = None,
 ) -> dict:
     fixed_income_positions = fixed_income_positions or []
@@ -992,11 +1315,32 @@ def _process_income_sheet(
         review_id = None
         status = B3IncomeEventStatus.IMPORTED.value
         ledger_event_id = None
+        income_values = {
+            "import_id": import_id,
+            "portfolio_id": portfolio_id,
+            "asset_id": asset_id,
+            "source_row": row_idx,
+            "payment_date": payment_date,
+            "event_type": event_type,
+            "product": product,
+            "ticker": ticker,
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "net_value": net_value,
+            "raw_payload": row,
+        }
         prefix = _norm_text(product).split(" - ")[0].strip()
         summary_only = (
             prefix in _SUMMARY_ONLY_PREFIXES
             or (not ticker and inferred_class not in {AssetClass.DEBENTURE, AssetClass.TESOURO_DIRETO})
         )
+        if not asset_id:
+            decision = _find_income_decision(conn, income_values, reference_month)
+            if decision:
+                asset_id = decision["resolved_asset_id"]
+                income_values["asset_id"] = asset_id
+                ticker = _optional_ticker(_get_current_ticker(conn, asset_id) or ticker)
+                income_values["ticker"] = ticker
         if not asset_id and summary_only:
             status = B3IncomeEventStatus.SUMMARY_ONLY.value
         elif not asset_id:
@@ -1036,26 +1380,8 @@ def _process_income_sheet(
             except Exception as exc:
                 status = B3IncomeEventStatus.LEDGER_ERROR.value
                 result["errors"].append(f"Proventos Recebidos linha {row_idx}: amortizacao nao lancada no ledger: {exc}")
-        inserted = _upsert_income(
-            conn,
-            {
-                "import_id": import_id,
-                "portfolio_id": portfolio_id,
-                "asset_id": asset_id,
-                "source_row": row_idx,
-                "payment_date": payment_date,
-                "event_type": event_type,
-                "product": product,
-                "ticker": ticker,
-                "quantity": quantity,
-                "unit_price": unit_price,
-                "net_value": net_value,
-                "status": status,
-                "ledger_event_id": ledger_event_id,
-                "review_id": review_id,
-                "raw_payload": row,
-            },
-        )
+        income_values.update({"status": status, "ledger_event_id": ledger_event_id, "review_id": review_id})
+        inserted = _upsert_income(conn, income_values)
         if inserted:
             result["imported_incomes"] += 1
         else:
@@ -1136,6 +1462,7 @@ def import_b3_monthly_file(conn: sqlite3.Connection, portfolio_id: int, source: 
                 ws,
                 import_id=import_id,
                 portfolio_id=portfolio_id,
+                reference_month=reference_month,
                 fixed_income_positions=fixed_income_positions,
             ),
         )
@@ -1210,7 +1537,12 @@ def import_b3_monthly_batch(conn: sqlite3.Connection, portfolio_id: int, files: 
     return response
 
 
-def sanitize_b3_monthly_import(conn: sqlite3.Connection, portfolio_id: int, reference_month: str) -> dict:
+def sanitize_b3_monthly_import(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    reference_month: str,
+    remove_manual_resolutions: bool = False,
+) -> dict:
     if not re.fullmatch(r"\d{4}-\d{2}", reference_month or ""):
         raise ValueError("Mes de referencia deve seguir o formato YYYY-MM.")
     _year, month = (int(part) for part in reference_month.split("-"))
@@ -1234,6 +1566,7 @@ def sanitize_b3_monthly_import(conn: sqlite3.Connection, portfolio_id: int, refe
             "market_prices_removed": 0,
             "income_events_removed": 0,
             "ledger_events_cancelled": 0,
+            "manual_resolutions_removed": 0,
         }
 
     placeholders = ",".join("?" for _ in import_ids)
@@ -1256,10 +1589,35 @@ def sanitize_b3_monthly_import(conn: sqlite3.Connection, portfolio_id: int, refe
         import_ids,
     ).fetchall()
     ledger_event_ids = [row["ledger_event_id"] for row in ledger_rows]
+    review_rows = conn.execute(
+        f"""
+        SELECT DISTINCT review_id
+        FROM (
+            SELECT review_id FROM b3_income_events WHERE import_id IN ({placeholders}) AND review_id IS NOT NULL
+            UNION
+            SELECT review_id FROM b3_market_prices WHERE import_id IN ({placeholders}) AND review_id IS NOT NULL
+        )
+        ORDER BY review_id
+        """,
+        [*import_ids, *import_ids],
+    ).fetchall()
 
     cancelled = []
     if ledger_event_ids:
         cancelled = event_service.delete_events_bulk(conn, ledger_event_ids)
+    for row in review_rows:
+        asset_service.resolve_match_review(conn, row["review_id"])
+
+    manual_resolutions_removed = 0
+    if remove_manual_resolutions:
+        cur = conn.execute(
+            """
+            DELETE FROM b3_income_resolution_decisions
+            WHERE portfolio_id = ? AND reference_month = ?
+            """,
+            (portfolio_id, reference_month),
+        )
+        manual_resolutions_removed = cur.rowcount if cur.rowcount is not None else 0
 
     conn.execute(
         f"DELETE FROM b3_monthly_imports WHERE id IN ({placeholders})",
@@ -1273,4 +1631,5 @@ def sanitize_b3_monthly_import(conn: sqlite3.Connection, portfolio_id: int, refe
         "market_prices_removed": market_prices_removed,
         "income_events_removed": income_events_removed,
         "ledger_events_cancelled": len(cancelled),
+        "manual_resolutions_removed": manual_resolutions_removed,
     }

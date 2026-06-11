@@ -169,6 +169,7 @@ export default function AssetManagement() {
   const { activePortfolioId, portfolioList } = useContext(AppContext);
   const [assetList, setAssetList] = useState([]);
   const [reviews, setReviews] = useState([]);
+  const [b3IncomePendings, setB3IncomePendings] = useState([]);
   const [assetAlerts, setAssetAlerts] = useState([]);
   const [schwabReviews, setSchwabReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -183,7 +184,11 @@ export default function AssetManagement() {
   const [sanitizeOpen, setSanitizeOpen] = useState(false);
   const [sanitizeMonth, setSanitizeMonth] = useState('');
   const [sanitizeConfirm, setSanitizeConfirm] = useState('');
+  const [preserveManualResolutions, setPreserveManualResolutions] = useState(true);
   const [sanitizing, setSanitizing] = useState(false);
+  const [selectedB3IncomePending, setSelectedB3IncomePending] = useState(null);
+  const [b3IncomeAssetId, setB3IncomeAssetId] = useState('');
+  const [resolvingB3Income, setResolvingB3Income] = useState(false);
   const [schwabAssetMap, setSchwabAssetMap] = useState({});
   const navigate = useNavigate();
   const searchInputRef = useRef(null);
@@ -192,14 +197,17 @@ export default function AssetManagement() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [assets, pending, alerts, schwabPending] = await Promise.all([
+      const [assets, pending, b3Pending, alerts, schwabPending] = await Promise.all([
         assetsApi.list(null, includeMerged),
         assetsApi.reviews(),
+        activePortfolioId ? b3Api.incomePendings({ portfolioId: activePortfolioId }) : Promise.resolve([]),
         assetsApi.alerts({ portfolioId: activePortfolioId }),
         schwabApi.reviews({ portfolioId: activePortfolioId }),
       ]);
+      const b3IncomeReviewIds = new Set(b3Pending.map((item) => item.review_id).filter(Boolean));
       setAssetList(assets);
-      setReviews(pending);
+      setReviews(pending.filter((review) => !b3IncomeReviewIds.has(review.id)));
+      setB3IncomePendings(b3Pending);
       setAssetAlerts(alerts);
       setSchwabReviews(schwabPending);
     } catch (err) {
@@ -319,13 +327,15 @@ export default function AssetManagement() {
       const result = await b3Api.sanitizeMonthlyImport({
         portfolioId: activePortfolioId,
         referenceMonth: sanitizeMonth,
+        removeManualResolutions: !preserveManualResolutions,
       });
       toast.success(
-        `Importacao B3 ${result.reference_month} removida: ${result.imports_removed} arquivo(s), ${result.market_prices_removed} preco(s), ${result.income_events_removed} provento(s), ${result.ledger_events_cancelled} evento(s) cancelado(s).`
+        `Importacao B3 ${result.reference_month} removida: ${result.imports_removed} arquivo(s), ${result.market_prices_removed} preco(s), ${result.income_events_removed} provento(s), ${result.ledger_events_cancelled} evento(s) cancelado(s), ${result.manual_resolutions_removed || 0} vinculo(s) manual(is) removido(s).`
       );
       setSanitizeOpen(false);
       setSanitizeMonth('');
       setSanitizeConfirm('');
+      setPreserveManualResolutions(true);
       await load();
     } catch (err) {
       toast.error(err.message || 'Falha ao sanitizar importacao B3.');
@@ -342,6 +352,40 @@ export default function AssetManagement() {
       await openAsset(asset);
     } catch (err) {
       toast.error(err.message || 'Falha ao criar ativo a partir da revisão.');
+    }
+  };
+
+  const openB3IncomeResolve = (pending) => {
+    setSelectedB3IncomePending(pending);
+    setB3IncomeAssetId('');
+  };
+
+  const discardB3IncomePending = async (pending) => {
+    try {
+      await b3Api.discardIncomePending(pending.id);
+      toast.success('Pendência de provento B3 descartada.');
+      await load();
+    } catch (err) {
+      toast.error(err.message || 'Falha ao descartar pendência B3.');
+    }
+  };
+
+  const resolveB3IncomePending = async () => {
+    if (!selectedB3IncomePending || !b3IncomeAssetId) {
+      toast.error('Selecione o ativo destino.');
+      return;
+    }
+    setResolvingB3Income(true);
+    try {
+      await b3Api.resolveIncomePending(selectedB3IncomePending.id, { asset_id: Number(b3IncomeAssetId) });
+      toast.success('Provento B3 vinculado ao ativo.');
+      setSelectedB3IncomePending(null);
+      setB3IncomeAssetId('');
+      await load();
+    } catch (err) {
+      toast.error(err.message || 'Falha ao resolver pendência B3.');
+    } finally {
+      setResolvingB3Income(false);
     }
   };
 
@@ -521,6 +565,55 @@ export default function AssetManagement() {
                     </div>
                   </div>
                 )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {b3IncomePendings.length > 0 && (
+        <Card className="border-emerald-500/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="w-4 h-4 text-emerald-500" /> Proventos B3 Pendentes
+            </CardTitle>
+            <CardDescription>Proventos importados da B3 com valor preservado, aguardando vínculo manual com um ativo real.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {b3IncomePendings.map((pending) => (
+              <div key={pending.id} className="flex flex-col gap-3 rounded-lg border p-3">
+                <div className="flex flex-col gap-1 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{pending.ticker || 'Código pendente'}</span>
+                    <Badge variant="secondary">{pending.event_type}</Badge>
+                    <span className="text-muted-foreground">{formatDate(pending.payment_date)}</span>
+                    <span className="font-medium">R$ {formatMoney(pending.net_value)}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{pending.product || 'Produto B3 sem descrição.'}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Origem: B3 {pending.reference_month} · {pending.filename} · linha {pending.source_row}
+                    {pending.institution ? ` · ${pending.institution}` : ''}{pending.account ? ` / ${pending.account}` : ''}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{pending.reason || 'Provento B3 nao resolvido com seguranca.'}</p>
+                  {parseCandidateIds(pending.candidate_asset_ids).length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Candidato(s) existente(s): {parseCandidateIds(pending.candidate_asset_ids).map((id) => `#${id}`).join(', ')}
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {parseCandidateIds(pending.candidate_asset_ids).map((id) => (
+                    <Button key={id} size="sm" variant="outline" onClick={() => navigate(`/assets/${id}`)}>
+                      <ExternalLink className="w-4 h-4" /> Abrir #{id}
+                    </Button>
+                  ))}
+                  <Button size="sm" variant="secondary" onClick={() => openB3IncomeResolve(pending)}>
+                    <GitMerge className="w-4 h-4" /> Vincular ativo
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => discardB3IncomePending(pending)}>
+                    <Check className="w-4 h-4" /> Descartar pendência
+                  </Button>
+                </div>
               </div>
             ))}
           </CardContent>
@@ -786,11 +879,54 @@ export default function AssetManagement() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={selectedB3IncomePending !== null} onOpenChange={(open) => {
+        if (!open && !resolvingB3Income) {
+          setSelectedB3IncomePending(null);
+          setB3IncomeAssetId('');
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          {selectedB3IncomePending && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Vincular provento B3 a ativo</DialogTitle>
+                <DialogDescription>Confira os dados originais da B3 antes de confirmar o ativo econômico correto.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <div className="grid gap-2 text-sm md:grid-cols-2">
+                    <div><span className="text-xs uppercase text-muted-foreground">Produto B3</span><p className="font-medium">{selectedB3IncomePending.product || '-'}</p></div>
+                    <div><span className="text-xs uppercase text-muted-foreground">Código/ticker</span><p className="font-medium">{selectedB3IncomePending.ticker || '-'}</p></div>
+                    <div><span className="text-xs uppercase text-muted-foreground">Evento</span><p className="font-medium">{selectedB3IncomePending.event_type}</p></div>
+                    <div><span className="text-xs uppercase text-muted-foreground">Pagamento</span><p className="font-medium">{formatDate(selectedB3IncomePending.payment_date)}</p></div>
+                    <div><span className="text-xs uppercase text-muted-foreground">Valor importado</span><p className="font-medium">R$ {formatMoney(selectedB3IncomePending.net_value)}</p></div>
+                    <div><span className="text-xs uppercase text-muted-foreground">Origem</span><p className="font-medium">{selectedB3IncomePending.reference_month} · linha {selectedB3IncomePending.source_row}</p></div>
+                    <div><span className="text-xs uppercase text-muted-foreground">Instituição</span><p className="font-medium">{selectedB3IncomePending.institution || '-'}</p></div>
+                    <div><span className="text-xs uppercase text-muted-foreground">Conta</span><p className="font-medium">{selectedB3IncomePending.account || '-'}</p></div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Ativo destino</Label>
+                  <AssetCombobox options={assetList.filter((asset) => !asset.merged_into_asset_id)} value={b3IncomeAssetId} onChange={setB3IncomeAssetId} />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setSelectedB3IncomePending(null)} disabled={resolvingB3Income}>Cancelar</Button>
+                <Button onClick={resolveB3IncomePending} disabled={resolvingB3Income || !b3IncomeAssetId}>
+                  {resolvingB3Income ? <><Loader2 className="w-4 h-4 animate-spin" /> Vinculando...</> : <><Check className="w-4 h-4" /> Confirmar vínculo</>}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={sanitizeOpen} onOpenChange={(open) => {
         if (!open && !sanitizing) {
           setSanitizeOpen(false);
           setSanitizeMonth('');
           setSanitizeConfirm('');
+          setPreserveManualResolutions(true);
         }
       }}>
         <DialogContent>
@@ -802,8 +938,20 @@ export default function AssetManagement() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-              Esta acao remove fisicamente os registros B3 do mes. Eventos manuais nao serao alterados.
+              Esta acao remove fisicamente os registros B3 do mes e cancela eventos automaticos desse import. Eventos manuais nao serao alterados.
             </div>
+            <div className="flex items-start justify-between gap-3 rounded-lg border p-3">
+              <div className="space-y-1">
+                <Label htmlFor="preserve-manual-resolutions">Preservar vínculos manuais</Label>
+                <p className="text-xs text-muted-foreground">Mantém decisões como HGLG13 → HGLG11 para reaplicar automaticamente em uma reimportação futura.</p>
+              </div>
+              <Switch id="preserve-manual-resolutions" checked={preserveManualResolutions} onCheckedChange={setPreserveManualResolutions} disabled={sanitizing} />
+            </div>
+            {!preserveManualResolutions && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                Os vínculos manuais resolvidos para este mês também serão removidos e precisarão ser refeitos se o arquivo for reimportado.
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="sanitize-month">Mes da importacao</Label>
               <Input
