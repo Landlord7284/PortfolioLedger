@@ -709,6 +709,8 @@ def get_dashboard(
     asset_ids = sorted(grouped)
     price_lookup = _price_lookup(conn, portfolio_id, months, asset_ids)
     equity_curve = _build_equity_curve(grouped, months, price_lookup, asset_meta)
+    net_contribution_month_count = len(equity_curve)
+    net_contribution_total = sum((_d(point["net_contribution"]) for point in equity_curve), ZERO)
     realized_result = _realized_result(grouped, period_start, period_end)
     income_total, income_series, income_month_count = _income_period(conn, portfolio_id, asset_class, start_month, end_month)
 
@@ -743,6 +745,8 @@ def get_dashboard(
             "income": _money(income_total),
             "income_monthly_avg": _money(income_total / Decimal(income_month_count or 1)),
             "income_month_count": income_month_count,
+            "net_contribution_monthly_avg": _money(net_contribution_total / Decimal(net_contribution_month_count or 1)),
+            "net_contribution_month_count": net_contribution_month_count,
             "income_period_start": period_start,
             "income_period_end": period_end,
         },

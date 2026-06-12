@@ -78,7 +78,7 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
         fii = asset_service.create_asset(conn, AssetClass.FII.value, "KNRI11", market="BR", name="Kinea", segment="Logística")
 
         event_service.create_event(conn, portfolio["id"], stock["id"], EventType.COMPRA.value, "2025-01-10", "100", "1000")
-        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2025-02-10", "10", "900")
+        event_service.create_event(conn, portfolio["id"], fii["id"], EventType.COMPRA.value, "2026-02-10", "10", "900")
         event_service.create_event(conn, portfolio["id"], stock["id"], EventType.VENDA.value, "2026-03-15", "40", "600")
 
         import_id = _import_id(conn, portfolio["id"], "2026-05")
@@ -96,6 +96,8 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
     assert report["summary"]["income"] == "120.00"
     assert report["summary"]["income_monthly_avg"] == "24.00"
     assert report["summary"]["income_month_count"] == 5
+    assert report["summary"]["net_contribution_monthly_avg"] == "60.00"
+    assert report["summary"]["net_contribution_month_count"] == 5
     assert report["summary"]["market_value_month"] == "2026-05"
     assert report["summary"]["market_value_uses_cost_fallback"] is True
     assert report["summary"]["market_value_cost_fallback_count"] == 1
@@ -128,6 +130,8 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
     assert stock_only["summary"]["market_value"] == "720.00"
     assert stock_only["summary"]["cost_basis"] == "600.00"
     assert stock_only["summary"]["realized_result"] == "200.00"
+    assert stock_only["summary"]["net_contribution_monthly_avg"] == "-120.00"
+    assert stock_only["summary"]["net_contribution_month_count"] == 5
     assert stock_only["summary"]["market_value_uses_cost_fallback"] is False
     assert stock_only["allocation"] == [
         {

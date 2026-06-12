@@ -991,6 +991,8 @@ class DashboardSummary(BaseModel):
     income: str
     income_monthly_avg: str
     income_month_count: int
+    net_contribution_monthly_avg: str
+    net_contribution_month_count: int
     income_period_start: Optional[str] = None
     income_period_end: Optional[str] = None
 

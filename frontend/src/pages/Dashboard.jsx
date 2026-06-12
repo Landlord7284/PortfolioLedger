@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ReferenceLine, XAxis, YAxis } from 'recharts';
 import { AppContext } from '../App';
 import { dashboard as dashboardApi, positions as posApi, schwab as schwabApi } from '../api/client';
 import EventForm from '../components/EventForm';
@@ -428,13 +428,14 @@ function MoneyTooltip({ active, payload, label, hideValues, labelFormatter }) {
   );
 }
 
-function ContributionTooltip({ active, payload, hideValues }) {
+function ContributionTooltip({ active, payload, hideValues, monthlyAverage }) {
   if (!active || !payload?.length) return null;
   const row = payload[0]?.payload || {};
   const items = [
     { label: 'Aportes', value: row.contributions_in, color: 'var(--color-contributions_in)' },
     { label: 'Resgates', value: row.contributions_out, color: 'var(--color-contributions_out)' },
     { label: 'Líquido', value: row.net_contribution, color: 'var(--color-net_contribution)' },
+    { label: 'Média', value: monthlyAverage, color: 'var(--muted-foreground)' },
   ];
 
   return (
@@ -1248,7 +1249,19 @@ export default function Dashboard() {
                               <CartesianGrid vertical={false} />
                               <XAxis dataKey="monthLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={18} />
                               <YAxis {...MONEY_AXIS_PROPS} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
-                              <ChartTooltip content={<ContributionTooltip hideValues={hideValues} />} />
+                              <ChartTooltip content={<ContributionTooltip hideValues={hideValues} monthlyAverage={summary.net_contribution_monthly_avg} />} />
+                              <ReferenceLine
+                                y={toNumber(summary.net_contribution_monthly_avg)}
+                                stroke="var(--muted-foreground)"
+                                strokeDasharray="4 4"
+                                strokeWidth={1.5}
+                                label={{
+                                  value: `Média ${formatCompactMoney(summary.net_contribution_monthly_avg, hideValues)}`,
+                                  position: 'insideTopRight',
+                                  fill: 'var(--muted-foreground)',
+                                  fontSize: 12,
+                                }}
+                              />
                               <Bar name="Aporte líquido mensal" dataKey="net_contribution" radius={[4, 4, 0, 0]}>
                                 {equityData.map((row) => (
                                   <Cell
