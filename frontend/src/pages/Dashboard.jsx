@@ -327,7 +327,7 @@ function SortableHead({ sortKey, sort, onSort, children, align = 'left' }) {
       <Button
         variant="ghost"
         size="sm"
-        className={`${alignmentClass} h-8 px-2 text-xs font-medium text-muted-foreground hover:text-foreground`}
+        className={`${alignmentClass} h-8 px-2 text-sm font-medium text-foreground hover:text-foreground`}
         onClick={() => onSort(sortKey)}
       >
         {children}
@@ -1559,7 +1559,7 @@ export default function Dashboard() {
             <Card className="overflow-hidden">
               <div className="max-h-[calc(100vh-18rem)] overflow-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-background">
+                  <TableHeader className="sticky top-0 z-10 bg-card">
                     <TableRow>
                       <SortableHead sortKey="ticker" sort={sort} onSort={handleSort}>Ticker</SortableHead>
                       <TableHead>Classe</TableHead>

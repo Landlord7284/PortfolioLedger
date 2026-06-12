@@ -185,7 +185,7 @@ export default function AssetsAndRightsReport() {
           <Button
             variant={!filterClass ? 'default' : 'outline'}
             size="sm"
-            className="text-sm"
+            className="text-sm text-foreground hover:text-foreground"
             onClick={() => setFilterClass('')}
           >
             Todos
@@ -195,7 +195,7 @@ export default function AssetsAndRightsReport() {
               key={assetClass}
               variant={filterClass === assetClass ? 'default' : 'outline'}
               size="sm"
-              className="text-sm"
+              className="text-sm text-foreground hover:text-foreground"
               onClick={() => setFilterClass(assetClass)}
             >
               {assetClass}

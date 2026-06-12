@@ -101,7 +101,7 @@ function SortableHead({ sortKey, sort, onSort, children }) {
       <Button
         variant="ghost"
         size="sm"
-        className="-ml-3 h-8 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+        className="-ml-3 h-8 px-2 text-sm font-medium text-foreground hover:text-foreground"
         onClick={() => onSort(sortKey)}
       >
         {children}
@@ -922,9 +922,9 @@ export default function AssetManagement() {
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Button variant={!filterClass ? 'default' : 'outline'} size="sm" className="text-sm" onClick={() => setFilterClass('')}>Todos</Button>
+          <Button variant={!filterClass ? 'default' : 'outline'} size="sm" className="text-sm text-foreground hover:text-foreground" onClick={() => setFilterClass('')}>Todos</Button>
           {ASSET_CLASSES.map((assetClass) => (
-            <Button key={assetClass} variant={filterClass === assetClass ? 'default' : 'outline'} size="sm" className="text-sm" onClick={() => setFilterClass(assetClass)}>
+            <Button key={assetClass} variant={filterClass === assetClass ? 'default' : 'outline'} size="sm" className="text-sm text-foreground hover:text-foreground" onClick={() => setFilterClass(assetClass)}>
               {assetClass}
             </Button>
           ))}
