@@ -9,7 +9,7 @@ import { formatMoney, formatQuantity } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip } from '@/components/ui/chart';
 import { Input } from '@/components/ui/input';
 import { Kbd } from '@/components/ui/kbd';
@@ -27,6 +27,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -49,6 +50,8 @@ const CHART_DISPLAY_OPTIONS = [
   { value: 'value', label: 'Valor (R$)' },
   { value: 'share', label: '% do total' },
 ];
+const CHART_VIEW_GENERAL = 'general';
+const CHART_VIEW_ASSET = 'asset';
 
 const CHART_COLORS = [
   'var(--chart-1)',
@@ -185,12 +188,6 @@ function othersLabelForGroup(groupBy) {
   return 'Outros';
 }
 
-function tableTitle(year, month) {
-  if (!year || year === ALL_FILTER_VALUE) return 'Detalhamento — Todos os meses';
-  if (!month || month === ALL_FILTER_VALUE) return `Detalhamento — ${year}`;
-  return `Detalhamento — ${formatMonthName(month)}/${year}`;
-}
-
 function getPaginationItems(currentPage, pageCount) {
   if (pageCount <= 7) return Array.from({ length: pageCount }, (_, index) => index + 1);
 
@@ -310,6 +307,7 @@ export default function Proventos() {
   const [activeAssetSearchMatchIndex, setActiveAssetSearchMatchIndex] = useState(0);
   const [tableEventType, setTableEventType] = useState(ALL_FILTER_VALUE);
   const [tablePage, setTablePage] = useState(1);
+  const [chartView, setChartView] = useState(CHART_VIEW_GENERAL);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState({ key: 'payment_date', direction: 'desc' });
@@ -317,10 +315,18 @@ export default function Proventos() {
 
   const activePortfolio = portfolioList.find((portfolio) => portfolio.id === activePortfolioId);
   const { period, chartGroupBy, chartDisplay } = proventosFilters;
+  const hasSelectedChartAsset = tableAssetId !== ALL_FILTER_VALUE;
+  const effectiveChartGroupBy = chartView === CHART_VIEW_ASSET ? 'event_type' : chartGroupBy;
 
   useEffect(() => {
     localStorage.setItem(PROVENTOS_FILTER_STORAGE_KEY, JSON.stringify(proventosFilters));
   }, [proventosFilters]);
+
+  useEffect(() => {
+    if (!hasSelectedChartAsset && chartView === CHART_VIEW_ASSET) {
+      setChartView(CHART_VIEW_GENERAL);
+    }
+  }, [chartView, hasSelectedChartAsset]);
 
   useEffect(() => {
     if (!activePortfolioId) return;
@@ -332,7 +338,8 @@ export default function Proventos() {
         const data = await b3Api.incomes({
           portfolioId: activePortfolioId,
           period,
-          chartGroupBy,
+          assetId: chartView === CHART_VIEW_ASSET && hasSelectedChartAsset ? tableAssetId : null,
+          chartGroupBy: effectiveChartGroupBy,
           tableYear: tableYear || null,
           tableMonth: tableMonth || null,
           tableAssetClass: tableAssetClass === ALL_FILTER_VALUE ? null : tableAssetClass,
@@ -355,7 +362,7 @@ export default function Proventos() {
     return () => {
       active = false;
     };
-  }, [activePortfolioId, period, chartGroupBy, tableYear, tableMonth, tableAssetClass, tableAssetId, tableEventType]);
+  }, [activePortfolioId, period, chartView, effectiveChartGroupBy, hasSelectedChartAsset, tableYear, tableMonth, tableAssetClass, tableAssetId, tableEventType]);
 
   const monthlyChartSegments = useMemo(() => (
     (report?.chart.months || []).map((month) => {
@@ -399,7 +406,7 @@ export default function Proventos() {
 
     if (monthlyChartSegments.some((month) => month.othersValue > 0)) {
       segments.push({
-        key: othersLabelForGroup(chartGroupBy),
+        key: othersLabelForGroup(effectiveChartGroupBy),
         dataKey: 'segment_others',
         color: CHART_COLORS[TOP_SEGMENT_LIMIT],
         isOthers: true,
@@ -407,7 +414,7 @@ export default function Proventos() {
     }
 
     return segments;
-  }, [monthlyChartSegments, chartGroupBy]);
+  }, [monthlyChartSegments, effectiveChartGroupBy]);
 
   const chartConfig = useMemo(() => (
     chartSegments.reduce((config, segment) => {
@@ -435,7 +442,7 @@ export default function Proventos() {
             isOthers: false,
           })),
           ...(month.othersValue > 0 ? [{
-            key: othersSegment?.key || othersLabelForGroup(chartGroupBy),
+            key: othersSegment?.key || othersLabelForGroup(effectiveChartGroupBy),
             value: month.othersValue,
             share: total ? (month.othersValue / total) * 100 : 0,
             color: othersSegment?.color,
@@ -450,7 +457,7 @@ export default function Proventos() {
       });
       return row;
     });
-  }, [monthlyChartSegments, chartSegments, chartDisplay, chartGroupBy]);
+  }, [monthlyChartSegments, chartSegments, chartDisplay, effectiveChartGroupBy]);
 
   const yearOptions = report?.filters.years || [];
   const classOptions = report?.filters.asset_classes || [];
@@ -632,6 +639,12 @@ export default function Proventos() {
   const handleChartSegmentClick = (row, segment) => {
     if (!row || !segment) return;
     applyMonthFilterFromChart(row.month);
+    if (chartView === CHART_VIEW_ASSET) {
+      setTableAssetClass(ALL_FILTER_VALUE);
+      setTableEventType(segment.isOthers ? ALL_FILTER_VALUE : segment.key);
+      return;
+    }
+
     setTableAssetClass(ALL_FILTER_VALUE);
     setTableAssetId(ALL_FILTER_VALUE);
     setAssetSearchQuery('');
@@ -649,7 +662,6 @@ export default function Proventos() {
     }
   };
 
-  const currentTableTitle = tableTitle(selectTableYear, selectTableMonth);
   const rowCount = sortedRows.length;
   const tableCountLabel = rowCount > 0
     ? `Mostrando ${currentPageStart} a ${currentPageEnd} de ${rowCount} recebimentos`
@@ -707,9 +719,23 @@ export default function Proventos() {
       <Card className="overflow-hidden">
         <CardHeader className="border-b">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle className="text-base">Evolução mensal (R$)</CardTitle>
-              <CardDescription>Clique em uma barra ou segmento para atualizar o detalhamento.</CardDescription>
+            <div className="overflow-x-auto pb-1">
+              <Tabs
+                value={chartView}
+                onValueChange={(value) => {
+                  if (value === CHART_VIEW_ASSET && !hasSelectedChartAsset) return;
+                  setChartView(value);
+                }}
+              >
+                <TabsList className="min-w-max justify-start">
+                  <TabsTrigger value={CHART_VIEW_GENERAL} className="h-9 flex-none px-3">
+                    Evolução Mensal
+                  </TabsTrigger>
+                  <TabsTrigger value={CHART_VIEW_ASSET} className="h-9 flex-none px-3" disabled={!hasSelectedChartAsset}>
+                    Ativo Individual
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -727,21 +753,28 @@ export default function Proventos() {
                   </Button>
                 ))}
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-sm font-medium">Agrupar por:</span>
-                {CHART_GROUP_OPTIONS.map((option) => (
-                  <Button
-                    key={option.value}
-                    type="button"
-                    variant={chartGroupBy === option.value ? 'default' : 'outline'}
-                    size="sm"
-                    className="text-sm"
-                    onClick={() => setProventosFilters((current) => ({ ...current, chartGroupBy: option.value }))}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
+              {chartView === CHART_VIEW_ASSET ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-sm font-medium">Agrupar por:</span>
+                  <Badge variant="secondary">Tipo</Badge>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-sm font-medium">Agrupar por:</span>
+                  {CHART_GROUP_OPTIONS.map((option) => (
+                    <Button
+                      key={option.value}
+                      type="button"
+                      variant={chartGroupBy === option.value ? 'default' : 'outline'}
+                      size="sm"
+                      className="text-sm"
+                      onClick={() => setProventosFilters((current) => ({ ...current, chartGroupBy: option.value }))}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -804,7 +837,6 @@ export default function Proventos() {
       <Card className="overflow-hidden">
         <CardHeader className="border-b">
           <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
-            <CardTitle className="text-base">{currentTableTitle}</CardTitle>
             <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap 2xl:w-auto 2xl:items-end 2xl:justify-end">
               <div className="flex w-full flex-col gap-1 sm:w-[150px]">
                 <Label className="text-xs text-muted-foreground">Classe</Label>
