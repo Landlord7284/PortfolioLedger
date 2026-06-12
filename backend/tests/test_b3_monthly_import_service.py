@@ -292,6 +292,33 @@ def test_sanitize_b3_monthly_import_is_scoped_to_portfolio(tmp_path):
     assert remaining_prices == 1
 
 
+def test_list_b3_monthly_import_files_is_scoped_and_ordered(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        first = portfolio_service.create_portfolio(conn, "Principal")
+        second = portfolio_service.create_portfolio(conn, "Reserva")
+        for portfolio_id, filename, reference_month in [
+            (first["id"], "2025-10.xlsx", "2025-10"),
+            (first["id"], "2025-11-a.xlsx", "2025-11"),
+            (first["id"], "2025-11-b.xlsx", "2025-11"),
+            (second["id"], "2026-01.xlsx", "2026-01"),
+        ]:
+            conn.execute(
+                """
+                INSERT INTO b3_monthly_imports (portfolio_id, filename, reference_month, reference_date)
+                VALUES (?, ?, ?, ?)
+                """,
+                (portfolio_id, filename, reference_month, f"{reference_month}-28"),
+            )
+
+        files = b3_service.list_b3_monthly_import_files(conn, first["id"])
+
+    assert [item["filename"] for item in files] == ["2025-11-b.xlsx", "2025-11-a.xlsx", "2025-10.xlsx"]
+    assert {item["portfolio_id"] for item in files} == {first["id"]}
+
+
 def test_sanitize_b3_monthly_import_validates_reference_month(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)

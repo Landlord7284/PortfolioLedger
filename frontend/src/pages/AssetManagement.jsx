@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -213,8 +214,11 @@ export default function AssetManagement() {
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [sort, setSort] = useState({ key: 'id', direction: 'asc' });
   const [sanitizeOpen, setSanitizeOpen] = useState(false);
-  const [sanitizeMonth, setSanitizeMonth] = useState('');
-  const [sanitizeConfirm, setSanitizeConfirm] = useState('');
+  const [sanitizeFiles, setSanitizeFiles] = useState([]);
+  const [sanitizeFilesLoading, setSanitizeFilesLoading] = useState(false);
+  const [selectedSanitizeMonths, setSelectedSanitizeMonths] = useState(new Set());
+  const [expandedSanitizeYears, setExpandedSanitizeYears] = useState(new Set());
+  const [sanitizeConfirmed, setSanitizeConfirmed] = useState(false);
   const [preserveManualResolutions, setPreserveManualResolutions] = useState(true);
   const [sanitizing, setSanitizing] = useState(false);
   const [selectedB3IncomePending, setSelectedB3IncomePending] = useState(null);
@@ -252,6 +256,33 @@ export default function AssetManagement() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!sanitizeOpen || !activePortfolioId) return;
+
+    let active = true;
+    async function loadSanitizeFiles() {
+      setSanitizeFilesLoading(true);
+      try {
+        const files = await b3Api.monthlyImportFiles({ portfolioId: activePortfolioId });
+        if (!active) return;
+        setSanitizeFiles(files);
+        setExpandedSanitizeYears(files[0]?.reference_month ? new Set([files[0].reference_month.slice(0, 4)]) : new Set());
+      } catch (err) {
+        if (active) {
+          setSanitizeFiles([]);
+          toast.error(err.message || 'Falha ao carregar arquivos B3 importados.');
+        }
+      } finally {
+        if (active) setSanitizeFilesLoading(false);
+      }
+    }
+
+    loadSanitizeFiles();
+    return () => {
+      active = false;
+    };
+  }, [activePortfolioId, sanitizeOpen]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (event) => {
@@ -352,21 +383,41 @@ export default function AssetManagement() {
       toast.error('Selecione uma carteira ativa.');
       return;
     }
-    if (!/^\d{4}-\d{2}$/.test(sanitizeMonth) || sanitizeConfirm !== sanitizeMonth) return;
+    const months = [...selectedSanitizeMonths].sort();
+    if (months.length === 0 || !sanitizeConfirmed) return;
 
     setSanitizing(true);
     try {
-      const result = await b3Api.sanitizeMonthlyImport({
-        portfolioId: activePortfolioId,
-        referenceMonth: sanitizeMonth,
-        removeManualResolutions: !preserveManualResolutions,
+      const results = [];
+      for (const referenceMonth of months) {
+        const result = await b3Api.sanitizeMonthlyImport({
+          portfolioId: activePortfolioId,
+          referenceMonth,
+          removeManualResolutions: !preserveManualResolutions,
+        });
+        results.push(result);
+      }
+      const totals = results.reduce((acc, result) => ({
+        importsRemoved: acc.importsRemoved + result.imports_removed,
+        marketPricesRemoved: acc.marketPricesRemoved + result.market_prices_removed,
+        incomeEventsRemoved: acc.incomeEventsRemoved + result.income_events_removed,
+        ledgerEventsCancelled: acc.ledgerEventsCancelled + result.ledger_events_cancelled,
+        manualResolutionsRemoved: acc.manualResolutionsRemoved + (result.manual_resolutions_removed || 0),
+      }), {
+        importsRemoved: 0,
+        marketPricesRemoved: 0,
+        incomeEventsRemoved: 0,
+        ledgerEventsCancelled: 0,
+        manualResolutionsRemoved: 0,
       });
       toast.success(
-        `Importacao B3 ${result.reference_month} removida: ${result.imports_removed} arquivo(s), ${result.market_prices_removed} preco(s), ${result.income_events_removed} provento(s), ${result.ledger_events_cancelled} evento(s) cancelado(s), ${result.manual_resolutions_removed || 0} vinculo(s) manual(is) removido(s).`
+        `Importacao B3 removida de ${months.length} mes(es): ${totals.importsRemoved} arquivo(s), ${totals.marketPricesRemoved} preco(s), ${totals.incomeEventsRemoved} provento(s), ${totals.ledgerEventsCancelled} evento(s) cancelado(s), ${totals.manualResolutionsRemoved} vinculo(s) manual(is) removido(s).`
       );
       setSanitizeOpen(false);
-      setSanitizeMonth('');
-      setSanitizeConfirm('');
+      setSanitizeFiles([]);
+      setSelectedSanitizeMonths(new Set());
+      setExpandedSanitizeYears(new Set());
+      setSanitizeConfirmed(false);
       setPreserveManualResolutions(true);
       await load();
     } catch (err) {
@@ -493,6 +544,67 @@ export default function AssetManagement() {
   ));
 
   const metadataSuggestions = useMemo(() => buildAssetMetadataSuggestions(assetList), [assetList]);
+
+  const sanitizeFilesByYear = useMemo(() => {
+    const grouped = sanitizeFiles.reduce((acc, file) => {
+      const year = file.reference_month.slice(0, 4);
+      if (!acc[year]) acc[year] = [];
+      acc[year].push(file);
+      return acc;
+    }, {});
+    return Object.fromEntries(Object.entries(grouped).map(([fileYear, files]) => {
+      const months = files.reduce((acc, file) => {
+        if (!acc[file.reference_month]) {
+          acc[file.reference_month] = {
+            reference_month: file.reference_month,
+            files: [],
+          };
+        }
+        acc[file.reference_month].files.push(file);
+        return acc;
+      }, {});
+      return [
+        fileYear,
+        Object.values(months).sort((left, right) => right.reference_month.localeCompare(left.reference_month)),
+      ];
+    }));
+  }, [sanitizeFiles]);
+
+  const selectedSanitizeMonthCount = selectedSanitizeMonths.size;
+
+  const resetSanitizeDialog = () => {
+    setSanitizeOpen(false);
+    setSanitizeFiles([]);
+    setSelectedSanitizeMonths(new Set());
+    setExpandedSanitizeYears(new Set());
+    setSanitizeConfirmed(false);
+    setPreserveManualResolutions(true);
+  };
+
+  const toggleSanitizeMonth = (referenceMonth) => {
+    setSelectedSanitizeMonths((current) => {
+      const next = new Set(current);
+      if (next.has(referenceMonth)) {
+        next.delete(referenceMonth);
+      } else {
+        next.add(referenceMonth);
+      }
+      return next;
+    });
+    setSanitizeConfirmed(false);
+  };
+
+  const toggleSanitizeYear = (year) => {
+    setExpandedSanitizeYears((current) => {
+      const next = new Set(current);
+      if (next.has(year)) {
+        next.delete(year);
+      } else {
+        next.add(year);
+      }
+      return next;
+    });
+  };
 
   const mergeOptions = assetList.filter((asset) => (
     selectedAsset &&
@@ -981,13 +1093,10 @@ export default function AssetManagement() {
 
       <Dialog open={sanitizeOpen} onOpenChange={(open) => {
         if (!open && !sanitizing) {
-          setSanitizeOpen(false);
-          setSanitizeMonth('');
-          setSanitizeConfirm('');
-          setPreserveManualResolutions(true);
+          resetSanitizeDialog();
         }
       }}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Sanitizar importacao B3</DialogTitle>
             <DialogDescription>
@@ -1010,29 +1119,78 @@ export default function AssetManagement() {
                 Os vínculos manuais resolvidos para este mês também serão removidos e precisarão ser refeitos se o arquivo for reimportado.
               </div>
             )}
-            <div className="space-y-1.5">
-              <Label htmlFor="sanitize-month">Mes da importacao</Label>
-              <Input
-                id="sanitize-month"
-                value={sanitizeMonth}
-                onChange={(event) => {
-                  setSanitizeMonth(event.target.value);
-                  setSanitizeConfirm('');
-                }}
-                placeholder="YYYY-MM"
-                disabled={sanitizing}
-              />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label>Arquivos enviados</Label>
+                <span className="text-xs text-muted-foreground">{selectedSanitizeMonthCount} mes(es) selecionado(s)</span>
+              </div>
+              <div className="max-h-[320px] overflow-y-auto rounded-lg border">
+                {sanitizeFilesLoading ? (
+                  <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Carregando arquivos...
+                  </div>
+                ) : sanitizeFiles.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-muted-foreground">
+                    Nenhum arquivo B3 importado para esta carteira.
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {Object.keys(sanitizeFilesByYear).sort((a, b) => b.localeCompare(a)).map((fileYear) => {
+                      const yearMonths = sanitizeFilesByYear[fileYear];
+                      const expanded = expandedSanitizeYears.has(fileYear);
+                      const ChevronIcon = expanded ? ChevronDown : ChevronRight;
+                      return (
+                        <div key={fileYear}>
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium hover:bg-muted/50"
+                            onClick={() => toggleSanitizeYear(fileYear)}
+                            disabled={sanitizing}
+                          >
+                            <span className="flex items-center gap-2">
+                              <ChevronIcon className="h-4 w-4" />
+                              {fileYear}
+                            </span>
+                            <span className="text-xs font-normal text-muted-foreground">{yearMonths.length} mes(es)</span>
+                          </button>
+                          {expanded && (
+                            <div className="divide-y border-t bg-muted/20">
+                              {yearMonths.map((monthItem) => {
+                                const checked = selectedSanitizeMonths.has(monthItem.reference_month);
+                                return (
+                                  <label key={monthItem.reference_month} className="flex cursor-pointer items-start gap-3 px-4 py-2 text-sm hover:bg-muted/50">
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={() => toggleSanitizeMonth(monthItem.reference_month)}
+                                      disabled={sanitizing}
+                                      className="mt-0.5"
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="font-mono font-medium">{monthItem.reference_month}</span>
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="sanitize-confirm">Digite {sanitizeMonth || 'YYYY-MM'} para confirmar</Label>
-              <Input
-                id="sanitize-confirm"
-                value={sanitizeConfirm}
-                onChange={(event) => setSanitizeConfirm(event.target.value)}
-                placeholder={sanitizeMonth || 'YYYY-MM'}
-                disabled={sanitizing || !/^\d{4}-\d{2}$/.test(sanitizeMonth)}
+            <label className="flex items-start gap-3 rounded-lg border border-destructive/30 p-3 text-sm">
+              <Checkbox
+                checked={sanitizeConfirmed}
+                onCheckedChange={(checked) => setSanitizeConfirmed(checked === true)}
+                disabled={sanitizing || selectedSanitizeMonthCount === 0}
+                className="mt-0.5"
               />
-            </div>
+              <span>
+                Confirmo que quero remover os dados B3 dos {selectedSanitizeMonthCount || 0} mes(es) selecionado(s).
+              </span>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSanitizeOpen(false)} disabled={sanitizing}>
@@ -1041,9 +1199,9 @@ export default function AssetManagement() {
             <Button
               variant="destructive"
               onClick={sanitizeB3Import}
-              disabled={sanitizing || !/^\d{4}-\d{2}$/.test(sanitizeMonth) || sanitizeConfirm !== sanitizeMonth}
+              disabled={sanitizing || selectedSanitizeMonthCount === 0 || !sanitizeConfirmed}
             >
-              {sanitizing ? <><Loader2 className="w-4 h-4 animate-spin" /> Removendo...</> : <><Trash2 className="w-4 h-4" /> Remover importacao</>}
+              {sanitizing ? <><Loader2 className="w-4 h-4 animate-spin" /> Removendo...</> : <><Trash2 className="w-4 h-4" /> Remover selecionados</>}
             </Button>
           </DialogFooter>
         </DialogContent>

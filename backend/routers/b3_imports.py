@@ -9,6 +9,7 @@ from backend.models import (
     B3IncomePendingResolveRequest,
     B3IncomePendingResponse,
     B3IncomeReportResponse,
+    B3MonthlyImportFileResponse,
     B3MonthlyImportResponse,
     B3MonthlySanitizeResponse,
 )
@@ -52,6 +53,14 @@ async def import_b3_monthly(
             raise HTTPException(422, str(exc))
         except Exception as exc:
             raise HTTPException(500, f"Erro na importacao B3: {exc}")
+
+
+@router.get("/monthly-import/files", response_model=list[B3MonthlyImportFileResponse])
+def list_b3_monthly_import_files(portfolio_id: int = Query(...)):
+    with get_db() as conn:
+        if not get_portfolio(conn, portfolio_id):
+            raise HTTPException(404, f"Carteira {portfolio_id} nao encontrada.")
+        return b3_monthly_import_service.list_b3_monthly_import_files(conn, portfolio_id)
 
 
 @router.get("/incomes", response_model=B3IncomeReportResponse)

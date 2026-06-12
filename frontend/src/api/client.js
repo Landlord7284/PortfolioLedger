@@ -198,6 +198,8 @@ export const b3 = {
       body: filesFormData(files),
     });
   },
+  monthlyImportFiles: ({ portfolioId }) =>
+    request(`/b3/monthly-import/files?portfolio_id=${portfolioId}`),
   sanitizeMonthlyImport: ({ portfolioId, referenceMonth, removeManualResolutions = false }) =>
     request(`/b3/monthly-import?portfolio_id=${portfolioId}&reference_month=${encodeURIComponent(referenceMonth)}&remove_manual_resolutions=${removeManualResolutions ? 'true' : 'false'}`, {
       method: 'DELETE',

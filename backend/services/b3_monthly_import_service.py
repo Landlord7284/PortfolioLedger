@@ -1537,6 +1537,19 @@ def import_b3_monthly_batch(conn: sqlite3.Connection, portfolio_id: int, files: 
     return response
 
 
+def list_b3_monthly_import_files(conn: sqlite3.Connection, portfolio_id: int) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT id, portfolio_id, filename, reference_month, reference_date, created_at
+        FROM b3_monthly_imports
+        WHERE portfolio_id = ?
+        ORDER BY reference_month DESC, id DESC
+        """,
+        (portfolio_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def sanitize_b3_monthly_import(
     conn: sqlite3.Connection,
     portfolio_id: int,

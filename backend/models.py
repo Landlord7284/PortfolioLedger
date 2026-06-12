@@ -733,6 +733,15 @@ class B3MonthlyImportResponse(BaseModel):
     files: list[B3MonthlyFileResult]
 
 
+class B3MonthlyImportFileResponse(BaseModel):
+    id: int
+    portfolio_id: int
+    filename: str
+    reference_month: str
+    reference_date: str
+    created_at: str
+
+
 class B3MonthlySanitizeResponse(BaseModel):
     portfolio_id: int
     reference_month: str
