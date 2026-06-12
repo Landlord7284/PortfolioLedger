@@ -13,7 +13,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -37,9 +36,9 @@ const PERIOD_OPTIONS = [
 ];
 const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--primary)'];
 const EQUITY_CHART_CONFIG = {
-  market_value: { label: 'Valor de Mercado', color: 'var(--chart-1)' },
-  cost_basis: { label: 'Valor Patrimonial', color: 'var(--chart-2)' },
-  net_contributions_accumulated: { label: 'Aporte líquido acumulado', color: 'var(--chart-4)' },
+  market_value: { label: 'Mercado', color: 'var(--chart-1)' },
+  cost_basis: { label: 'Patrimônio', color: 'var(--chart-2)' },
+  net_contributions_accumulated: { label: 'Aporte Acumulado', color: 'var(--chart-4)' },
   net_contribution: { label: 'Aporte líquido mensal', color: 'var(--chart-3)' },
   contributions_in: { label: 'Aportes', color: 'var(--chart-1)' },
   contributions_out: { label: 'Resgates', color: 'var(--chart-5)' },
@@ -1167,19 +1166,11 @@ export default function Dashboard() {
               <Card className="overflow-hidden">
                 <Tabs defaultValue="progression" className="flex flex-col">
                   <CardHeader className="border-b">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="flex flex-col gap-1">
-                        <CardTitle className="text-base">Evolução Patrimonial Mensal</CardTitle>
-                        {alerts?.uses_cost_fallback && (
-                          <Badge variant="secondary" className="w-fit">Alguns meses usam fallback para custo</Badge>
-                        )}
-                      </div>
-                      <div className="overflow-x-auto pb-1">
-                        <TabsList className="min-w-max justify-start">
-                          <TabsTrigger value="progression" className="h-9 flex-none px-3">Progressão</TabsTrigger>
-                          <TabsTrigger value="contributions" className="h-9 flex-none px-3">Aporte mensal</TabsTrigger>
-                        </TabsList>
-                      </div>
+                    <div className="overflow-x-auto pb-1">
+                      <TabsList className="min-w-max justify-start">
+                        <TabsTrigger value="progression" className="h-9 flex-none px-3">Evolução Patrimonial</TabsTrigger>
+                        <TabsTrigger value="contributions" className="h-9 flex-none px-3">Aporte mensal</TabsTrigger>
+                      </TabsList>
                     </div>
                   </CardHeader>
                   <CardContent className="p-4">
@@ -1190,28 +1181,29 @@ export default function Dashboard() {
                     ) : (
                       <>
                         <TabsContent value="progression" className="mt-0 flex flex-col gap-4">
-                          <div className="flex flex-wrap items-center gap-3" aria-label="Séries da progressão patrimonial">
+                          <div className="flex flex-wrap items-center justify-end gap-2" aria-label="Séries da evolução patrimonial">
                             {PROGRESSION_SERIES.map((series) => {
                               const config = EQUITY_CHART_CONFIG[series.key];
                               const checked = visibleProgressionSeries.includes(series.key);
                               const disabled = checked && visibleProgressionSeries.length === 1;
                               return (
-                                <label
+                                <button
                                   key={series.key}
+                                  type="button"
                                   className={cn(
-                                    'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50',
-                                    checked && 'bg-muted/40',
+                                    'flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors',
+                                    checked
+                                      ? 'bg-muted text-foreground shadow-sm hover:bg-muted/80'
+                                      : 'bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                                     disabled && 'cursor-not-allowed opacity-80'
                                   )}
+                                  onClick={() => handleProgressionSeriesChange(series.key, !checked)}
+                                  disabled={disabled}
+                                  aria-pressed={checked}
                                 >
-                                  <Checkbox
-                                    checked={checked}
-                                    disabled={disabled}
-                                    onCheckedChange={(value) => handleProgressionSeriesChange(series.key, value === true)}
-                                  />
                                   <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: config.color }} />
                                   <span>{config.label}</span>
-                                </label>
+                                </button>
                               );
                             })}
                           </div>
