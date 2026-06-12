@@ -235,7 +235,7 @@ export default function AssetManagement() {
     try {
       const [assets, pending, b3Pending, alerts, schwabPending] = await Promise.all([
         assetsApi.list(null, includeMerged),
-        assetsApi.reviews(),
+        assetsApi.reviews({ portfolioId: activePortfolioId }),
         activePortfolioId ? b3Api.incomePendings({ portfolioId: activePortfolioId }) : Promise.resolve([]),
         assetsApi.alerts({ portfolioId: activePortfolioId }),
         schwabApi.reviews({ portfolioId: activePortfolioId }),

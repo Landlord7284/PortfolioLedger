@@ -488,6 +488,51 @@ def test_probable_match_review_reuses_existing_and_preserves_first_payload(tmp_p
         assert payload["quantity"] == "10"
 
 
+def test_list_match_reviews_filters_by_operation_payload_portfolio(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        first = asset_service.create_match_review(
+            conn,
+            source="event_form",
+            ticker="AAAA3",
+            asset_class=AssetClass.ACAO.value,
+            market="BR",
+            event_date="2026-05-11",
+            reason="Revisao portfolio 1",
+            operation_payload={"portfolio_id": 1},
+        )
+        second = asset_service.create_match_review(
+            conn,
+            source="event_form",
+            ticker="BBBB3",
+            asset_class=AssetClass.ACAO.value,
+            market="BR",
+            event_date="2026-05-12",
+            reason="Revisao portfolio 2",
+            operation_payload={"portfolio_id": 2},
+        )
+        without_portfolio = asset_service.create_match_review(
+            conn,
+            source="manual",
+            ticker="CCCC3",
+            asset_class=AssetClass.ACAO.value,
+            market="BR",
+            event_date="2026-05-13",
+            reason="Revisao sem portfolio",
+        )
+
+        all_reviews = asset_service.list_match_reviews(conn)
+        assert {review["id"] for review in all_reviews} == {first["id"], second["id"], without_portfolio["id"]}
+
+        first_portfolio_reviews = asset_service.list_match_reviews(conn, portfolio_id=1)
+        assert [review["id"] for review in first_portfolio_reviews] == [first["id"]]
+
+        second_portfolio_reviews = asset_service.list_match_reviews(conn, portfolio_id=2)
+        assert [review["id"] for review in second_portfolio_reviews] == [second["id"]]
+
+
 def test_import_review_stores_operation_payload(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)

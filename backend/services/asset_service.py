@@ -642,11 +642,25 @@ def list_asset_tickers(conn: sqlite3.Connection, asset_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def list_match_reviews(conn: sqlite3.Connection, status: str = AssetMatchReviewStatus.PENDING.value) -> list[dict]:
+def list_match_reviews(
+    conn: sqlite3.Connection,
+    status: str = AssetMatchReviewStatus.PENDING.value,
+    portfolio_id: int | None = None,
+) -> list[dict]:
     normalized_status = normalize_review_status(status)
+    params: list[object] = [normalized_status]
+    portfolio_clause = ""
+    if portfolio_id is not None:
+        portfolio_clause = " AND json_extract(operation_payload, '$.portfolio_id') = ?"
+        params.append(portfolio_id)
     rows = conn.execute(
-        "SELECT * FROM asset_match_reviews WHERE status = ? ORDER BY created_at DESC, id DESC",
-        (normalized_status,),
+        f"""
+        SELECT * FROM asset_match_reviews
+        WHERE status = ?
+        {portfolio_clause}
+        ORDER BY created_at DESC, id DESC
+        """,
+        params,
     ).fetchall()
     return [dict(r) for r in rows]
 

@@ -78,9 +78,12 @@ def list_all(asset_class: Optional[str] = Query(None), include_merged: bool = Qu
 
 
 @router.get("/reviews", response_model=list[AssetMatchReviewResponse])
-def list_reviews(status: str = Query(AssetMatchReviewStatus.PENDING.value)):
+def list_reviews(
+    status: str = Query(AssetMatchReviewStatus.PENDING.value),
+    portfolio_id: Optional[int] = Query(None),
+):
     with get_db() as conn:
-        return asset_service.list_match_reviews(conn, status)
+        return asset_service.list_match_reviews(conn, status, portfolio_id)
 
 
 @router.post("/reviews/{review_id}/resolve", response_model=AssetMatchReviewResponse)

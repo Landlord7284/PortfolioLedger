@@ -100,7 +100,13 @@ export const assets = {
   updateMetadata: (id, data) =>
     request(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   tickers: (id) => request(`/assets/${id}/tickers`),
-  reviews: () => request('/assets/reviews'),
+  reviews: ({ portfolioId, status } = {}) => {
+    const params = new URLSearchParams();
+    if (portfolioId) params.set('portfolio_id', portfolioId);
+    if (status) params.set('status', status);
+    const qs = params.toString();
+    return request(`/assets/reviews${qs ? '?' + qs : ''}`);
+  },
   alerts: ({ portfolioId, status } = {}) => {
     const params = new URLSearchParams();
     if (portfolioId) params.set('portfolio_id', portfolioId);
