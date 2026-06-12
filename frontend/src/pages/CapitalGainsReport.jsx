@@ -955,7 +955,7 @@ export default function CapitalGainsReport() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
         <SummaryCard title="Resultado líquido" value={summary.realizedResult} hideValues={hideValues} />
         <SummaryCard title="Ganhos isentos" value={summary.exemptGain} hideValues={hideValues} />
-        <SummaryCard title="Saldo IRRF a compensar" value={summary.finalIrrf} hideValues={hideValues} />
+        <SummaryCard title="IRRF Acumulado" value={summary.finalIrrf} hideValues={hideValues} />
         <SummaryCard title="Prejuízo final" value={summary.finalLoss} hideValues={hideValues} />
         <SummaryCard
           title="DARFs"

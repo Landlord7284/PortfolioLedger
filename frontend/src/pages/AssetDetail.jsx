@@ -225,6 +225,36 @@ export default function AssetDetail() {
     if (activePortfolioId) load();
   }, [activePortfolioId, load]);
 
+  useEffect(() => {
+    const handleGlobalKeyDown = (event) => {
+      if (event.defaultPrevented || !event.altKey || event.ctrlKey || event.metaKey) return;
+
+      const target = event.target;
+      const isEditing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName) || target?.isContentEditable;
+      const hasOpenDialog = showEventForm || editingEvent || alertTarget;
+
+      if (isEditing || hasOpenDialog) return;
+
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        navigate('/?tab=assets');
+        return;
+      }
+
+      const isPlusShortcut = event.key === '+'
+        || event.code === 'NumpadAdd'
+        || (event.code === 'Equal' && event.shiftKey);
+
+      if (isPlusShortcut && asset) {
+        event.preventDefault();
+        setShowEventForm(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [asset, alertTarget, editingEvent, navigate, showEventForm]);
+
   const metadataSuggestions = useMemo(() => buildAssetMetadataSuggestions(metadataAssetList), [metadataAssetList]);
 
   const displayError = (msg) => {
@@ -413,7 +443,7 @@ export default function AssetDetail() {
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => navigate('/?tab=assets')}>
+      <Button variant="ghost" size="sm" className="-ml-2 text-sm text-muted-foreground" onClick={() => navigate('/?tab=assets')}>
         <ArrowLeft className="w-4 h-4" /> Voltar
       </Button>
 
