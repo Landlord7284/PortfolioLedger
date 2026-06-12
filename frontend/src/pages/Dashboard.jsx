@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ChartContainer, ChartTooltip } from '@/components/ui/chart';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Kbd } from '@/components/ui/kbd';
 import { toast } from 'sonner';
 import { formatMoney, formatQuantity } from '@/lib/formatters';
@@ -37,17 +38,25 @@ const PERIOD_OPTIONS = [
 const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--primary)'];
 const EQUITY_CHART_CONFIG = {
   market_value: { label: 'Mercado', color: 'var(--chart-1)' },
-  cost_basis: { label: 'Patrimônio', color: 'var(--chart-2)' },
+  cost_basis: { label: 'Patrimônio', color: 'var(--chart-3)' },
   net_contributions_accumulated: { label: 'Aporte Acumulado', color: 'var(--chart-4)' },
-  net_contribution: { label: 'Aporte líquido mensal', color: 'var(--chart-3)' },
+  net_contribution: { label: 'Aporte líquido mensal', color: 'var(--chart-1)' },
   contributions_in: { label: 'Aportes', color: 'var(--chart-1)' },
-  contributions_out: { label: 'Resgates', color: 'var(--chart-5)' },
+  contributions_out: { label: 'Resgates', color: 'var(--chart-3)' },
 };
 const PROGRESSION_SERIES = [
   { key: 'market_value', strokeWidth: 2.5 },
   { key: 'cost_basis', strokeWidth: 2, strokeDasharray: '5 5' },
   { key: 'net_contributions_accumulated', strokeWidth: 1.75, strokeDasharray: '6 3 1 3' },
 ];
+const MONEY_AXIS_PROPS = {
+  tickLine: false,
+  axisLine: false,
+  tickMargin: 8,
+  width: 86,
+  tickCount: 6,
+  tick: { fontSize: 12 },
+};
 const DETAIL_ASSET_LIMIT = 9;
 const SEARCH_MATCH_LIMIT = 6;
 const CLASS_LEVEL = { type: 'class', field: 'asset_class', label: 'Classe', emptyLabel: 'Sem classe' };
@@ -534,6 +543,7 @@ export default function Dashboard() {
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(0);
   const [sort, setSort] = useState({ key: 'ticker', direction: 'asc' });
   const [isLargeModal, setIsLargeModal] = useState(false);
+  const [activeEquityChartTab, setActiveEquityChartTab] = useState('progression');
   const [visibleProgressionSeries, setVisibleProgressionSeries] = useState(
     () => PROGRESSION_SERIES.map((series) => series.key)
   );
@@ -841,12 +851,9 @@ export default function Dashboard() {
     }
   }, [activeSearchMatch, navigateToSearchMatch, searchMatches.length, searchQuery]);
 
-  const handleProgressionSeriesChange = useCallback((seriesKey, checked) => {
-    setVisibleProgressionSeries((current) => {
-      if (checked) return current.includes(seriesKey) ? current : [...current, seriesKey];
-      if (current.length <= 1) return current;
-      return current.filter((key) => key !== seriesKey);
-    });
+  const handleVisibleProgressionSeriesChange = useCallback((seriesKeys) => {
+    if (seriesKeys.length === 0) return;
+    setVisibleProgressionSeries(seriesKeys);
   }, []);
 
   const displayMoney = (val) => formatMoney(val, hideValues);
@@ -1169,14 +1176,42 @@ export default function Dashboard() {
               </div>
 
               <Card className="overflow-hidden">
-                <Tabs defaultValue="progression" className="flex flex-col">
-                  <CardHeader className="border-b">
+                <Tabs value={activeEquityChartTab} onValueChange={setActiveEquityChartTab} className="flex flex-col">
+                  <CardHeader className="flex flex-col gap-3 border-b sm:flex-row sm:items-center sm:justify-between">
                     <div className="overflow-x-auto pb-1">
                       <TabsList className="min-w-max justify-start">
                         <TabsTrigger value="progression" className="h-7 flex-none px-3">Evolução Patrimonial</TabsTrigger>
                         <TabsTrigger value="contributions" className="h-7 flex-none px-3">Aporte mensal</TabsTrigger>
                       </TabsList>
                     </div>
+                    {activeEquityChartTab === 'progression' && (
+                      <ToggleGroup
+                        type="multiple"
+                        variant="outline"
+                        size="sm"
+                        value={visibleProgressionSeries}
+                        onValueChange={handleVisibleProgressionSeriesChange}
+                        className="flex-wrap justify-start sm:justify-end"
+                        aria-label="Séries da evolução patrimonial"
+                      >
+                        {PROGRESSION_SERIES.map((series) => {
+                          const config = EQUITY_CHART_CONFIG[series.key];
+                          const disabled = visibleProgressionSeries.includes(series.key) && visibleProgressionSeries.length === 1;
+                          return (
+                            <ToggleGroupItem
+                              key={series.key}
+                              value={series.key}
+                              disabled={disabled}
+                              aria-label={config.label}
+                              className={cn(disabled && 'cursor-not-allowed opacity-80')}
+                            >
+                              <span className="size-2.5 shrink-0 rounded-sm" style={{ backgroundColor: config.color }} />
+                              <span>{config.label}</span>
+                            </ToggleGroupItem>
+                          );
+                        })}
+                      </ToggleGroup>
+                    )}
                   </CardHeader>
                   <CardContent className="p-4">
                     {!hasEquityData ? (
@@ -1185,38 +1220,12 @@ export default function Dashboard() {
                       </div>
                     ) : (
                       <>
-                        <TabsContent value="progression" className="mt-0 flex flex-col gap-4">
-                          <div className="flex flex-wrap items-center justify-end gap-2" aria-label="Séries da evolução patrimonial">
-                            {PROGRESSION_SERIES.map((series) => {
-                              const config = EQUITY_CHART_CONFIG[series.key];
-                              const checked = visibleProgressionSeries.includes(series.key);
-                              const disabled = checked && visibleProgressionSeries.length === 1;
-                              return (
-                                <button
-                                  key={series.key}
-                                  type="button"
-                                  className={cn(
-                                    'flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors',
-                                    checked
-                                      ? 'bg-muted text-foreground shadow-sm hover:bg-muted/80'
-                                      : 'bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                    disabled && 'cursor-not-allowed opacity-80'
-                                  )}
-                                  onClick={() => handleProgressionSeriesChange(series.key, !checked)}
-                                  disabled={disabled}
-                                  aria-pressed={checked}
-                                >
-                                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: config.color }} />
-                                  <span>{config.label}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
+                        <TabsContent value="progression" className="mt-0">
                           <ChartContainer config={EQUITY_CHART_CONFIG} className="h-[340px] w-full aspect-auto">
                             <LineChart data={equityData} margin={{ left: 8, right: 16, top: 16, bottom: 8 }}>
                               <CartesianGrid vertical={false} />
                               <XAxis dataKey="monthLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={18} />
-                              <YAxis tickLine={false} axisLine={false} tickMargin={8} width={86} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
+                              <YAxis {...MONEY_AXIS_PROPS} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
                               <ChartTooltip content={<MoneyTooltip hideValues={hideValues} labelFormatter={formatMonth} />} />
                               {PROGRESSION_SERIES.filter((series) => visibleProgressionSeries.includes(series.key)).map((series) => (
                                 <Line
@@ -1238,7 +1247,7 @@ export default function Dashboard() {
                             <BarChart data={equityData} margin={{ left: 8, right: 16, top: 16, bottom: 8 }}>
                               <CartesianGrid vertical={false} />
                               <XAxis dataKey="monthLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={18} />
-                              <YAxis tickLine={false} axisLine={false} tickMargin={8} width={86} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
+                              <YAxis {...MONEY_AXIS_PROPS} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
                               <ChartTooltip content={<ContributionTooltip hideValues={hideValues} />} />
                               <Bar name="Aporte líquido mensal" dataKey="net_contribution" radius={[4, 4, 0, 0]}>
                                 {equityData.map((row) => (
