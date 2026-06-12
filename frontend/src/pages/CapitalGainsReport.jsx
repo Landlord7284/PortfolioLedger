@@ -996,11 +996,13 @@ export default function CapitalGainsReport() {
         />
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col gap-4">
-        <div className="overflow-x-auto">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col gap-5">
+        <div className="overflow-x-auto pb-1">
           <TabsList className="min-w-max justify-start">
             {REPORT_TABS.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value}>{tab.label}</TabsTrigger>
+              <TabsTrigger key={tab.value} value={tab.value} className="h-7 flex-none px-3">
+                {tab.label}
+              </TabsTrigger>
             ))}
           </TabsList>
         </div>
@@ -1113,61 +1115,61 @@ export default function CapitalGainsReport() {
                 />
               </div>
               {irrfDialog.row.regime === REGIME_B3_COMMON && (
-              <div className="flex flex-col gap-3 rounded-md border p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <Label className="text-sm font-medium">Venda de Direitos</Label>
+                <div className="flex flex-col gap-3 rounded-md border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <Label className="text-sm font-medium">Venda de Direitos</Label>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={addManualEventDraft} disabled={savingIrrf}>
+                      <Plus data-icon="inline-start" />
+                      Adicionar
+                    </Button>
                   </div>
-                  <Button variant="outline" size="sm" onClick={addManualEventDraft} disabled={savingIrrf}>
-                    <Plus data-icon="inline-start" />
-                    Adicionar
-                  </Button>
+                  {irrfDialog.manualEvents.filter((event) => !event._deleted).length === 0 ? (
+                    <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                      Nenhum evento manual cadastrado.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {irrfDialog.manualEvents.filter((event) => !event._deleted).map((event) => (
+                        <div key={event.clientId} className="grid grid-cols-[5.5rem_1fr] gap-2 rounded-md border p-3 sm:grid-cols-[5.5rem_6.75rem_6.75rem_auto]">
+                          <div className="flex flex-col gap-1.5">
+                            <Label htmlFor={`manual-ticker-${event.clientId}`}>Ativo</Label>
+                            <Input
+                              id={`manual-ticker-${event.clientId}`}
+                              value={event.ticker}
+                              onChange={(inputEvent) => updateManualEventDraft(event.clientId, { ticker: inputEvent.target.value.toUpperCase() })}
+                              disabled={savingIrrf}
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            <Label htmlFor={`manual-gross-${event.clientId}`}>Venda Bruta</Label>
+                            <Input
+                              id={`manual-gross-${event.clientId}`}
+                              value={event.gross_sale}
+                              onChange={(inputEvent) => updateManualEventDraft(event.clientId, { gross_sale: applyCurrencyMask(inputEvent.target.value) })}
+                              disabled={savingIrrf}
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            <Label htmlFor={`manual-result-${event.clientId}`}>Resultado</Label>
+                            <Input
+                              id={`manual-result-${event.clientId}`}
+                              value={event.realized_result}
+                              onChange={(inputEvent) => updateManualEventDraft(event.clientId, { realized_result: applySignedCurrencyMask(inputEvent.target.value) })}
+                              disabled={savingIrrf}
+                            />
+                          </div>
+                          <div className="flex items-end">
+                            <Button variant="ghost" size="icon" onClick={() => removeManualEventDraft(event.clientId)} disabled={savingIrrf} aria-label="Remover evento manual">
+                              <Trash2 />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {irrfDialog.manualEvents.filter((event) => !event._deleted).length === 0 ? (
-                  <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                    Nenhum evento manual cadastrado.
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {irrfDialog.manualEvents.filter((event) => !event._deleted).map((event) => (
-                      <div key={event.clientId} className="grid grid-cols-[5.5rem_1fr] gap-2 rounded-md border p-3 sm:grid-cols-[5.5rem_6.75rem_6.75rem_auto]">
-                        <div className="flex flex-col gap-1.5">
-                          <Label htmlFor={`manual-ticker-${event.clientId}`}>Ativo</Label>
-                          <Input
-                            id={`manual-ticker-${event.clientId}`}
-                            value={event.ticker}
-                            onChange={(inputEvent) => updateManualEventDraft(event.clientId, { ticker: inputEvent.target.value.toUpperCase() })}
-                            disabled={savingIrrf}
-                          />
-                        </div>
-                        <div className="flex flex-col gap-1.5">
-                          <Label htmlFor={`manual-gross-${event.clientId}`}>Venda Bruta</Label>
-                          <Input
-                            id={`manual-gross-${event.clientId}`}
-                            value={event.gross_sale}
-                            onChange={(inputEvent) => updateManualEventDraft(event.clientId, { gross_sale: applyCurrencyMask(inputEvent.target.value) })}
-                            disabled={savingIrrf}
-                          />
-                        </div>
-                        <div className="flex flex-col gap-1.5">
-                          <Label htmlFor={`manual-result-${event.clientId}`}>Resultado</Label>
-                          <Input
-                            id={`manual-result-${event.clientId}`}
-                            value={event.realized_result}
-                            onChange={(inputEvent) => updateManualEventDraft(event.clientId, { realized_result: applySignedCurrencyMask(inputEvent.target.value) })}
-                            disabled={savingIrrf}
-                          />
-                        </div>
-                        <div className="flex items-end">
-                          <Button variant="ghost" size="icon" onClick={() => removeManualEventDraft(event.clientId)} disabled={savingIrrf} aria-label="Remover evento manual">
-                            <Trash2 />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
               )}
             </div>
           )}

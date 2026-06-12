@@ -728,10 +728,10 @@ export default function Proventos() {
                 }}
               >
                 <TabsList className="min-w-max justify-start">
-                  <TabsTrigger value={CHART_VIEW_GENERAL} className="h-9 flex-none px-3">
+                  <TabsTrigger value={CHART_VIEW_GENERAL} className="h-7 flex-none px-3">
                     Evolução Mensal
                   </TabsTrigger>
-                  <TabsTrigger value={CHART_VIEW_ASSET} className="h-9 flex-none px-3" disabled={!hasSelectedChartAsset}>
+                  <TabsTrigger value={CHART_VIEW_ASSET} className="h-7 flex-none px-3" disabled={!hasSelectedChartAsset}>
                     Ativo Individual
                   </TabsTrigger>
                 </TabsList>

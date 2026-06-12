@@ -180,30 +180,30 @@ function buildAllocationGroups(positions, level) {
     .sort((a, b) => b.amount - a.amount || compareText(a.label, b.label));
   const visibleGroups = level.type === 'asset' && sortedGroups.length > DETAIL_ASSET_LIMIT
     ? [
-        ...sortedGroups.slice(0, DETAIL_ASSET_LIMIT),
-        sortedGroups.slice(DETAIL_ASSET_LIMIT).reduce((others, row) => ({
-          ...others,
-          amount: others.amount + row.amount,
-          costBasis: others.costBasis + row.costBasis,
-          unrealized: others.unrealized + row.unrealized,
-          uses_cost_fallback: others.uses_cost_fallback || row.uses_cost_fallback,
-          market_value_supported: others.market_value_supported && row.market_value_supported,
-          positions: [...others.positions, ...row.positions],
-        }), {
-          key: 'asset:others',
-          type: 'others',
-          field: level.field,
-          value: 'Outros',
-          label: 'Outros',
-          assetId: null,
-          amount: 0,
-          costBasis: 0,
-          unrealized: 0,
-          uses_cost_fallback: false,
-          market_value_supported: true,
-          positions: [],
-        }),
-      ]
+      ...sortedGroups.slice(0, DETAIL_ASSET_LIMIT),
+      sortedGroups.slice(DETAIL_ASSET_LIMIT).reduce((others, row) => ({
+        ...others,
+        amount: others.amount + row.amount,
+        costBasis: others.costBasis + row.costBasis,
+        unrealized: others.unrealized + row.unrealized,
+        uses_cost_fallback: others.uses_cost_fallback || row.uses_cost_fallback,
+        market_value_supported: others.market_value_supported && row.market_value_supported,
+        positions: [...others.positions, ...row.positions],
+      }), {
+        key: 'asset:others',
+        type: 'others',
+        field: level.field,
+        value: 'Outros',
+        label: 'Outros',
+        assetId: null,
+        amount: 0,
+        costBasis: 0,
+        unrealized: 0,
+        uses_cost_fallback: false,
+        market_value_supported: true,
+        positions: [],
+      }),
+    ]
     : sortedGroups;
 
   return visibleGroups
@@ -444,7 +444,7 @@ function OperationalAlert({ alerts, hideValues }) {
             </div>
           )}
           {alerts.missing_recent_quotes_summary?.length > 0 && (
-            <div className="text-muted-foreground">Ativos: {alerts.missing_recent_quotes_summary.join(', ')}</div>
+            <div className="text-background/80">Ativos: {alerts.missing_recent_quotes_summary.join(', ')}</div>
           )}
           {alerts.unsupported_market_value_count > 0 && (
             <div>
@@ -452,16 +452,16 @@ function OperationalAlert({ alerts, hideValues }) {
             </div>
           )}
           {alerts.unsupported_market_value_summary?.length > 0 && (
-            <div className="text-muted-foreground">Sem valor de mercado: {alerts.unsupported_market_value_summary.join(', ')}</div>
+            <div className="text-background/80">Sem valor de mercado: {alerts.unsupported_market_value_summary.join(', ')}</div>
           )}
           {alerts.uses_cost_fallback && (
-            <div className="text-muted-foreground">
+            <div className="text-background/80">
               Fallback explícito para custo: {formatCurrency(alerts.cost_fallback_amount, hideValues)}.
             </div>
           )}
-          <div className="text-muted-foreground">Última importação B3: {formatDateTime(alerts.last_b3_import_at)}</div>
-          <div className="text-muted-foreground">Última competência de cotação: {formatMonth(alerts.latest_quote_month)}</div>
-          <div className="text-muted-foreground">Última cotação: {alerts.latest_quote_date ? formatDate(alerts.latest_quote_date) : '—'}</div>
+          <div className="text-background/80">Última importação B3: {formatDateTime(alerts.last_b3_import_at)}</div>
+          <div className="text-background/80">Última competência de cotação: {formatMonth(alerts.latest_quote_month)}</div>
+          <div className="text-background/80">Última cotação: {alerts.latest_quote_date ? formatDate(alerts.latest_quote_date) : '—'}</div>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -927,10 +927,10 @@ export default function Dashboard() {
         <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
           <div className="overflow-x-auto pb-1">
             <TabsList className="min-w-max justify-start">
-              <TabsTrigger value="dashboard" className="h-9 flex-none px-3">
+              <TabsTrigger value="dashboard" className="h-7 flex-none px-3">
                 Dashboard
               </TabsTrigger>
-              <TabsTrigger value="assets" className="h-9 flex-none px-3">
+              <TabsTrigger value="assets" className="h-7 flex-none px-3">
                 Ativos
               </TabsTrigger>
             </TabsList>
