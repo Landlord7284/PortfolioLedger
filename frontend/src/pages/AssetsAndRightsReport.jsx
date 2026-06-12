@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const currentYear = new Date().getFullYear();
-const ASSET_NAME_MAX_LENGTH = 44;
+const ASSET_NAME_MAX_LENGTH = 45;
 
 function truncateAssetName(name) {
   if (!name) return '-';
@@ -291,7 +291,7 @@ export default function AssetsAndRightsReport() {
                         <TableCell className="text-right font-mono text-sm">
                           {formatQuantity(row.quantity, row.asset_class, hideValues)}
                         </TableCell>
-                        <TableCell className="min-w-[180px]" title={row.name || undefined}>
+                        <TableCell className="max-w-[45ch] truncate" title={row.name || undefined}>
                           {truncateAssetName(row.name)}
                         </TableCell>
                         <TableCell className="font-mono text-sm text-muted-foreground">{formatCnpj(row.cnpj) || '-'}</TableCell>
