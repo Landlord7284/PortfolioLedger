@@ -7,7 +7,7 @@ import EventForm from '../components/EventForm';
 import B3MonthlyImportModal from '../components/B3MonthlyImportModal';
 import ImportModal from '../components/ImportModal';
 import SchwabImportModal from '../components/SchwabImportModal';
-import { Search, Plus, Download, FolderOpen, Inbox, AlertCircle, Loader2, ArrowDown, ArrowUp, AlertTriangle, Info, ChevronDown } from 'lucide-react';
+import { Search, Plus, Download, FolderOpen, Inbox, AlertCircle, Loader2, ArrowDown, ArrowUp, AlertTriangle, Info, ChevronDown, TrendingUp, TrendingDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
@@ -328,7 +328,7 @@ function SortableHead({ sortKey, sort, onSort, children, align = 'left' }) {
   );
 }
 
-function MetricCard({ title, value, subtitle, detail, tone = 'default', badge, tooltip }) {
+function MetricCard({ title, value, subtitle, subtitleIcon: SubtitleIcon, tone = 'default', badge, tooltip }) {
   const toneClass = tone === 'positive'
     ? 'text-emerald-500'
     : tone === 'negative'
@@ -337,7 +337,7 @@ function MetricCard({ title, value, subtitle, detail, tone = 'default', badge, t
 
   return (
     <Card>
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-1">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{title}</CardTitle>
           {tooltip && (
@@ -350,13 +350,17 @@ function MetricCard({ title, value, subtitle, detail, tone = 'default', badge, t
           )}
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pb-3">
         <div className={`font-mono text-2xl font-bold tabular-nums ${toneClass}`}>{value}</div>
-        <div className="mt-2 flex min-h-5 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {subtitle && <span>{subtitle}</span>}
+        <div className="mt-1 flex min-h-4 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {subtitle && (
+            <span className="inline-flex items-center gap-1">
+              {subtitle}
+              {SubtitleIcon && <SubtitleIcon className="h-3.5 w-3.5" aria-hidden="true" />}
+            </span>
+          )}
           {badge && <Badge variant="secondary">{badge}</Badge>}
         </div>
-        {detail && <p className="mt-1 text-xs text-muted-foreground">{detail}</p>}
       </CardContent>
     </Card>
   );
@@ -945,7 +949,9 @@ export default function Dashboard() {
 
   const hasDashboardEvents = !alerts?.no_events;
   const hasEquityData = equityData.some((row) => row.market_value !== 0 || row.cost_basis !== 0 || row.net_contribution !== 0 || row.net_contributions_accumulated !== 0);
+  const resultPercent = toNumber(summary?.unrealized_result_pct);
   const resultTone = toNumber(summary?.unrealized_result) > 0 ? 'positive' : toNumber(summary?.unrealized_result) < 0 ? 'negative' : 'default';
+  const resultTrendIcon = resultPercent > 0 ? TrendingUp : resultPercent < 0 ? TrendingDown : null;
   const realizedTone = toNumber(summary?.realized_result) > 0 ? 'positive' : toNumber(summary?.realized_result) < 0 ? 'negative' : 'default';
   const realizedPeriodDetail = summary?.realized_result_period_start
     ? `${formatDate(summary.realized_result_period_start)} a ${formatDate(summary.realized_result_period_end)}`
@@ -1137,21 +1143,20 @@ export default function Dashboard() {
                 <MetricCard
                   title="Valor Patrimonial"
                   value={formatCurrency(summary.cost_basis, hideValues)}
-                  subtitle="Valor patrimonial atual"
                   tooltip="Custo patrimonial atual das posições abertas, derivado do replay do ledger."
                 />
                 <MetricCard
-                  title="Diferença de Mercado"
+                  title="Resultado Aberto"
                   value={formatSignedCurrency(summary.unrealized_result, hideValues)}
                   subtitle={formatPercent(summary.unrealized_result_pct, hideValues)}
+                  subtitleIcon={resultTrendIcon}
                   tone={resultTone}
                   tooltip="Valor de mercado menos valor patrimonial dos ativos com valor de mercado suportado. Não inclui vendas realizadas, proventos nem criptomoedas nesta etapa."
                 />
                 <MetricCard
                   title="Resultado Realizado"
                   value={formatSignedCurrency(summary.realized_result, hideValues)}
-                  subtitle="Operações realizadas"
-                  detail={realizedPeriodDetail}
+                  subtitle={realizedPeriodDetail}
                   tone={realizedTone}
                   tooltip="Resultado consolidado de vendas e resgates realizados no período selecionado. Separado do resultado não realizado."
                 />
@@ -1168,8 +1173,8 @@ export default function Dashboard() {
                   <CardHeader className="border-b">
                     <div className="overflow-x-auto pb-1">
                       <TabsList className="min-w-max justify-start">
-                        <TabsTrigger value="progression" className="h-9 flex-none px-3">Evolução Patrimonial</TabsTrigger>
-                        <TabsTrigger value="contributions" className="h-9 flex-none px-3">Aporte mensal</TabsTrigger>
+                        <TabsTrigger value="progression" className="h-7 flex-none px-3">Evolução Patrimonial</TabsTrigger>
+                        <TabsTrigger value="contributions" className="h-7 flex-none px-3">Aporte mensal</TabsTrigger>
                       </TabsList>
                     </div>
                   </CardHeader>
