@@ -115,10 +115,14 @@ def test_dashboard_uses_b3_market_value_and_explicit_cost_fallback(tmp_path, mon
     assert may["year_month"] == "2026-05"
     assert may["market_value"] == "1620.00"
     assert may["cost_basis"] == "1500.00"
+    assert may["contributions_in"] == "0.00"
+    assert may["contributions_out"] == "0.00"
     assert may["net_contribution"] == "0.00"
     assert may["net_contributions_accumulated"] == "1300.00"
     assert may["uses_cost_fallback"] is True
     march = next(month for month in report["equity_curve"] if month["year_month"] == "2026-03")
+    assert march["contributions_in"] == "0.00"
+    assert march["contributions_out"] == "600.00"
     assert march["net_contribution"] == "-600.00"
 
     assert stock_only["summary"]["market_value"] == "720.00"
@@ -245,10 +249,16 @@ def test_dashboard_net_contributions_ignore_non_cash_events(tmp_path, monkeypatc
     january = next(month for month in report["equity_curve"] if month["year_month"] == "2026-01")
     february = next(month for month in report["equity_curve"] if month["year_month"] == "2026-02")
     march = next(month for month in report["equity_curve"] if month["year_month"] == "2026-03")
+    assert january["contributions_in"] == "1000.00"
+    assert january["contributions_out"] == "0.00"
     assert january["net_contribution"] == "1000.00"
     assert january["net_contributions_accumulated"] == "1000.00"
+    assert february["contributions_in"] == "0.00"
+    assert february["contributions_out"] == "0.00"
     assert february["net_contribution"] == "0.00"
     assert february["net_contributions_accumulated"] == "1000.00"
+    assert march["contributions_in"] == "0.00"
+    assert march["contributions_out"] == "0.00"
     assert march["net_contribution"] == "0.00"
     assert march["net_contributions_accumulated"] == "1000.00"
     assert march["cost_basis"] == "1100.00"

@@ -999,6 +999,8 @@ class DashboardEquityPoint(BaseModel):
     year_month: str
     market_value: str
     cost_basis: str
+    contributions_in: str
+    contributions_out: str
     net_contribution: str
     net_contributions_accumulated: str
     uses_cost_fallback: bool = False

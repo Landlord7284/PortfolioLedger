@@ -419,6 +419,16 @@ def _cash_flow(event: EventRecord) -> Decimal:
     return ZERO
 
 
+def _cash_flow_parts(event: EventRecord) -> tuple[Decimal, Decimal]:
+    if event.is_cancelled or event.is_storno:
+        return ZERO, ZERO
+    if event.event_type == EventType.COMPRA:
+        return event.replay_value, ZERO
+    if event.event_type in EventType.exit_events() or event.event_type == EventType.AMORTIZACAO:
+        return ZERO, event.replay_value
+    return ZERO, ZERO
+
+
 def _realized_result(
     grouped_records: dict[int, list[EventRecord]],
     start_date: str | None,
@@ -587,7 +597,10 @@ def _build_equity_curve(
         cost_total = ZERO
         missing_count = 0
         unsupported_count = 0
-        net_contribution = sum((_cash_flow(event) for event in all_events if start <= event.event_date <= cutoff), ZERO)
+        monthly_cash_flow = [_cash_flow_parts(event) for event in all_events if start <= event.event_date <= cutoff]
+        contributions_in = sum((item[0] for item in monthly_cash_flow), ZERO)
+        contributions_out = sum((item[1] for item in monthly_cash_flow), ZERO)
+        net_contribution = contributions_in - contributions_out
         net_contributions_accumulated = sum((_cash_flow(event) for event in all_events if event.event_date <= cutoff), ZERO)
 
         for asset_id, records in grouped_records.items():
@@ -610,6 +623,8 @@ def _build_equity_curve(
                 "year_month": month,
                 "market_value": _money(market_total),
                 "cost_basis": _money(cost_total),
+                "contributions_in": _money(contributions_in),
+                "contributions_out": _money(contributions_out),
                 "net_contribution": _money(net_contribution),
                 "net_contributions_accumulated": _money(net_contributions_accumulated),
                 "uses_cost_fallback": missing_count > 0,

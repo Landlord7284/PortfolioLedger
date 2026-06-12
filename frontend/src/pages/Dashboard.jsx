@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, Pie, PieChart, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from 'recharts';
 import { AppContext } from '../App';
 import { dashboard as dashboardApi, positions as posApi, schwab as schwabApi } from '../api/client';
 import EventForm from '../components/EventForm';
@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -35,6 +36,19 @@ const PERIOD_OPTIONS = [
   { value: 'all', label: 'Tudo' },
 ];
 const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--primary)'];
+const EQUITY_CHART_CONFIG = {
+  market_value: { label: 'Valor de Mercado', color: 'var(--chart-1)' },
+  cost_basis: { label: 'Valor Patrimonial', color: 'var(--chart-2)' },
+  net_contributions_accumulated: { label: 'Aporte líquido acumulado', color: 'var(--chart-4)' },
+  net_contribution: { label: 'Aporte líquido mensal', color: 'var(--chart-3)' },
+  contributions_in: { label: 'Aportes', color: 'var(--chart-1)' },
+  contributions_out: { label: 'Resgates', color: 'var(--chart-5)' },
+};
+const PROGRESSION_SERIES = [
+  { key: 'market_value', strokeWidth: 2.5 },
+  { key: 'cost_basis', strokeWidth: 2, strokeDasharray: '5 5' },
+  { key: 'net_contributions_accumulated', strokeWidth: 1.75, strokeDasharray: '6 3 1 3' },
+];
 const DETAIL_ASSET_LIMIT = 9;
 const SEARCH_MATCH_LIMIT = 6;
 const CLASS_LEVEL = { type: 'class', field: 'asset_class', label: 'Classe', emptyLabel: 'Sem classe' };
@@ -402,6 +416,33 @@ function MoneyTooltip({ active, payload, label, hideValues, labelFormatter }) {
   );
 }
 
+function ContributionTooltip({ active, payload, hideValues }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload || {};
+  const items = [
+    { label: 'Aportes', value: row.contributions_in, color: 'var(--color-contributions_in)' },
+    { label: 'Resgates', value: row.contributions_out, color: 'var(--color-contributions_out)' },
+    { label: 'Líquido', value: row.net_contribution, color: 'var(--color-net_contribution)' },
+  ];
+
+  return (
+    <div className="min-w-52 rounded-lg border bg-background p-3 text-sm shadow-xl">
+      <div className="mb-2 font-medium">{formatMonth(row.year_month)}</div>
+      <div className="flex flex-col gap-2">
+        {items.map((item) => (
+          <div key={item.label} className="flex items-center justify-between gap-4">
+            <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: item.color }} />
+              <span className="truncate">{item.label}</span>
+            </span>
+            <span className="font-mono font-medium tabular-nums">{formatCurrency(item.value, hideValues)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AllocationTooltip({ active, payload, hideValues }) {
   if (!active || !payload?.length) return null;
   const item = payload[0];
@@ -490,6 +531,9 @@ export default function Dashboard() {
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(0);
   const [sort, setSort] = useState({ key: 'ticker', direction: 'asc' });
   const [isLargeModal, setIsLargeModal] = useState(false);
+  const [visibleProgressionSeries, setVisibleProgressionSeries] = useState(
+    () => PROGRESSION_SERIES.map((series) => series.key)
+  );
   const [showRedeemed, setShowRedeemed] = useState(() => {
     return localStorage.getItem('showRedeemed') === 'true';
   });
@@ -794,6 +838,14 @@ export default function Dashboard() {
     }
   }, [activeSearchMatch, navigateToSearchMatch, searchMatches.length, searchQuery]);
 
+  const handleProgressionSeriesChange = useCallback((seriesKey, checked) => {
+    setVisibleProgressionSeries((current) => {
+      if (checked) return current.includes(seriesKey) ? current : [...current, seriesKey];
+      if (current.length <= 1) return current;
+      return current.filter((key) => key !== seriesKey);
+    });
+  }, []);
+
   const displayMoney = (val) => formatMoney(val, hideValues);
   const displayQuantity = (val, assetClass) => formatQuantity(val, assetClass, hideValues);
   const classes = [...new Set(positionList.map((p) => p.asset_class).filter(Boolean))].sort();
@@ -807,6 +859,8 @@ export default function Dashboard() {
       monthLabel: formatMonth(row.year_month),
       market_value: toNumber(row.market_value),
       cost_basis: toNumber(row.cost_basis),
+      contributions_in: toNumber(row.contributions_in),
+      contributions_out: toNumber(row.contributions_out),
       net_contribution: toNumber(row.net_contribution),
       net_contributions_accumulated: toNumber(row.net_contributions_accumulated),
     }))
@@ -1111,43 +1165,99 @@ export default function Dashboard() {
               </div>
 
               <Card className="overflow-hidden">
-                <CardHeader className="border-b">
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <CardTitle className="text-base">Evolução Patrimonial Mensal</CardTitle>
-                    {alerts?.uses_cost_fallback && (
-                      <Badge variant="secondary">Alguns meses usam fallback para custo</Badge>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="p-4">
-                  {!hasEquityData ? (
-                    <div className="flex h-[340px] items-center justify-center text-center text-sm text-muted-foreground">
-                      Sem dados suficientes para montar a evolução patrimonial.
+                <Tabs defaultValue="progression" className="flex flex-col">
+                  <CardHeader className="border-b">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex flex-col gap-1">
+                        <CardTitle className="text-base">Evolução Patrimonial Mensal</CardTitle>
+                        {alerts?.uses_cost_fallback && (
+                          <Badge variant="secondary" className="w-fit">Alguns meses usam fallback para custo</Badge>
+                        )}
+                      </div>
+                      <div className="overflow-x-auto pb-1">
+                        <TabsList className="min-w-max justify-start">
+                          <TabsTrigger value="progression" className="h-9 flex-none px-3">Progressão</TabsTrigger>
+                          <TabsTrigger value="contributions" className="h-9 flex-none px-3">Aporte mensal</TabsTrigger>
+                        </TabsList>
+                      </div>
                     </div>
-                  ) : (
-                    <ChartContainer
-                      config={{
-                        market_value: { label: 'Valor de Mercado', color: 'var(--chart-1)' },
-                        cost_basis: { label: 'Valor Patrimonial', color: 'var(--chart-2)' },
-                        net_contributions_accumulated: { label: 'Aporte líquido acumulado', color: 'var(--chart-4)' },
-                        net_contribution: { label: 'Aporte líquido mensal', color: 'var(--muted-foreground)' },
-                      }}
-                      className="h-[340px] w-full aspect-auto"
-                    >
-                      <ComposedChart data={equityData} margin={{ left: 8, right: 16, top: 16, bottom: 8 }}>
-                        <CartesianGrid vertical={false} />
-                        <XAxis dataKey="monthLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={18} />
-                        <YAxis yAxisId="value" tickLine={false} axisLine={false} tickMargin={8} width={86} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
-                        <YAxis yAxisId="flow" orientation="right" tickLine={false} axisLine={false} tickMargin={8} width={72} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
-                        <ChartTooltip content={<MoneyTooltip hideValues={hideValues} labelFormatter={formatMonth} />} />
-                        <Bar yAxisId="flow" name="Aporte líquido mensal" dataKey="net_contribution" fill="var(--color-net_contribution)" opacity={0.42} radius={[3, 3, 0, 0]} />
-                        <Line yAxisId="value" name="Valor de Mercado" type="monotone" dataKey="market_value" stroke="var(--color-market_value)" strokeWidth={2.5} dot={false} />
-                        <Line yAxisId="value" name="Valor Patrimonial" type="monotone" dataKey="cost_basis" stroke="var(--color-cost_basis)" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                        <Line yAxisId="value" name="Aporte líquido acumulado" type="monotone" dataKey="net_contributions_accumulated" stroke="var(--color-net_contributions_accumulated)" strokeWidth={1.75} strokeDasharray="6 3 1 3" dot={false} />
-                      </ComposedChart>
-                    </ChartContainer>
-                  )}
-                </CardContent>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    {!hasEquityData ? (
+                      <div className="flex h-[340px] items-center justify-center text-center text-sm text-muted-foreground">
+                        Sem dados suficientes para montar a evolução patrimonial.
+                      </div>
+                    ) : (
+                      <>
+                        <TabsContent value="progression" className="mt-0 flex flex-col gap-4">
+                          <div className="flex flex-wrap items-center gap-3" aria-label="Séries da progressão patrimonial">
+                            {PROGRESSION_SERIES.map((series) => {
+                              const config = EQUITY_CHART_CONFIG[series.key];
+                              const checked = visibleProgressionSeries.includes(series.key);
+                              const disabled = checked && visibleProgressionSeries.length === 1;
+                              return (
+                                <label
+                                  key={series.key}
+                                  className={cn(
+                                    'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50',
+                                    checked && 'bg-muted/40',
+                                    disabled && 'cursor-not-allowed opacity-80'
+                                  )}
+                                >
+                                  <Checkbox
+                                    checked={checked}
+                                    disabled={disabled}
+                                    onCheckedChange={(value) => handleProgressionSeriesChange(series.key, value === true)}
+                                  />
+                                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: config.color }} />
+                                  <span>{config.label}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <ChartContainer config={EQUITY_CHART_CONFIG} className="h-[340px] w-full aspect-auto">
+                            <LineChart data={equityData} margin={{ left: 8, right: 16, top: 16, bottom: 8 }}>
+                              <CartesianGrid vertical={false} />
+                              <XAxis dataKey="monthLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={18} />
+                              <YAxis tickLine={false} axisLine={false} tickMargin={8} width={86} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
+                              <ChartTooltip content={<MoneyTooltip hideValues={hideValues} labelFormatter={formatMonth} />} />
+                              {PROGRESSION_SERIES.filter((series) => visibleProgressionSeries.includes(series.key)).map((series) => (
+                                <Line
+                                  key={series.key}
+                                  name={EQUITY_CHART_CONFIG[series.key].label}
+                                  type="monotone"
+                                  dataKey={series.key}
+                                  stroke={`var(--color-${series.key})`}
+                                  strokeWidth={series.strokeWidth}
+                                  strokeDasharray={series.strokeDasharray}
+                                  dot={false}
+                                />
+                              ))}
+                            </LineChart>
+                          </ChartContainer>
+                        </TabsContent>
+                        <TabsContent value="contributions" className="mt-0">
+                          <ChartContainer config={EQUITY_CHART_CONFIG} className="h-[340px] w-full aspect-auto">
+                            <BarChart data={equityData} margin={{ left: 8, right: 16, top: 16, bottom: 8 }}>
+                              <CartesianGrid vertical={false} />
+                              <XAxis dataKey="monthLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={18} />
+                              <YAxis tickLine={false} axisLine={false} tickMargin={8} width={86} tickFormatter={(value) => formatCompactMoney(value, hideValues)} />
+                              <ChartTooltip content={<ContributionTooltip hideValues={hideValues} />} />
+                              <Bar name="Aporte líquido mensal" dataKey="net_contribution" radius={[4, 4, 0, 0]}>
+                                {equityData.map((row) => (
+                                  <Cell
+                                    key={row.year_month}
+                                    fill={row.net_contribution >= 0 ? 'var(--color-net_contribution)' : 'var(--color-contributions_out)'}
+                                  />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ChartContainer>
+                        </TabsContent>
+                      </>
+                    )}
+                  </CardContent>
+                </Tabs>
               </Card>
 
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
