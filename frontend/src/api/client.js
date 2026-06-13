@@ -166,6 +166,13 @@ export const dashboard = {
   },
 };
 
+export const performance = {
+  twr: ({ portfolioId, period }) => {
+    const params = new URLSearchParams({ portfolio_id: portfolioId, period });
+    return request(`/performance/twr?${params.toString()}`);
+  },
+};
+
 export const reports = {
   yearOptions: ({ portfolioId }) => {
     const params = new URLSearchParams({ portfolio_id: portfolioId });

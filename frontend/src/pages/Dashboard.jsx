@@ -1,8 +1,8 @@
 import { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ReferenceLine, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ReferenceLine, XAxis, YAxis } from 'recharts';
 import { AppContext } from '../App';
-import { dashboard as dashboardApi, positions as posApi, schwab as schwabApi } from '../api/client';
+import { dashboard as dashboardApi, performance as performanceApi, positions as posApi, schwab as schwabApi } from '../api/client';
 import EventForm from '../components/EventForm';
 import B3MonthlyImportModal from '../components/B3MonthlyImportModal';
 import ImportModal from '../components/ImportModal';
@@ -43,6 +43,7 @@ const EQUITY_CHART_CONFIG = {
   net_contribution: { label: 'Aporte líquido mensal', color: 'var(--chart-1)' },
   contributions_in: { label: 'Aportes', color: 'var(--chart-1)' },
   contributions_out: { label: 'Resgates', color: 'var(--chart-3)' },
+  quota_value: { label: 'Cota TWR BR', color: 'var(--chart-2)' },
 };
 const PROGRESSION_SERIES = [
   { key: 'market_value', strokeWidth: 2.5 },
@@ -456,6 +457,37 @@ function ContributionTooltip({ active, payload, hideValues, monthlyAverage }) {
   );
 }
 
+function TwrTooltip({ active, payload, hideValues }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload || {};
+  const items = [
+    { label: 'Cota', value: row.quota_value, formatter: (value) => hideValues ? '••••' : Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) },
+    { label: 'Retorno mensal', value: row.monthly_return_pct, formatter: (value) => formatPercent(value, hideValues) },
+    { label: 'Retorno acumulado', value: row.accumulated_return_pct, formatter: (value) => formatPercent(value, hideValues) },
+    { label: 'Mercado BR', value: row.market_value, formatter: (value) => formatCurrency(value, hideValues) },
+    { label: 'Fluxo líquido', value: row.net_flow, formatter: (value) => formatCurrency(value, hideValues) },
+  ];
+
+  return (
+    <div className="min-w-56 rounded-lg border bg-background p-3 text-sm shadow-xl">
+      <div className="mb-2 font-medium">{formatMonth(row.year_month)}</div>
+      <div className="flex flex-col gap-2">
+        {items.map((item) => (
+          <div key={item.label} className="flex items-center justify-between gap-4">
+            <span className="text-muted-foreground">{item.label}</span>
+            <span className="font-mono font-medium tabular-nums">{item.formatter(item.value)}</span>
+          </div>
+        ))}
+      </div>
+      {row.uses_cost_fallback && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {row.missing_quote_count} ativo(s) usando custo como fallback neste mês.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function AllocationTooltip({ active, payload, hideValues }) {
   if (!active || !payload?.length) return null;
   const item = payload[0];
@@ -529,6 +561,8 @@ export default function Dashboard() {
   const [positionsLoading, setPositionsLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [twrData, setTwrData] = useState(null);
+  const [twrLoading, setTwrLoading] = useState(true);
   const [portfolioDashboardData, setPortfolioDashboardData] = useState(null);
   const [portfolioDashboardLoading, setPortfolioDashboardLoading] = useState(true);
   const [dashboardFilters, setDashboardFilters] = useState(getStoredDashboardFilters);
@@ -658,6 +692,28 @@ export default function Dashboard() {
     }
   }, [activePortfolioId, dashboardPeriod, dashboardAssetClass]);
 
+  const loadTwr = useCallback(async () => {
+    if (!activePortfolioId) {
+      setTwrData(null);
+      setTwrLoading(false);
+      return;
+    }
+    setTwrLoading(true);
+    try {
+      const data = await performanceApi.twr({
+        portfolioId: activePortfolioId,
+        period: dashboardPeriod,
+      });
+      setTwrData(data);
+    } catch (err) {
+      console.error('Failed to load TWR:', err);
+      setTwrData(null);
+      toast.error(err.message || 'Falha ao carregar TWR.');
+    } finally {
+      setTwrLoading(false);
+    }
+  }, [activePortfolioId, dashboardPeriod]);
+
   const loadPortfolioDashboard = useCallback(async () => {
     if (!activePortfolioId) {
       setPortfolioDashboardData(null);
@@ -684,8 +740,9 @@ export default function Dashboard() {
   const refreshData = useCallback(() => {
     loadPositions();
     loadDashboard();
+    loadTwr();
     loadPortfolioDashboard();
-  }, [loadPositions, loadDashboard, loadPortfolioDashboard]);
+  }, [loadPositions, loadDashboard, loadTwr, loadPortfolioDashboard]);
 
   useEffect(() => {
     let active = true;
@@ -706,6 +763,16 @@ export default function Dashboard() {
       active = false;
     };
   }, [loadDashboard]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => {
+      if (active) loadTwr();
+    });
+    return () => {
+      active = false;
+    };
+  }, [loadTwr]);
 
   useEffect(() => {
     let active = true;
@@ -877,6 +944,20 @@ export default function Dashboard() {
     }))
   ), [dashboardData]);
 
+  const twrChartData = useMemo(() => (
+    (twrData?.series || []).map((row) => ({
+      ...row,
+      monthLabel: formatMonth(row.year_month),
+      market_value: toNumber(row.market_value),
+      flow_in: toNumber(row.flow_in),
+      flow_out: toNumber(row.flow_out),
+      net_flow: toNumber(row.net_flow),
+      monthly_return_pct: toNumber(row.monthly_return_pct),
+      accumulated_return_pct: toNumber(row.accumulated_return_pct),
+      quota_value: toNumber(row.quota_value),
+    }))
+  ), [twrData]);
+
   const portfolioStructureData = portfolioDashboardData || (!dashboardAssetClass && dashboardPeriod === 'year' ? dashboardData : null);
 
   const portfolioCurrentPositions = useMemo(() => (
@@ -957,6 +1038,8 @@ export default function Dashboard() {
 
   const hasDashboardEvents = !alerts?.no_events;
   const hasEquityData = equityData.some((row) => row.market_value !== 0 || row.cost_basis !== 0 || row.net_contribution !== 0 || row.net_contributions_accumulated !== 0);
+  const hasTwrData = twrChartData.some((row) => row.market_value !== 0 || row.net_flow !== 0 || row.quota_value !== 100);
+  const twrUsesCostFallback = Boolean(twrData?.summary?.uses_cost_fallback);
   const resultPercent = toNumber(summary?.unrealized_result_pct);
   const resultTone = toNumber(summary?.unrealized_result) > 0 ? 'positive' : toNumber(summary?.unrealized_result) < 0 ? 'negative' : 'default';
   const resultTrendIcon = resultPercent > 0 ? TrendingUp : resultPercent < 0 ? TrendingDown : null;
@@ -1183,6 +1266,7 @@ export default function Dashboard() {
                       <TabsList className="min-w-max justify-start">
                         <TabsTrigger value="progression" className="h-7 flex-none px-3">Evolução Patrimonial</TabsTrigger>
                         <TabsTrigger value="contributions" className="h-7 flex-none px-3">Aporte mensal</TabsTrigger>
+                        <TabsTrigger value="twr" className="h-7 flex-none px-3">TWR BR</TabsTrigger>
                       </TabsList>
                     </div>
                     {activeEquityChartTab === 'progression' && (
@@ -1215,7 +1299,7 @@ export default function Dashboard() {
                     )}
                   </CardHeader>
                   <CardContent className="p-4">
-                    {!hasEquityData ? (
+                    {!hasEquityData && activeEquityChartTab !== 'twr' ? (
                       <div className="flex h-[340px] items-center justify-center text-center text-sm text-muted-foreground">
                         Sem dados suficientes para montar a evolução patrimonial.
                       </div>
@@ -1272,6 +1356,51 @@ export default function Dashboard() {
                               </Bar>
                             </BarChart>
                           </ChartContainer>
+                        </TabsContent>
+                        <TabsContent value="twr" className="mt-0">
+                          {twrLoading ? (
+                            <div className="flex h-[340px] items-center justify-center text-center text-sm text-muted-foreground">
+                              Carregando TWR BR...
+                            </div>
+                          ) : !hasTwrData ? (
+                            <div className="flex h-[340px] items-center justify-center text-center text-sm text-muted-foreground">
+                              Sem dados BR suficientes para montar o TWR.
+                            </div>
+                          ) : (
+                            <div className="flex flex-col gap-2">
+                              {twrUsesCostFallback && (
+                                <div className="text-xs text-muted-foreground">
+                                  Alguns meses usam custo como fallback por falta de cotacao B3.
+                                </div>
+                              )}
+                              <ChartContainer config={EQUITY_CHART_CONFIG} className="h-[316px] w-full aspect-auto">
+                                <AreaChart data={twrChartData} margin={{ left: 8, right: 16, top: 16, bottom: 8 }}>
+                                  <CartesianGrid vertical={false} />
+                                  <XAxis dataKey="monthLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={18} />
+                                  <YAxis
+                                    tickLine={false}
+                                    axisLine={false}
+                                    tickMargin={8}
+                                    width={72}
+                                    tickCount={6}
+                                    tick={{ fontSize: 12 }}
+                                    tickFormatter={(value) => hideValues ? '••••' : Number(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                  />
+                                  <ChartTooltip content={<TwrTooltip hideValues={hideValues} />} />
+                                  <Area
+                                    name="Cota TWR BR"
+                                    type="monotone"
+                                    dataKey="quota_value"
+                                    stroke="var(--color-quota_value)"
+                                    fill="var(--color-quota_value)"
+                                    fillOpacity={0.18}
+                                    strokeWidth={2.5}
+                                    dot={false}
+                                  />
+                                </AreaChart>
+                              </ChartContainer>
+                            </div>
+                          )}
                         </TabsContent>
                       </>
                     )}

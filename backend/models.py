@@ -1088,6 +1088,36 @@ class DashboardResponse(BaseModel):
     operational_alerts: DashboardOperationalAlerts
 
 
+class TwrSummary(BaseModel):
+    quota_value: str
+    accumulated_return_pct: str
+    monthly_return_pct: str
+    market_value: str
+    uses_cost_fallback: bool = False
+    fallback_month_count: int = 0
+
+
+class TwrPoint(BaseModel):
+    year_month: str
+    market_value: str
+    flow_in: str
+    flow_out: str
+    net_flow: str
+    monthly_return_pct: str
+    accumulated_return_pct: str
+    quota_value: str
+    uses_cost_fallback: bool = False
+    missing_quote_count: int = 0
+
+
+class TwrResponse(BaseModel):
+    portfolio_id: int
+    market: str
+    period: str
+    summary: TwrSummary
+    series: list[TwrPoint]
+
+
 # â”€â”€ Brokerage notes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class BrokerageNoteOperation(BaseModel):
