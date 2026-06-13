@@ -35,9 +35,9 @@ from backend.services import asset_service, event_service
 
 
 _FILENAME_RE = re.compile(r"^(?P<year>\d{4})-(?P<month>\d{2})\.xlsx$", re.IGNORECASE)
-_TICKER_PREFIX_RE = re.compile(r"^\s*([A-Z]{4}\d{1,2}[A-Z]*)\s+-\s+(.+)$")
-_TRADED_TICKER_RE = re.compile(r"^[A-Z]{4}\d{1,2}$")
-_BR_TICKER_WITH_ALPHA_SUFFIX_RE = re.compile(r"^([A-Z]{4}\d{1,2})[A-Z]+$")
+_TICKER_PREFIX_RE = re.compile(r"^\s*([A-Z0-9]{4}\d{1,2}[A-Z]*)\s+-\s+(.+)$")
+_TRADED_TICKER_RE = re.compile(r"^[A-Z0-9]{4}\d{1,2}$")
+_BR_TICKER_WITH_ALPHA_SUFFIX_RE = re.compile(r"^([A-Z0-9]{4}\d{1,2})[A-Z]+$")
 _FIXED_INCOME_CLASSES = {
     "DEB": AssetClass.DEBENTURE,
 }

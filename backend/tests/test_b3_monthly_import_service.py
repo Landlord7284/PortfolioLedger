@@ -420,6 +420,33 @@ def test_b3_income_preserves_same_asset_date_type_with_different_values(tmp_path
     assert [row["net_value"] for row in rows] == ["4", "5"]
 
 
+def test_b3_income_matches_tickers_with_digit_in_symbol_prefix(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    content = _workbook_bytes(
+        {
+            "Proventos Recebidos": [
+                ["B3SA3 - B3 S.A. - BRASIL, BOLSA, BALCAO", "13/04/2026", "Juros Sobre Capital Proprio", "ITAU", "6500", 0.07, 411.53],
+            ],
+        }
+    )
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "B3SA3", market="BR", name="B3 S.A")
+
+        result = import_b3_monthly_batch(conn, portfolio["id"], [SourceFile("2026-04.xlsx", content)])
+        income = conn.execute("SELECT * FROM b3_income_events").fetchone()
+        reviews = asset_service.list_match_reviews(conn)
+
+    assert result["imported_incomes"] == 1
+    assert result["review_count"] == 0
+    assert reviews == []
+    assert income["ticker"] == "B3SA3"
+    assert income["asset_id"] == asset["id"]
+    assert income["status"] == "imported"
+
+
 def test_b3_income_matches_known_assets_when_product_ticker_has_alpha_suffix(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)
