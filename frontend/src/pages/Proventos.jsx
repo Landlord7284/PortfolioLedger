@@ -365,28 +365,33 @@ export default function Proventos() {
   }, [activePortfolioId, period, chartView, effectiveChartGroupBy, hasSelectedChartAsset, tableYear, tableMonth, tableAssetClass, tableAssetId, tableEventType]);
 
   const monthlyChartSegments = useMemo(() => (
-    (report?.chart.months || []).map((month) => {
-      const sortedSegments = (month.segments || [])
-        .map((segment) => ({
-          key: segment.key,
-          value: toNumber(segment.value),
-        }))
-        .filter((segment) => segment.value > 0)
-        .sort((a, b) => (b.value - a.value) || compareText(a.key, b.key));
-      const hasOverflow = sortedSegments.length > TOP_SEGMENT_LIMIT;
-      const visibleSegments = hasOverflow ? sortedSegments.slice(0, TOP_SEGMENT_LIMIT) : sortedSegments;
-      const visibleKeys = new Set(visibleSegments.map((segment) => segment.key));
-      const othersValue = hasOverflow
-        ? sortedSegments.reduce((sum, segment) => (visibleKeys.has(segment.key) ? sum : sum + segment.value), 0)
-        : 0;
+    (report?.chart.months || [])
+      .filter((month) => {
+        const latestImportedMonth = report?.metadata?.latest_b3_file_reference;
+        return !latestImportedMonth || month.month <= latestImportedMonth;
+      })
+      .map((month) => {
+        const sortedSegments = (month.segments || [])
+          .map((segment) => ({
+            key: segment.key,
+            value: toNumber(segment.value),
+          }))
+          .filter((segment) => segment.value > 0)
+          .sort((a, b) => (b.value - a.value) || compareText(a.key, b.key));
+        const hasOverflow = sortedSegments.length > TOP_SEGMENT_LIMIT;
+        const visibleSegments = hasOverflow ? sortedSegments.slice(0, TOP_SEGMENT_LIMIT) : sortedSegments;
+        const visibleKeys = new Set(visibleSegments.map((segment) => segment.key));
+        const othersValue = hasOverflow
+          ? sortedSegments.reduce((sum, segment) => (visibleKeys.has(segment.key) ? sum : sum + segment.value), 0)
+          : 0;
 
-      return {
-        month: month.month,
-        totalNetValue: month.total_net_value,
-        visibleSegments,
-        othersValue,
-      };
-    })
+        return {
+          month: month.month,
+          totalNetValue: month.total_net_value,
+          visibleSegments,
+          othersValue,
+        };
+      })
   ), [report]);
 
   const chartSegments = useMemo(() => {
