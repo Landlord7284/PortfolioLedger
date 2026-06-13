@@ -26,6 +26,8 @@ from backend.domain.normalization import normalize_event_type_strict
 
 
 CENTS = Decimal("0.01")
+PERCENT = Decimal("0.01")
+ZERO = Decimal("0")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -68,6 +70,10 @@ def _rows_to_original_event_records(rows: list) -> list[EventRecord]:
 
 def _money_brl(value: Decimal) -> str:
     return str(value.quantize(CENTS, rounding=ROUND_HALF_UP))
+
+
+def _percent(value: Decimal) -> str:
+    return str(value.quantize(PERCENT, rounding=ROUND_HALF_UP))
 
 
 def _is_us_asset(conn: sqlite3.Connection, asset_id: int) -> bool:
@@ -196,6 +202,76 @@ def recalculate_position(
             process_event(ev, state, skip_validation=True)
     _save_position(conn, portfolio_id, asset_id, state)
     return state
+
+
+def replay_position_until(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    asset_id: int,
+    as_of_date: str,
+) -> PositionState:
+    """Replay the asset position through the end of as_of_date."""
+    state = PositionState()
+    for ev in _fetch_all_events(conn, asset_id, portfolio_id):
+        if ev.is_cancelled or ev.is_storno or ev.event_date > as_of_date:
+            continue
+        process_event(ev, state, skip_validation=True)
+    return state
+
+
+def income_yield_on_cost(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    asset_id: int | None,
+    payment_date: str,
+    net_value: str | None,
+) -> str | None:
+    if not asset_id:
+        return None
+    state = replay_position_until(conn, portfolio_id, asset_id, payment_date)
+    if state.total_cost <= ZERO:
+        return None
+    return _percent((to_decimal(net_value or "0") / state.total_cost) * Decimal("100"))
+
+
+def position_income_metrics(
+    conn: sqlite3.Connection,
+    portfolio_id: int,
+    asset_id: int,
+    quantity: str | None,
+    total_cost: str | None,
+) -> dict[str, str | None]:
+    rows = conn.execute(
+        """
+        SELECT net_value
+        FROM b3_income_events
+        WHERE portfolio_id = ?
+          AND asset_id = ?
+          AND status NOT LIKE 'ledger_%'
+          AND status != 'discarded'
+        """,
+        (portfolio_id, asset_id),
+    ).fetchall()
+    accumulated_income = sum((to_decimal(row["net_value"] or "0") for row in rows), ZERO)
+    current_quantity = to_decimal(quantity)
+    current_total_cost = to_decimal(total_cost)
+
+    if current_quantity > ZERO:
+        adjusted_cost = max(current_total_cost - accumulated_income, ZERO)
+        adjusted_average_price = _money_brl(adjusted_cost / current_quantity)
+    else:
+        adjusted_average_price = "0.00"
+
+    if current_total_cost > ZERO:
+        yield_on_cost = _percent((accumulated_income / current_total_cost) * Decimal("100"))
+    else:
+        yield_on_cost = None
+
+    return {
+        "accumulated_income": _money_brl(accumulated_income),
+        "adjusted_average_price": adjusted_average_price,
+        "yield_on_cost": yield_on_cost,
+    }
 
 
 def backfill_event_brl_conversions(conn: sqlite3.Connection) -> dict:
@@ -741,7 +817,19 @@ def get_position(
         """,
         (portfolio_id, asset_id),
     ).fetchone()
-    return _attach_original_position(conn, dict(row)) if row else None
+    if not row:
+        return None
+    position = _attach_original_position(conn, dict(row))
+    position.update(
+        position_income_metrics(
+            conn,
+            portfolio_id,
+            asset_id,
+            position["quantity"],
+            position["total_cost"],
+        )
+    )
+    return position
 
 
 def _attach_original_position(conn: sqlite3.Connection, position: dict) -> dict:

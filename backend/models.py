@@ -265,6 +265,9 @@ class PositionResponse(BaseModel):
     total_cost: str
     average_price: str
     realized_result: str
+    accumulated_income: Optional[str] = None
+    adjusted_average_price: Optional[str] = None
+    yield_on_cost: Optional[str] = None
     total_cost_original: Optional[str] = None
     average_price_original: Optional[str] = None
     realized_result_original: Optional[str] = None

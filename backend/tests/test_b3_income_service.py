@@ -1,8 +1,8 @@
 from datetime import date
 
 from backend.database import get_db, init_db
-from backend.domain.enums import AssetClass
-from backend.services import asset_service, b3_income_service, portfolio_service
+from backend.domain.enums import AssetClass, EventType
+from backend.services import asset_service, b3_income_service, event_service, portfolio_service
 
 
 def _import_id(conn, portfolio_id: int, month: str = "2026-03") -> int:
@@ -104,6 +104,48 @@ def test_b3_incomes_summary_chart_filters_and_table(tmp_path, monkeypatch):
 
     assert by_class["chart"]["segment_keys"] == [AssetClass.ACAO.value, AssetClass.FII.value]
     assert by_type["chart"]["segment_keys"] == ["Dividendos", "Juros sobre Capital Próprio", "Rendimento"]
+
+
+def test_b3_income_table_includes_event_yield_on_cost(tmp_path, monkeypatch):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+    monkeypatch.setattr(b3_income_service, "date", type("FixedDate", (), {"today": staticmethod(lambda: date(2026, 5, 17))}))
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "ITSA4", market="BR", name="Itausa")
+        import_id = _import_id(conn, portfolio["id"], "2026-03")
+        event_service.create_event(
+            conn,
+            portfolio["id"],
+            asset["id"],
+            EventType.COMPRA.value,
+            "2026-01-10",
+            "100",
+            "1000",
+        )
+        _income(
+            conn,
+            import_id,
+            portfolio["id"],
+            asset_id=asset["id"],
+            payment_date="2026-03-10",
+            event_type="Dividendos",
+            product="ITSA4 - Itausa",
+            ticker="ITSA4",
+            quantity="100",
+            net_value="50.00",
+        )
+
+        report = b3_income_service.list_b3_incomes(
+            conn,
+            portfolio["id"],
+            period="year",
+            table_year=2026,
+            table_month=3,
+        )
+
+    assert report["table"]["rows"][0]["yoc"] == "5.00"
 
 
 def test_b3_incomes_table_filters_are_independent(tmp_path, monkeypatch):

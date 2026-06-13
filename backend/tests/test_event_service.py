@@ -169,6 +169,114 @@ def test_us_purchase_keeps_usd_event_value_and_replays_brl_position(tmp_path):
     assert rows[0]["running_total_cost"] == "5000.00"
 
 
+def test_position_includes_accumulated_income_metrics(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "ITSA4", market="BR")
+        import_id = conn.execute(
+            """
+            INSERT INTO b3_monthly_imports (portfolio_id, filename, reference_month, reference_date)
+            VALUES (?, ?, ?, ?)
+            """,
+            (portfolio["id"], "2026-03.xlsx", "2026-03", "2026-03-31"),
+        ).lastrowid
+        event_service.create_event(
+            conn,
+            portfolio["id"],
+            asset["id"],
+            EventType.COMPRA.value,
+            "2026-01-10",
+            "10",
+            "1000",
+        )
+        conn.execute(
+            """
+            INSERT INTO b3_income_events (
+                import_id, portfolio_id, asset_id, payment_date, event_type,
+                product, ticker, quantity, unit_price, net_value, status, raw_payload
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                import_id,
+                portfolio["id"],
+                asset["id"],
+                "2026-03-10",
+                "Dividendos",
+                "ITSA4 - Itausa",
+                "ITSA4",
+                "10",
+                "0",
+                "200.00",
+                "imported",
+                "{}",
+            ),
+        )
+
+        position = event_service.get_position(conn, portfolio["id"], asset["id"])
+
+    assert position["accumulated_income"] == "200.00"
+    assert position["adjusted_average_price"] == "80.00"
+    assert position["yield_on_cost"] == "20.00"
+
+
+def test_position_adjusted_average_price_cannot_be_negative(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    init_db(db_path)
+
+    with get_db(db_path) as conn:
+        portfolio = portfolio_service.create_portfolio(conn, "Principal")
+        asset = asset_service.create_asset(conn, AssetClass.ACAO.value, "ITSA4", market="BR")
+        import_id = conn.execute(
+            """
+            INSERT INTO b3_monthly_imports (portfolio_id, filename, reference_month, reference_date)
+            VALUES (?, ?, ?, ?)
+            """,
+            (portfolio["id"], "2026-03.xlsx", "2026-03", "2026-03-31"),
+        ).lastrowid
+        event_service.create_event(
+            conn,
+            portfolio["id"],
+            asset["id"],
+            EventType.COMPRA.value,
+            "2026-01-10",
+            "10",
+            "1000",
+        )
+        conn.execute(
+            """
+            INSERT INTO b3_income_events (
+                import_id, portfolio_id, asset_id, payment_date, event_type,
+                product, ticker, quantity, unit_price, net_value, status, raw_payload
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                import_id,
+                portfolio["id"],
+                asset["id"],
+                "2026-03-10",
+                "Dividendos",
+                "ITSA4 - Itausa",
+                "ITSA4",
+                "10",
+                "0",
+                "1200.00",
+                "imported",
+                "{}",
+            ),
+        )
+
+        position = event_service.get_position(conn, portfolio["id"], asset["id"])
+
+    assert position["accumulated_income"] == "1200.00"
+    assert position["adjusted_average_price"] == "0.00"
+    assert position["yield_on_cost"] == "120.00"
+
+
 def test_us_xlsx_import_converts_values_for_brl_position(tmp_path):
     db_path = tmp_path / "ledger.db"
     init_db(db_path)

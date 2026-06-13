@@ -8,6 +8,8 @@ from decimal import Decimal, ROUND_HALF_UP
 import sqlite3
 from typing import Any
 
+from backend.services import event_service
+
 
 PERIODS = {"year", "12m", "24m", "36m", "all"}
 CHART_GROUPS = {"asset", "asset_class", "event_type"}
@@ -180,7 +182,7 @@ def _segment_key(row: sqlite3.Row, chart_group_by: str) -> str:
     return row["event_type"] or "Sem tipo"
 
 
-def _table_row(row: sqlite3.Row) -> dict[str, Any]:
+def _table_row(conn: sqlite3.Connection, portfolio_id: int, row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "asset_id": row["asset_id"],
@@ -191,7 +193,13 @@ def _table_row(row: sqlite3.Row) -> dict[str, Any]:
         "event_type": row["event_type"],
         "quantity": row["quantity"] or "0",
         "net_value": _money(_to_decimal(row["net_value"])),
-        "yoc": None,
+        "yoc": event_service.income_yield_on_cost(
+            conn,
+            portfolio_id,
+            row["asset_id"],
+            row["payment_date"],
+            row["net_value"],
+        ),
         "status": row["status"],
     }
 
@@ -386,7 +394,7 @@ def list_b3_incomes(
             "year": selected_year,
             "month": selected_month,
             "total_net_value": _money(table_total),
-            "rows": [_table_row(row) for row in table_rows],
+            "rows": [_table_row(conn, portfolio_id, row) for row in table_rows],
         },
         "metadata": _metadata(conn, portfolio_id),
     }

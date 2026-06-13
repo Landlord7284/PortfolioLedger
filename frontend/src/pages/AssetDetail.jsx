@@ -401,8 +401,16 @@ export default function AssetDetail() {
 
   const displayMoney = (val) => formatMoney(val, hideValues);
   const displayQuantity = (val) => formatQuantity(val, asset?.asset_class, hideValues);
+  const displayPercent = (val) => {
+    if (val == null || val === '') return '—';
+    if (hideValues) return '•••••';
+    const parsed = Number(val);
+    if (!Number.isFinite(parsed)) return '—';
+    return `${parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+  };
   const isUsAsset = asset?.market === 'US' || asset?.currency === 'USD';
-  const operationMoneyPrefix = isUsAsset ? 'US$' : 'R$';
+  const tableOperationMoneyPrefix = isUsAsset ? 'US$ ' : '';
+  const tableBrlPrefix = isUsAsset ? 'R$ ' : '';
 
   const formatDisplayDate = (isoStr) => {
     if (!isoStr) return '';
@@ -482,7 +490,7 @@ export default function AssetDetail() {
       />
 
       {position && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Quantidade</CardTitle>
@@ -496,7 +504,7 @@ export default function AssetDetail() {
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Custo Total (BRL)</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold font-mono">R$ {displayMoney(position.total_cost)}</div>
+              <div className="text-2xl font-bold font-mono">{displayMoney(position.total_cost)}</div>
               {isUsAsset && position.total_cost_original && (
                 <div className="mt-1 text-xs font-mono text-muted-foreground">US$ {displayMoney(position.total_cost_original)}</div>
               )}
@@ -507,10 +515,26 @@ export default function AssetDetail() {
               <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Preço Médio (BRL)</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold font-mono">R$ {displayMoney(position.average_price)}</div>
+              <div className="text-2xl font-bold font-mono">{displayMoney(position.average_price)}</div>
               {isUsAsset && position.average_price_original && (
                 <div className="mt-1 text-xs font-mono text-muted-foreground">US$ {displayMoney(position.average_price_original)}</div>
               )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">PM Ajustado</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold font-mono">{displayMoney(position.adjusted_average_price)}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Yield on Cost</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold font-mono">{displayPercent(position.yield_on_cost)}</div>
             </CardContent>
           </Card>
           <Card>
@@ -519,7 +543,7 @@ export default function AssetDetail() {
             </CardHeader>
             <CardContent>
               <div className={`text-2xl font-bold font-mono ${!hideValues && parseFloat(position.realized_result) >= 0 ? 'text-emerald-500' : !hideValues ? 'text-red-500' : ''}`}>
-                R$ {displayMoney(position.realized_result)}
+                {displayMoney(position.realized_result)}
               </div>
             </CardContent>
           </Card>
@@ -545,7 +569,7 @@ export default function AssetDetail() {
                   </div>
                   <p className="text-xs text-muted-foreground">{review.review_reason || 'Possível duplicidade patrimonial contra evento existente no ledger.'}</p>
                   <p className="text-xs text-muted-foreground">
-                    Importado: {review.source_symbol || review.current_ticker || '-'} · qtd {displayQuantity(review.quantity)} · valor {operationMoneyPrefix} {displayMoney(review.amount)}
+                    Importado: {review.source_symbol || review.current_ticker || '-'} · qtd {displayQuantity(review.quantity)} · valor {displayMoney(review.amount)}
                   </p>
                   <p className="text-xs text-muted-foreground">Origem: {review.filename || 'Schwab JSON'} · linha {review.source_row}</p>
                 </div>
@@ -570,7 +594,7 @@ export default function AssetDetail() {
                             <TableCell>{event.event_type}</TableCell>
                             <TableCell>{formatDisplayDate(event.event_date)}</TableCell>
                             <TableCell className="text-right font-mono text-sm">{displayQuantity(event.quantity)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">{operationMoneyPrefix} {displayMoney(event.event_value)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{tableOperationMoneyPrefix}{displayMoney(event.event_value)}</TableCell>
                             <TableCell className="text-right">
                               <Button size="sm" onClick={() => confirmSchwabDuplicate(review, event.id)}>
                                 <Check className="w-3 h-3" /> Confirmar duplicado
@@ -701,15 +725,15 @@ export default function AssetDetail() {
                         )}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">{displayQuantity(ev.quantity)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{operationMoneyPrefix} {displayMoney(ev.event_value)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{tableOperationMoneyPrefix}{displayMoney(ev.event_value)}</TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        {ev.gross_value ? `${operationMoneyPrefix} ${displayMoney(ev.gross_value)}` : '—'}
+                        {ev.gross_value ? `${tableOperationMoneyPrefix}${displayMoney(ev.gross_value)}` : '—'}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        {ev.unit_price ? `${operationMoneyPrefix} ${displayMoney(ev.unit_price)}` : '—'}
+                        {ev.unit_price ? `${tableOperationMoneyPrefix}${displayMoney(ev.unit_price)}` : '—'}
                       </TableCell>
                       <TableCell className={`text-right font-mono text-sm ${!hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) > 0 ? 'text-emerald-500' : !hideValues && ev.realized_event_result && parseFloat(ev.realized_event_result) < 0 ? 'text-red-500' : ''}`}>
-                        {ev.realized_event_result ? `R$ ${displayMoney(ev.realized_event_result)}` : '—'}
+                        {ev.realized_event_result ? `${tableBrlPrefix}${displayMoney(ev.realized_event_result)}` : '—'}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">
                         {ev.running_quantity ? displayQuantity(ev.running_quantity) : '—'}
@@ -720,7 +744,7 @@ export default function AssetDetail() {
                         </TableCell>
                       )}
                       <TableCell className="text-right font-mono text-sm">
-                        {ev.running_total_cost ? `R$ ${displayMoney(ev.running_total_cost)}` : '—'}
+                        {ev.running_total_cost ? `${tableBrlPrefix}${displayMoney(ev.running_total_cost)}` : '—'}
                       </TableCell>
                       <TableCell>
                         {isCancelled && <span className="text-destructive text-xs font-medium">Cancelado</span>}
